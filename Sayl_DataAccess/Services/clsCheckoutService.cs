@@ -111,8 +111,7 @@ namespace Sayl.Core.Services
                 };
                 await ProcessPaymentAsync(invoice, request);
 
-                // تحرير الحجز (طرح الكمية من QuantityReserved)
-                await ReleaseReservationAsync(items);
+                // ملاحظة: تحرير الحجز يتم داخل DeductStockAndCreateMovementsAsync
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();

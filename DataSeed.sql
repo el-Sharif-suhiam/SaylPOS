@@ -106,15 +106,20 @@ VALUES
 SET IDENTITY_INSERT Roles OFF;
 
 -- ===============================================
--- 7) Users (passwords hashed for demo only)
+-- 7) Users (passwords hashed with BCrypt)
 -- ===============================================
+-- Demo login credentials:
+--   admin    / Admin@123
+--   cashier1 / Cashier@123
+--   manager  / Manager@123
+--   cashier2 / Cashier2@123
 SET IDENTITY_INSERT Users ON;
 INSERT INTO Users (UserId, Username, PasswordHash, EmployeeId, RoleId, CreatedAt)
 VALUES
-(1, N'admin', N'hashed_admin_123', 1, 1, '2025-02-01 08:00:00'),     -- عبدالله (مدير)
-(2, N'cashier1', N'hashed_cash_456', 1, 2, '2025-02-01 09:00:00'),  -- عبدالله كاشير أيضاً (يمكن أن يكون نفس الشخص)
-(3, N'manager', N'hashed_mgr_789', 2, 1, '2025-03-15 08:30:00'),    -- فاطمة مديرة
-(4, N'cashier2', N'hashed_cash2_000', 3, 2, '2025-06-01 10:00:00'); -- خالد (في إجازة لكن حسابه موجود)
+(1, N'admin', N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, '2025-02-01 08:00:00'),     -- عبدالله (مدير)
+(2, N'cashier1', N'$2a$11$qEzXqA3D4ohz3k8xNjKGyON9buLjMGPcWXmMqsbbf2tb0QSnX2SmW', 1, 2, '2025-02-01 09:00:00'),  -- عبدالله كاشير أيضاً (يمكن أن يكون نفس الشخص)
+(3, N'manager', N'$2a$11$BiA0Or/ByzEygzuHM15sXe5ilM10KpF6zdQy3ucTG9PYaukb99rbC', 2, 1, '2025-03-15 08:30:00'),    -- فاطمة مديرة
+(4, N'cashier2', N'$2a$11$7DlI/JCHdLeKtnURDN1muOW0IlkU5NQueLY2XepccKPanMCDjyGWm', 3, 2, '2025-06-01 10:00:00'); -- خالد (في إجازة لكن حسابه موجود)
 SET IDENTITY_INSERT Users OFF;
 
 -- ===============================================

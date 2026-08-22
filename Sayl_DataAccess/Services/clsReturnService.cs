@@ -39,6 +39,8 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة بيع مكتملة.");
 
+            var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
+
             foreach (var item in request.Items)
             {
                 var originalItem = originalInvoice.InvoiceItems
@@ -47,8 +49,9 @@ namespace Sayl.Core.Services
                 if (originalItem == null)
                     return Result<int>.Fail($"المنتج {item.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                if (item.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المباعة للمنتج {item.ProductId}.");
+                int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
+                if (returnedSoFar + item.Quantity > originalItem.Quantity)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
             using var transaction = await _dbContext.Database.BeginTransactionAsync();
@@ -139,6 +142,8 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة شراء مكتملة.");
 
+            var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+
             foreach (var item in request.Items)
             {
                 var originalItem = originalInvoice.InvoiceItems
@@ -147,8 +152,9 @@ namespace Sayl.Core.Services
                 if (originalItem == null)
                     return Result<int>.Fail($"المنتج {item.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                if (item.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المشتراة للمنتج {item.ProductId}.");
+                int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
+                if (returnedSoFar + item.Quantity > originalItem.Quantity)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
             using var transaction = await _dbContext.Database.BeginTransactionAsync();
@@ -218,6 +224,19 @@ namespace Sayl.Core.Services
         // ═════════════════════════════════════════════════
         // الدوال الخاصة
         // ═════════════════════════════════════════════════
+
+        private async Task<Dictionary<int, int>> GetReturnedQuantitiesAsync(int originalInvoiceId, enInvoicesType returnType)
+        {
+            var returnedItems = await _dbContext.InvoiceItems
+                .Where(ii => ii.Invoice.OriginalInvoiceId == originalInvoiceId
+                          && ii.Invoice.Type == returnType
+                          && ii.Invoice.Status == enInvoicesStatus.completed)
+                .GroupBy(ii => ii.ProductId)
+                .Select(g => new { ProductId = g.Key, Quantity = g.Sum(ii => ii.Quantity) })
+                .ToListAsync();
+
+            return returnedItems.ToDictionary(x => x.ProductId, x => x.Quantity);
+        }
 
         private async Task RestockProductAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
         {
