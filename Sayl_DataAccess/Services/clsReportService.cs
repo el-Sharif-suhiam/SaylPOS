@@ -190,5 +190,215 @@ namespace Sayl.Core.Services
 
             return Result<List<TopSellingProductVM>>.Ok(result);
         }
+
+        // ─────────────────────────────────────────────────
+        // ملخص لوحة التحكم (اليوم + الشهر حتى تاريخه + مخزون)
+        // ─────────────────────────────────────────────────
+        public async Task<Result<DashboardSummaryVM>> GetDashboardSummaryAsync(DateOnly date)
+        {
+            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);
+            DateTime dayEnd = dayStart.AddDays(1);
+
+            DateOnly monthStartDate = new DateOnly(date.Year, date.Month, 1);
+            DateTime mtdStart = monthStartDate.ToDateTime(TimeOnly.MinValue);
+
+            // ── اليوم ──
+            var todaySales = await _dbContext.Invoices
+                .Where(i => i.Type == enInvoicesType.sale
+                         && i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= dayStart && i.CreatedAt < dayEnd)
+                .GroupBy(i => 1)
+                .Select(g => new { Count = g.Count(), Net = g.Sum(i => i.NetAmount) })
+                .FirstOrDefaultAsync();
+
+            decimal todayReturns = await _dbContext.Invoices
+                .Where(i => i.Type == enInvoicesType.customer_return
+                         && i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= dayStart && i.CreatedAt < dayEnd)
+                .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // قيمة سالبة
+
+            decimal todayCollected = await _dbContext.Payments
+                .Where(p => p.Type == enPaymentType.income
+                         && p.PaymentDate == date)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            decimal todayExpenses = await _dbContext.Expenses
+                .Where(e => e.ExpenseDate == date)
+                .SumAsync(e => (decimal?)e.Amount) ?? 0m;
+
+            // ── الشهر حتى تاريخه ──
+            decimal monthSalesNet = await _dbContext.Invoices
+                .Where(i => i.Type == enInvoicesType.sale
+                         && i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= mtdStart && i.CreatedAt < dayEnd)
+                .SumAsync(i => (decimal?)i.NetAmount) ?? 0m;
+
+            decimal monthReturnsNet = await _dbContext.Invoices
+                .Where(i => i.Type == enInvoicesType.customer_return
+                         && i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= mtdStart && i.CreatedAt < dayEnd)
+                .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // قيمة سالبة
+
+            decimal monthNetSales = monthSalesNet + monthReturnsNet;
+
+            var mtdSaleInvoiceIds = _dbContext.Invoices
+                .Where(i => i.Type == enInvoicesType.sale
+                         && i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= mtdStart && i.CreatedAt < dayEnd)
+                .Select(i => i.InvoiceId);
+
+            decimal cogs = await _dbContext.InvoiceItems
+                .Where(ii => mtdSaleInvoiceIds.Contains(ii.InvoiceId))
+                .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
+
+            decimal monthExpenses = await _dbContext.Expenses
+                .Where(e => e.ExpenseDate >= monthStartDate && e.ExpenseDate <= date)
+                .SumAsync(e => (decimal?)e.Amount) ?? 0m;
+
+            decimal monthGrossProfit = monthNetSales - cogs;
+            decimal monthNetProfit = monthGrossProfit - monthExpenses;
+
+            // ── المخزون والمنتجات ──
+            int totalActiveProducts = await _dbContext.Products
+                .CountAsync(p => p.IsActive);
+
+            decimal totalStockValue = await (from p in _dbContext.Products
+                                             join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
+                                             where p.Type == "stock" && p.IsActive
+                                             select (decimal)(inv.QuantityAvailable ?? 0) * p.CostPrice)
+                                            .SumAsync();
+
+            var lowStockQuery = from p in _dbContext.Products
+                                join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
+                                where p.Type == "stock" && p.IsActive
+                                   && (inv.QuantityAvailable ?? 0) <= (p.ReorderLevel ?? 0)
+                                select new InventoryStatusVM
+                                {
+                                    ProductId = p.ProductId,
+                                    ProductName = p.Name,
+                                    Unit = p.Unit,
+                                    QuantityAvailable = inv.QuantityAvailable ?? 0,
+                                    QuantityReserved = inv.QuantityReserved ?? 0,
+                                    ReorderLevel = p.ReorderLevel ?? 0,
+                                    IsLowStock = true,
+                                    LastCountedAt = inv.LastCountedAt
+                                };
+
+            int lowStockCount = await lowStockQuery.CountAsync();
+
+            var lowStockItems = await lowStockQuery
+                .OrderBy(x => x.QuantityAvailable)
+                .Take(10)
+                .ToListAsync();
+
+            // ── أفضل المنتجات (آخر 30 يوماً شاملة اليوم) ──
+            var topProductsResult = await GetTopSellingProductsAsync(date.AddDays(-29), date, 5);
+            var topProducts = topProductsResult.IsSuccess ? topProductsResult.Data! : new List<TopSellingProductVM>();
+
+            var vm = new DashboardSummaryVM
+            {
+                Date = date,
+                TodayInvoiceCount = todaySales?.Count ?? 0,
+                TodayNetSales = (todaySales?.Net ?? 0m) + todayReturns,
+                TodayCollected = todayCollected,
+                TodayReturns = todayReturns,
+                TodayExpenses = todayExpenses,
+                MonthNetSales = monthNetSales,
+                MonthExpenses = monthExpenses,
+                MonthGrossProfit = monthGrossProfit,
+                MonthNetProfit = monthNetProfit,
+                LowStockCount = lowStockCount,
+                TotalActiveProducts = totalActiveProducts,
+                TotalStockValue = totalStockValue,
+                TopProducts = topProducts,
+                LowStockItems = lowStockItems
+            };
+
+            return Result<DashboardSummaryVM>.Ok(vm);
+        }
+
+        // ─────────────────────────────────────────────────
+        // سلسلة المبيعات الزمنية (يومي / أسبوعي / شهري)
+        // ─────────────────────────────────────────────────
+        public async Task<Result<List<SalesTrendPointVM>>> GetSalesTrendAsync(
+            DateOnly fromDate,
+            DateOnly toDate,
+            enTrendGroupBy groupBy = enTrendGroupBy.Day)
+        {
+            if (fromDate > toDate)
+                return Result<List<SalesTrendPointVM>>.Fail("تاريخ البداية يجب أن يكون قبل تاريخ النهاية.");
+
+            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue);
+            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue);
+
+            // تجميع يومي داخل قاعدة البيانات ثم دمج الفترات (أسبوع/شهر) في الذاكرة
+            var rows = await _dbContext.Invoices
+                .Where(i => i.Status == enInvoicesStatus.completed
+                         && i.CreatedAt >= start && i.CreatedAt <= end
+                         && (i.Type == enInvoicesType.sale || i.Type == enInvoicesType.customer_return))
+                .GroupBy(i => new { Day = i.CreatedAt!.Value.Date, i.Type })
+                .Select(g => new
+                {
+                    g.Key.Day,
+                    g.Key.Type,
+                    Count = g.Count(),
+                    Gross = g.Sum(i => i.TotalAmount),
+                    Net = g.Sum(i => i.NetAmount)
+                })
+                .ToListAsync();
+
+            var dailyPoints = rows
+                .GroupBy(r => r.Day.Date)
+                .Select(g =>
+                {
+                    decimal salesNet = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Net);
+                    decimal returnsNet = g.Where(x => x.Type == enInvoicesType.customer_return).Sum(x => x.Net); // قيمتها سالبة
+
+                    return new SalesTrendPointVM
+                    {
+                        PeriodStart = DateOnly.FromDateTime(g.Key),
+                        PeriodEnd = DateOnly.FromDateTime(g.Key),
+                        InvoiceCount = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Count),
+                        GrossSales = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Gross),
+                        ReturnsAmount = returnsNet,
+                        NetSales = salesNet + returnsNet
+                    };
+                })
+                .ToList();
+
+            List<SalesTrendPointVM> result;
+
+            if (groupBy == enTrendGroupBy.Day)
+            {
+                result = dailyPoints.OrderBy(p => p.PeriodStart).ToList();
+            }
+            else
+            {
+                result = dailyPoints
+                    .GroupBy(p => groupBy == enTrendGroupBy.Week
+                        ? GetWeekStart(p.PeriodStart)
+                        : new DateOnly(p.PeriodStart.Year, p.PeriodStart.Month, 1))
+                    .Select(g => new SalesTrendPointVM
+                    {
+                        PeriodStart = g.Key,
+                        PeriodEnd = g.Max(x => x.PeriodStart),
+                        InvoiceCount = g.Sum(x => x.InvoiceCount),
+                        GrossSales = g.Sum(x => x.GrossSales),
+                        ReturnsAmount = g.Sum(x => x.ReturnsAmount),
+                        NetSales = g.Sum(x => x.NetSales)
+                    })
+                    .OrderBy(p => p.PeriodStart)
+                    .ToList();
+            }
+
+            return Result<List<SalesTrendPointVM>>.Ok(result);
+        }
+
+        private static DateOnly GetWeekStart(DateOnly date)
+        {
+            // بداية الأسبوع: الإثنين
+            int diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+            return date.AddDays(-diff);
+        }
     }
 }

@@ -127,5 +127,73 @@ namespace Sayl.Core.Services
 
             return Result<InvoiceVM>.Ok(vm);
         }
+
+        // ─────────────────────────────────────────────────
+        // بيانات الفاتورة الكاملة للطباعة (البنود والمدفوعات)
+        // ─────────────────────────────────────────────────
+        public async Task<Result<InvoicePrintVM>> GetInvoiceForPrintAsync(int invoiceId)
+        {
+            var invoice = await _dbContext.Invoices
+                .Include(i => i.Party)
+                .Include(i => i.User)
+                    .ThenInclude(u => u.Employee)
+                .Include(i => i.InvoiceItems)
+                    .ThenInclude(ii => ii.Product)
+                .Include(i => i.InvoiceItems)
+                    .ThenInclude(ii => ii.Batch)
+                .Include(i => i.Payments)
+                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId);
+
+            if (invoice == null)
+                return Result<InvoicePrintVM>.Fail("الفاتورة غير موجودة.");
+
+            decimal paid = invoice.Payments.Sum(p => p.Amount);
+
+            var vm = new InvoicePrintVM
+            {
+                InvoiceId = invoice.InvoiceId,
+                Type = invoice.Type.ToString(),
+                Status = invoice.Status.ToString(),
+                PaymentStatus = invoice.PaymentStatus.ToString(),
+                PartyId = invoice.PartyId,
+                PartyName = invoice.Party?.Name,
+                PartyPhone = invoice.Party?.Phone1,
+                PartyAddress = invoice.Party?.AddressLine1,
+                CashierName = invoice.User?.Employee?.Name ?? invoice.User?.Username ?? "",
+                SessionId = invoice.SessionId,
+                OriginalInvoiceId = invoice.OriginalInvoiceId,
+                Notes = invoice.Notes,
+                CreatedAt = invoice.CreatedAt,
+                TotalAmount = invoice.TotalAmount,
+                DiscountAmount = invoice.DiscountAmount,
+                TaxAmount = invoice.TaxAmount,
+                NetAmount = invoice.NetAmount,
+                PaidAmount = paid,
+                RemainingAmount = invoice.NetAmount - paid,
+                Items = invoice.InvoiceItems.Select(ii => new InvoiceItemVM
+                {
+                    InvoiceItemId = ii.InvoiceItemId,
+                    ProductId = ii.ProductId,
+                    ProductName = ii.Product.Name,
+                    Quantity = ii.Quantity,
+                    BatchNumber = ii.Batch != null ? ii.Batch.BatchNumber : null,
+                    ItemPrice = ii.ItemPrice,
+                    ItemCost = ii.ItemCost
+                }).ToList(),
+                Payments = invoice.Payments
+                    .OrderBy(p => p.PaymentDate)
+                    .ThenBy(p => p.PaymentId)
+                    .Select(p => new InvoicePaymentLineVM
+                    {
+                        PaymentId = p.PaymentId,
+                        Amount = p.Amount,
+                        PaymentMethod = p.PaymentMethod,
+                        PaymentDate = p.PaymentDate,
+                        Notes = p.Notes
+                    }).ToList()
+            };
+
+            return Result<InvoicePrintVM>.Ok(vm);
+        }
     }
 }
