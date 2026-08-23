@@ -334,14 +334,14 @@ namespace Sayl.UI.Forms
                 if (result.IsSuccess && result.Data != null)
                 {
                     SessionState.SetUser(result.Data, _roles);
+                    SetBusy(false);
                     LoginSucceeded?.Invoke(result.Data);
+                    return;
                 }
-                else
-                {
-                    ShowError(string.IsNullOrEmpty(result.Message) ? "فشل تسجيل الدخول." : result.Message);
-                    _txtPassword.SelectAll();
-                    _txtPassword.Focus();
-                }
+
+                ShowError(string.IsNullOrEmpty(result.Message) ? "فشل تسجيل الدخول." : result.Message);
+                _txtPassword.SelectAll();
+                _txtPassword.Focus();
             }
             catch
             {

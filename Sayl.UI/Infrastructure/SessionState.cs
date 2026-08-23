@@ -21,7 +21,7 @@ namespace Sayl.UI.Infrastructure
         public static bool IsLoggedIn => CurrentUser != null;
         public static bool IsAdmin => CurrentRoleValue >= AdminRoleValue;
         public static bool IsAccountant => !IsAdmin && CurrentRoleValue >= AccountantRoleValue;
-        public static bool IsCashier => !IsAccountant && CurrentRoleValue >= CashierRoleValue;
+        public static bool IsCashier => !IsAdmin && !IsAccountant && CurrentRoleValue >= CashierRoleValue;
 
         /// <summary>
         /// صلاحية can_receive_stock مسندة لدور الكاشير (حسب UI_TASK).

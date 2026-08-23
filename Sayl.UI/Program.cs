@@ -16,6 +16,14 @@ namespace Sayl.UI
         {
             ApplicationConfiguration.Initialize();
 
+            // تسجيل الأخطاء غير المتوقعة في ملف للتشخيص
+            Application.ThreadException += (_, e) =>
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
+                    $"[{DateTime.Now:HH:mm:ss}] THREAD: {e.Exception}\n");
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
+                    $"[{DateTime.Now:HH:mm:ss}] UNHANDLED: {e.ExceptionObject}\n");
+
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
@@ -42,11 +50,20 @@ namespace Sayl.UI
 
         private static void NavigateAfterLogin()
         {
-            Form next = SessionState.IsCashier
-                ? Services.GetRequiredService<PosForm>()
-                : Services.GetRequiredService<MainForm>();
+            try
+            {
+                Form next = SessionState.IsCashier
+                    ? Services.GetRequiredService<PosForm>()
+                    : Services.GetRequiredService<MainForm>();
 
-            Navigator.Show(next);
+                Navigator.Show(next);
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
+                    $"[{DateTime.Now:HH:mm:ss}] NAVIGATE: {ex}\n");
+                throw;
+            }
         }
     }
 }

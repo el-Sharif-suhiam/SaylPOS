@@ -62,8 +62,9 @@ namespace Sayl.UI.Forms
             KeyPreview = true;
 
             BuildTopBar();
-            BuildActionPanel();
+            // ترتيب الإرساء معكوس: Fill (الشبكة) يُضاف قبل لوحة الأوامر حتى تحجز اللوحة مكانها
             BuildCartGrid();
+            BuildActionPanel();
         }
 
         private void BuildTopBar()
@@ -195,7 +196,6 @@ namespace Sayl.UI.Forms
             _gridCart.CellClick += GridCart_CellClick;
 
             Controls.Add(_gridCart);
-            _gridCart.BringToFront();
         }
 
         private void BuildActionPanel()

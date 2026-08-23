@@ -1,3 +1,4 @@
+using Common.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Controls;
@@ -37,13 +38,13 @@ namespace Sayl.UI.Forms
         private void BuildSections()
         {
             _sections["لوحة التحكم"] = () => new DashboardControl();
-            _sections["المنتجات"] = () => new SectionPlaceholderControl("المنتجات");
-            _sections["المخزون"] = () => new SectionPlaceholderControl("المخزون");
-            _sections["العملاء"] = () => new SectionPlaceholderControl("العملاء");
-            _sections["الموردون"] = () => new SectionPlaceholderControl("الموردون");
-            _sections["فواتير البيع"] = () => new SectionPlaceholderControl("فواتير البيع");
-            _sections["فواتير الشراء"] = () => new SectionPlaceholderControl("فواتير الشراء");
-            _sections["المصروفات"] = () => new SectionPlaceholderControl("المصروفات");
+            _sections["المنتجات"] = () => new ProductsControl();
+            _sections["المخزون"] = () => new InventoryControl();
+            _sections["العملاء"] = () => new CustomersControl();
+            _sections["الموردون"] = () => new SuppliersControl();
+            _sections["فواتير البيع"] = () => new InvoicesControl(enInvoicesType.sale);
+            _sections["فواتير الشراء"] = () => new InvoicesControl(enInvoicesType.purchase);
+            _sections["المصروفات"] = () => new ExpensesControl();
             _sections["التقارير"] = () => new ReportsControl();
 
             if (SessionState.IsAdmin)
@@ -79,6 +80,7 @@ namespace Sayl.UI.Forms
             BuildSidebar(sidebar);
             BuildContent(contentArea);
 
+            // ترتيب الإرساء معكوس: آخر عنصر يُرسّى أولًا — Fill أولًا ثم الحواف
             Controls.Add(contentArea);
             Controls.Add(sidebar);
         }
@@ -119,16 +121,18 @@ namespace Sayl.UI.Forms
             };
             menuLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
+            int row = 0;
             foreach (var name in _sections.Keys)
             {
-                menuLayout.RowCount++;
-                menuLayout.RowStyles.Insert(menuLayout.RowCount - 2, new RowStyle(SizeType.Absolute, 54));
+                menuLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
                 var btn = MakeNavButton(name);
                 _navButtons.Add(btn);
-                menuLayout.Controls.Add(btn, 0, menuLayout.RowCount - 2);
+                menuLayout.Controls.Add(btn, 0, row);
+                row++;
             }
-            menuLayout.RowCount++;
+            // صف فارغ يمتص المساحة الزائدة
             menuLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            menuLayout.RowCount = row + 1;
             layout.Controls.Add(menuLayout, 0, 1);
 
             // أسفل الشريط: حول البرنامج + تسجيل الخروج
