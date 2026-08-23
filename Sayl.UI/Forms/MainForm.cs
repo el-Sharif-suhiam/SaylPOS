@@ -36,7 +36,7 @@ namespace Sayl.UI.Forms
         // ─────────────────────────────────────────────────
         private void BuildSections()
         {
-            _sections["لوحة التحكم"] = () => new SectionPlaceholderControl("لوحة التحكم");
+            _sections["لوحة التحكم"] = () => new DashboardControl();
             _sections["المنتجات"] = () => new SectionPlaceholderControl("المنتجات");
             _sections["المخزون"] = () => new SectionPlaceholderControl("المخزون");
             _sections["العملاء"] = () => new SectionPlaceholderControl("العملاء");
@@ -44,7 +44,7 @@ namespace Sayl.UI.Forms
             _sections["فواتير البيع"] = () => new SectionPlaceholderControl("فواتير البيع");
             _sections["فواتير الشراء"] = () => new SectionPlaceholderControl("فواتير الشراء");
             _sections["المصروفات"] = () => new SectionPlaceholderControl("المصروفات");
-            _sections["التقارير"] = () => new SectionPlaceholderControl("التقارير");
+            _sections["التقارير"] = () => new ReportsControl();
 
             if (SessionState.IsAdmin)
             {
