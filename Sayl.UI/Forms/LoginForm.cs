@@ -269,7 +269,7 @@ namespace Sayl.UI.Forms
                 foreach (var user in _users.Where(u => u.IsActive))
                     _cmbUsers.Items.Add(new ComboItem { User = user, Text = FormatDisplayName(user) });
 
-                _cmbUsers.SelectedIndex = -1;
+                _cmbUsers.SelectedIndex = _cmbUsers.Items.Count > 0 ? 0 : -1;
 
                 if (_cmbUsers.Items.Count == 0)
                 {
@@ -297,10 +297,8 @@ namespace Sayl.UI.Forms
 
         private static string FormatDisplayName(UserVM user)
         {
-            string display = string.IsNullOrWhiteSpace(user.Name) || user.Name == "No Employee"
-                ? user.UserName
-                : user.Name;
-            return $"{display} ({user.RoleName})";
+            // اسم الدخول + الدور: يبقى واضحًا مهما كانت لغة اسم الموظف
+            return $"{user.UserName} ({user.RoleName})";
         }
 
         private async Task TryLoginAsync()
