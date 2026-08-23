@@ -28,6 +28,7 @@ namespace Sayl.UI.Forms
         private Button _btnTogglePassword = null!;
         private Button _btnLogin = null!;
         private Label _lblError = null!;
+        private Label _lblConnectionStatus = null!;
 
         private List<UserVM> _users = new();
         private List<DtoRole> _roles = new();
@@ -58,7 +59,7 @@ namespace Sayl.UI.Forms
             Text = "تسجيل الدخول — سيل";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(480, 620);
+            ClientSize = new Size(560, 620);
             BackColor = AppTheme.SidebarBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -70,7 +71,7 @@ namespace Sayl.UI.Forms
             var lblBrand = new Label
             {
                 Text = "سيل",
-                Bounds = new Rectangle(0, 52, 480, 64),
+                Bounds = new Rectangle(0, 52, 560, 64),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
                 BackColor = Color.Transparent,
@@ -80,7 +81,7 @@ namespace Sayl.UI.Forms
             var lblTagline = new Label
             {
                 Text = "نظام المبيعات وإدارة المخزون",
-                Bounds = new Rectangle(0, 118, 480, 26),
+                Bounds = new Rectangle(0, 118, 560, 26),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(156, 163, 175),
                 BackColor = Color.Transparent
@@ -91,7 +92,7 @@ namespace Sayl.UI.Forms
 
             var card = new Panel
             {
-                Bounds = new Rectangle(40, 168, 400, 372),
+                Bounds = new Rectangle(40, 168, 480, 372),
                 BackColor = AppTheme.CardBg
             };
             AppTheme.ApplyRoundedRegion(card, 18);
@@ -100,7 +101,7 @@ namespace Sayl.UI.Forms
             var lblCardTitle = new Label
             {
                 Text = "تسجيل الدخول",
-                Bounds = new Rectangle(24, 24, 352, 34),
+                Bounds = new Rectangle(24, 24, 432, 34),
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = AppTheme.FontHeading,
                 ForeColor = AppTheme.TextPrimary,
@@ -110,14 +111,14 @@ namespace Sayl.UI.Forms
             var lblUserCaption = new Label
             {
                 Text = "اختر المستخدم",
-                Bounds = new Rectangle(24, 66, 352, 22),
+                Bounds = new Rectangle(24, 66, 432, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
 
             _cmbUsers = new ComboBox
             {
-                Bounds = new Rectangle(24, 92, 352, 44),
+                Bounds = new Rectangle(24, 92, 432, 44),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 FlatStyle = FlatStyle.Flat,
                 Font = AppTheme.FontBody,
@@ -127,14 +128,14 @@ namespace Sayl.UI.Forms
             var lblPassCaption = new Label
             {
                 Text = "كلمة المرور",
-                Bounds = new Rectangle(24, 148, 352, 22),
+                Bounds = new Rectangle(24, 148, 432, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
 
             var passPanel = new Panel
             {
-                Bounds = new Rectangle(24, 174, 352, 44),
+                Bounds = new Rectangle(24, 174, 432, 44),
                 BackColor = AppTheme.FieldBg
             };
 
@@ -169,12 +170,12 @@ namespace Sayl.UI.Forms
             passPanel.Controls.Add(_btnTogglePassword);
 
             _btnLogin = AppTheme.MakeButton("دخول", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            _btnLogin.Bounds = new Rectangle(24, 240, 352, 54);
+            _btnLogin.Bounds = new Rectangle(24, 240, 432, 54);
 
             _lblError = new Label
             {
                 Text = "",
-                Bounds = new Rectangle(24, 304, 352, 48),
+                Bounds = new Rectangle(24, 304, 432, 48),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.Danger,
                 Visible = false
@@ -204,10 +205,33 @@ namespace Sayl.UI.Forms
             btnAbout.Click += (_, _) =>
                 Program.Services.GetRequiredService<AboutForm>().ShowDialog(this);
 
+            var btnClose = new Button
+            {
+                Text = "×",
+                Bounds = new Rectangle(ClientSize.Width - 58, 16, 42, 42),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = AppTheme.TextOnDark,
+                BackColor = AppTheme.SidebarHover,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.FlatAppearance.MouseOverBackColor = AppTheme.Danger;
+            AppTheme.ApplyRoundedRegion(btnClose, 21);
+            btnClose.Click += (_, _) => Close();
+
+            _lblConnectionStatus = new Label
+            {
+                Text = "جارٍ التحقق من الاتصال بقاعدة البيانات...",
+                Bounds = new Rectangle(0, 550, 560, 22),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = AppTheme.TextMuted
+            };
+
             var lblFooter = new Label
             {
                 Text = "© سيل 2026 — جميع الحقوق محفوظة",
-                Bounds = new Rectangle(0, 566, 480, 22),
+                Bounds = new Rectangle(0, 576, 560, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(107, 114, 128)
             };
@@ -216,9 +240,12 @@ namespace Sayl.UI.Forms
             Controls.Add(lblTagline);
             Controls.Add(card);
             Controls.Add(btnAbout);
+            Controls.Add(btnClose);
+            Controls.Add(_lblConnectionStatus);
             Controls.Add(lblFooter);
 
             AcceptButton = _btnLogin;
+            CancelButton = btnClose;
 
             _btnLogin.Click += async (_, _) => await TryLoginAsync();
         }
@@ -242,17 +269,29 @@ namespace Sayl.UI.Forms
                 foreach (var user in _users.Where(u => u.IsActive))
                     _cmbUsers.Items.Add(new ComboItem { User = user, Text = FormatDisplayName(user) });
 
+                _cmbUsers.SelectedIndex = -1;
+
                 if (_cmbUsers.Items.Count == 0)
+                {
+                    SetConnectionStatus(false);
                     ShowError("لا يوجد مستخدمون نشطون في النظام.");
+                }
+                else
+                {
+                    SetConnectionStatus(true);
+                }
             }
             catch
             {
+                SetConnectionStatus(false);
                 ShowError("تعذر تحميل قائمة المستخدمين. تحقق من الاتصال بقاعدة البيانات.");
             }
             finally
             {
                 UseWaitCursor = false;
                 _btnLogin.Enabled = _cmbUsers.Items.Count > 0;
+                // منع تركيز القائمة تلائيًا عند الفتح (يمنع ظهورها باللون الأزرق المحدد)
+                ActiveControl = _txtPassword;
             }
         }
 
@@ -335,6 +374,14 @@ namespace Sayl.UI.Forms
         }
 
         private void HideError() => _lblError.Visible = false;
+
+        private void SetConnectionStatus(bool connected)
+        {
+            _lblConnectionStatus.Text = connected
+                ? "متصل بقاعدة البيانات"
+                : "غير متصل بقاعدة البيانات";
+            _lblConnectionStatus.ForeColor = connected ? AppTheme.Success : AppTheme.Danger;
+        }
 
         private void StartDrag(object? sender, MouseEventArgs e)
         {
