@@ -3,6 +3,7 @@
     <File Path="Agent.md" />
     <File Path="SaylDB.sql" />
     <File Path="TASK.md" />
+    <File Path="UI_TASK.md" />
   </Folder>
   <Project Path="Common/Common.csproj" />
   <Project Path="consol app/consol app.csproj" Id="ccf8c3c4-eaf1-4e85-88b4-913bacf1f9d1" />
