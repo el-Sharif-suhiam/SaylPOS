@@ -29,6 +29,14 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
             }
 
+            // صلاحية الخصم: خصم أكبر من حد الكاشير يتطلب دور محاسب فأعلى
+            if (request.DiscountPercent > clsPermissions.MaxCashierDiscountPercent || request.DiscountAmount > 0)
+            {
+                int actorRole = await GetUserRoleValueAsync(request.UserId);
+                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
+                    return Result<int>.Fail($"الخصم فوق {clsPermissions.MaxCashierDiscountPercent:0.#}% يتطلب صلاحية محاسب أو أعلى. راجع المدير.");
+            }
+
             if (request.CustomerId.HasValue)
             {
                 bool customerExists = await _dbContext.Customers.AnyAsync(c => c.PartyId == request.CustomerId.Value);
@@ -36,8 +44,8 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("العميل غير موجود.");
             }
 
-            //  بدء المعاملة
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            //  بدء المعاملة (Serializable لمنع بيع نفس الكمية من طرفيتين في نفس اللحظة)
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
                 // إنشاء رأس الفاتورة
@@ -62,9 +70,21 @@ namespace Sayl.Core.Services
                 }
 
                 await _dbContext.SaveChangesAsync();
+
+                // تدقيق: تسجيل العملية
+                clsAudit.Log(_dbContext, request.UserId,
+                    suspend ? "SuspendInvoice" : "SaleInvoice",
+                    $"فاتورة #{invoice.InvoiceId} — صافي: {invoice.NetAmount:N2} — بنود: {request.Items.Count} — خصم: {invoice.DiscountAmount:N2}");
+
+                await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
 
                 return Result<int>.Ok(invoice.InvoiceId, suspend ? "تم تعليق الفاتورة وحجز المخزون." : "تمت عملية البيع بنجاح.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                return Result<int>.Fail(ex.Message);
             }
             catch
             {
@@ -73,11 +93,23 @@ namespace Sayl.Core.Services
             }
         }
 
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return 0;
+            var user = await _dbContext.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+            return user?.Role.RoleValue ?? 0;
+        }
+
         // ─────────────────────────────────────────────────
         // إكمال فاتورة معلقة
         // ─────────────────────────────────────────────────
-        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, DtoPaymentInfo paymentInfo)
+        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments)
         {
+            if (payments == null || !payments.Any(p => p.Amount > 0))
+                return Result.Fail("يجب إدخال مبلغ دفعة واحد على الأقل.");
+
             var invoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
                 .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId && i.Status == enInvoicesStatus.suspended);
@@ -85,7 +117,7 @@ namespace Sayl.Core.Services
             if (invoice == null)
                 return Result.Fail("الفاتورة المعلقة غير موجودة أو تم إكمالها بالفعل.");
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
                 // تحويل الحالة
@@ -101,11 +133,11 @@ namespace Sayl.Core.Services
 
                 await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId);
 
-                // معالجة الدفع
+                // معالجة الدفع (دفعة واحدة أو دفعات مقسومة)
                 var request = new DtoCheckoutRequest
                 {
                     CustomerId = invoice.PartyId,
-                    Payment = paymentInfo,
+                    Payments = payments,
                     DiscountPercent = 0, // يمكنك إضافة حقول للخصم في الفاتورة المعلقة
                     TaxPercent = 0
                 };
@@ -113,9 +145,17 @@ namespace Sayl.Core.Services
 
                 // ملاحظة: تحرير الحجز يتم داخل DeductStockAndCreateMovementsAsync
 
+                clsAudit.Log(_dbContext, invoice.UserId, "CompleteSuspendedInvoice",
+                    $"إكمال فاتورة معلقة #{invoiceId} — صافي: {invoice.NetAmount:N2}");
+
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return Result.Ok("تم إكمال الفاتورة بنجاح.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                return Result.Fail(ex.Message);
             }
             catch
             {
@@ -126,14 +166,22 @@ namespace Sayl.Core.Services
 
         // ─────────────────────────────────────────────────
         // إلغاء فاتورة معلقة (تحرير الحجز)
+        // الكاشير يلغي فواتيره فقط، والمحاسب فأعلى يلغي أي فاتورة
         // ─────────────────────────────────────────────────
-        public async Task<Result> CancelSuspendedInvoiceAsync(int invoiceId)
+        public async Task<Result> CancelSuspendedInvoiceAsync(int invoiceId, int actorUserId)
         {
             var invoice = await _dbContext.Invoices.FindAsync(invoiceId);
             if (invoice == null || invoice.Status != enInvoicesStatus.suspended)
                 return Result.Fail("الفاتورة المعلقة غير موجودة.");
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            if (invoice.UserId != actorUserId)
+            {
+                int actorRole = await GetUserRoleValueAsync(actorUserId);
+                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
+                    return Result.Fail("إلغاء فاتورة معلقة لأجل كاشير آخر يتطلب صلاحية محاسب أو أعلى.");
+            }
+
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
                 invoice.Status = enInvoicesStatus.cancelled;
@@ -154,9 +202,17 @@ namespace Sayl.Core.Services
                     }
                 }
 
+                clsAudit.Log(_dbContext, actorUserId, "CancelSuspendedInvoice",
+                    $"إلغاء فاتورة معلقة #{invoiceId} — صافي: {invoice.NetAmount:N2}");
+
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return Result.Ok("تم إلغاء الفاتورة وتحرير المخزون المحجوز.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                return Result.Fail(ex.Message);
             }
             catch
             {
@@ -210,7 +266,7 @@ namespace Sayl.Core.Services
                 TaxAmount = tax,
                 NetAmount = net,
                 Notes = request.Notes,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             };
 
             _dbContext.Invoices.Add(invoice);
@@ -291,9 +347,11 @@ namespace Sayl.Core.Services
                 }
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
-                    // FEFO
+                    // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
+                    DateOnly today = DateOnly.FromDateTime(DateTime.Now);
                     var batches = await _dbContext.Batches
-                        .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0)
+                        .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
+                                 && (b.ExpiryDate == null || b.ExpiryDate >= today))
                         .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
                         .ThenBy(b => b.CreatedAt)
                         .ToListAsync();
@@ -314,7 +372,7 @@ namespace Sayl.Core.Services
                             Quantity = -take,
                             SourceType = "Invoice",
                             SourceId = invoiceId,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.Now
                         });
                     }
 
@@ -326,29 +384,38 @@ namespace Sayl.Core.Services
                 inv.QuantityAvailable -= item.Quantity;
                 inv.QuantityReserved -= item.Quantity; // تحرير الحجز (إن كان موجوداً)
                 if (inv.QuantityReserved < 0) inv.QuantityReserved = 0;
-                inv.UpdatedAt = DateTime.UtcNow;
+                inv.UpdatedAt = DateTime.Now;
             }
         }
 
         private async Task ProcessPaymentAsync(Invoice invoice, DtoCheckoutRequest request)
         {
             decimal net = invoice.NetAmount;
-            decimal paid = request.Payment?.Amount ?? 0;
 
-            if (paid > 0)
+            // دفعات متعددة (نقدي + شبكة...) أو دفعة واحدة
+            var payments = request.Payments != null && request.Payments.Any()
+                ? request.Payments
+                : (request.Payment != null ? new List<DtoPaymentInfo> { request.Payment } : new List<DtoPaymentInfo>());
+
+            decimal paid = 0;
+            foreach (var payment in payments)
             {
+                if (payment.Amount <= 0)
+                    continue;
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = enPaymentType.income,
                     InvoiceId = invoice.InvoiceId,
                     PartyType = 'C',
                     PartyId = invoice.PartyId ?? null,
-                    Amount = paid,
-                    PaymentDate = request.Payment.PaymentDate,
-                    PaymentMethod = request.Payment.Method,
+                    Amount = payment.Amount,
+                    PaymentDate = payment.PaymentDate,
+                    PaymentMethod = payment.Method,
                     Notes = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
+                paid += payment.Amount;
             }
 
             if (paid >= net)
@@ -364,8 +431,12 @@ namespace Sayl.Core.Services
                 invoice.PaymentStatus = enPaymentStatus.unpaid;
             }
 
+            // البيع بالدين (كلي أو جزئي) يتطلب عميلًا مسجلًا — وإلا فالمبلغ ضائع بلا متابعة
+            if (paid < net && !invoice.PartyId.HasValue)
+                throw new InvalidOperationException("البيع بالدين أو الدفع الجزئي يتطلب اختيار عميل.");
+
             // إذا كان البيع بالدين (أو جزئي) لعميل مسجل
-            if (invoice.PartyId.HasValue && (paid < net || paid == 0))
+            if (invoice.PartyId.HasValue && paid < net)
             {
                 var customer = await _dbContext.Customers.FindAsync(invoice.PartyId.Value);
                 if (customer == null) return;

@@ -19,6 +19,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<Batch> Batches { get; set; }
 
+    public virtual DbSet<CashMovement> CashMovements { get; set; }
+
     public virtual DbSet<Customer> Customers { get; set; }
 
     public virtual DbSet<Employee> Employees { get; set; }
@@ -41,6 +43,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<Role> Roles { get; set; }
 
+    public virtual DbSet<Setting> Settings { get; set; }
+
     public virtual DbSet<StockMovement> StockMovements { get; set; }
 
     public virtual DbSet<Supplier> Suppliers { get; set; }
@@ -55,6 +59,44 @@ public partial class SaylDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<CashMovement>(entity =>
+        {
+            entity.HasKey(e => e.MovementId).HasName("PK_CashMovements");
+
+            entity.HasIndex(e => e.SessionId, "IX_CashMovements_SessionId");
+
+            entity.HasIndex(e => e.UserId, "IX_CashMovements_UserId");
+
+            entity.HasIndex(e => e.CreatedAt, "IX_CashMovements_CreatedAt");
+
+            entity.Property(e => e.MovementType)
+                .HasMaxLength(1)
+                .IsUnicode(false)
+                .IsFixedLength();
+            entity.Property(e => e.Amount)
+                .HasColumnType("decimal(10, 2)")
+                .HasDefaultValue(0m);
+            entity.Property(e => e.Reason).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.PosSession).WithMany()
+                .HasForeignKey(d => d.SessionId)
+                .HasConstraintName("FK_CashMovements_SessionId");
+
+            entity.HasOne(d => d.User).WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_CashMovements_UserId");
+        });
+
+        modelBuilder.Entity<Setting>(entity =>
+        {
+            entity.HasKey(e => e.SettingKey).HasName("PK_Settings");
+
+            entity.Property(e => e.SettingKey).HasMaxLength(100);
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(getdate())");
+        });
+
         modelBuilder.Entity<Batch>(entity =>
         {
             entity.HasKey(e => e.BatchId).HasName("PK__Batches__5D55CE580F5FA9C8");

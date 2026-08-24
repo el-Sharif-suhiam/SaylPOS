@@ -22,6 +22,7 @@ namespace Sayl.UI.UserControls
         private const int ReportTopProducts = 1;
         private const int ReportInventory = 2;
         private const int ReportDailySales = 3;
+        private const int ReportExpiry = 4;
 
         public ReportsControl()
         {
@@ -37,7 +38,7 @@ namespace Sayl.UI.UserControls
 
             var lblType = new Label { Text = "نوع التقرير", Dock = DockStyle.Right, Width = 80, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbReportType = new ComboBox { Dock = DockStyle.Right, Width = 170, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
-            _cmbReportType.Items.AddRange(new object[] { "ملخص الأرباح", "الأكثر مبيعًا", "حالة المخزون", "المبيعات اليومية" });
+            _cmbReportType.Items.AddRange(new object[] { "ملخص الأرباح", "الأكثر مبيعًا", "حالة المخزون", "المبيعات اليومية", "قرب انتهاء الصلاحية" });
             _cmbReportType.SelectedIndex = 0;
             _cmbReportType.SelectedIndexChanged += (_, _) => ToggleDateFields();
 
@@ -73,11 +74,12 @@ namespace Sayl.UI.UserControls
         {
             bool inventory = _cmbReportType.SelectedIndex == ReportInventory;
             bool daily = _cmbReportType.SelectedIndex == ReportDailySales;
+            bool expiry = _cmbReportType.SelectedIndex == ReportExpiry;
 
-            _dtpTo.Visible = !inventory && !daily;
+            _dtpTo.Visible = !inventory && !daily && !expiry;
             _lblTo.Visible = _dtpTo.Visible;
-            _dtpFrom.Visible = !inventory;
-            _lblFrom.Visible = !inventory;
+            _dtpFrom.Visible = !inventory && !expiry;
+            _lblFrom.Visible = !inventory && !expiry;
         }
 
         private async Task RunReportAsync()
@@ -141,6 +143,17 @@ namespace Sayl.UI.UserControls
                         AddRow("صافي المبيعات (بعد المرتجعات)", UiHelpers.Money(d.TotalNet));
                         AddRow("المحصل", UiHelpers.Money(d.TotalCollected));
                         AddRow("غير المحصل", UiHelpers.Money(d.TotalOutstanding));
+                        break;
+                    }
+                    case ReportExpiry:
+                    {
+                        var r = await reportService.GetExpiringBatchesAsync(90);
+                        if (!CheckResult(r) || r.Data == null) return;
+                        AddColumns(("المنتج", 30), ("الدفعة", 18), ("انتهاء الصلاحية", 18), ("الكمية", 12), ("متبقٍ (يوم)", 12), ("الحالة", 10));
+                        foreach (var b in r.Data)
+                            AddRow(b.ProductName, b.BatchNumber, b.ExpiryDate.ToString("yyyy-MM-dd"),
+                                b.Quantity.ToString(), b.DaysUntilExpiry.ToString(),
+                                b.IsExpired ? "منتهية!" : b.DaysUntilExpiry <= 30 ? "قريب جدًا" : "قريب");
                         break;
                     }
                 }

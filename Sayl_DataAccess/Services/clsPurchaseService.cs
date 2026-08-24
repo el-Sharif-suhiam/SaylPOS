@@ -1,4 +1,4 @@
-using Common.DTOs.RequestModels;
+﻿using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -76,7 +76,7 @@ namespace Sayl.Core.Services
                     TaxAmount = tax,
                     NetAmount = net,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 _dbContext.Invoices.Add(invoice);
@@ -95,7 +95,7 @@ namespace Sayl.Core.Services
                             BatchNumber = item.BatchNumber.Trim(),
                             ExpiryDate = item.ExpiryDate,
                             BatchQuantity = item.Quantity,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.Now
                         };
                         _dbContext.Batches.Add(batch);
                     }
@@ -131,7 +131,7 @@ namespace Sayl.Core.Services
                     }
 
                     inventory.QuantityAvailable += item.Quantity;
-                    inventory.UpdatedAt = DateTime.UtcNow;
+                    inventory.UpdatedAt = DateTime.Now;
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -141,7 +141,7 @@ namespace Sayl.Core.Services
                         Quantity = item.Quantity,
                         SourceType = "Invoice",
                         SourceId = invoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.Now
                     });
 
                     var product = products[item.ProductId];
@@ -185,7 +185,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.Payment!.PaymentDate,
                     PaymentMethod = request.Payment.Method,
                     Notes = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
             }
 

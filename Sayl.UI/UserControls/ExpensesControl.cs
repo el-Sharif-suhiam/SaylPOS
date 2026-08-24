@@ -93,7 +93,8 @@ namespace Sayl.UI.UserControls
             using (var scope = Program.Services.CreateScope())
             {
                 var expenseService = scope.ServiceProvider.GetRequiredService<clsExpenseService>();
-                result = await expenseService.DeleteExpenseAsync(expense.ExpenseId);
+                result = await expenseService.DeleteExpenseAsync(expense.ExpenseId,
+                    SessionState.CurrentUser?.UserId ?? 0);
             }
 
             UiHelpers.ShowResult(this, result);

@@ -15,6 +15,10 @@ namespace Common.DTOs.RequestModels
         public decimal DiscountAmount { get; set; }   // أو مبلغ الخصم الثابت
         public decimal TaxPercent { get; set; }
         public DtoPaymentInfo? Payment { get; set; }
+
+        /// <summary>دفعات متعددة (نقدي + شبكة على نفس الفاتورة). إذا مُلئت تُستخدم بدل Payment.</summary>
+        public List<DtoPaymentInfo>? Payments { get; set; }
+
         public string? Notes { get; set; }
     }
 

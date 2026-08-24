@@ -1,4 +1,4 @@
-using Common.DTOs;
+﻿using Common.DTOs;
 using Common.Results;
 using Common.Utils;
 using Microsoft.EntityFrameworkCore;
@@ -90,7 +90,7 @@ namespace Sayl.Core.Services
                 Category = string.IsNullOrWhiteSpace(dtoExpense.Category) ? null : dtoExpense.Category,
                 Notes = string.IsNullOrWhiteSpace(dtoExpense.Notes) ? null : dtoExpense.Notes,
                 UserId = dtoExpense.UserId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             };
 
             _dbContext.Expenses.Add(expense);
@@ -129,13 +129,22 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تحديث المصروف بنجاح.");
         }
 
-        public async Task<Result> DeleteExpenseAsync(int expenseId)
+        public async Task<Result> DeleteExpenseAsync(int expenseId, int actorUserId)
         {
             var expense = await _dbContext.Expenses.FindAsync(expenseId);
             if (expense == null)
                 return Result.Fail("المصروف غير موجود.");
 
+            // حذف المصروفات يتطلب صلاحية محاسب فأعلى
+            var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
+            if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Accountant))
+                return Result.Fail("حذف المصروفات يتطلب صلاحية محاسب أو أعلى.");
+
             _dbContext.Expenses.Remove(expense);
+
+            clsAudit.Log(_dbContext, actorUserId, "DeleteExpense",
+                $"حذف مصروف '{expense.Description}' بمبلغ {expense.Amount:N2} بتاريخ {expense.ExpenseDate:yyyy-MM-dd}");
+
             bool saved = (await _dbContext.SaveChangesAsync()) > 0;
 
             return saved ? Result.Ok("تم حذف المصروف بنجاح.") : Result.Fail("فشل حذف المصروف.");

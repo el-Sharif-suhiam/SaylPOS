@@ -117,14 +117,14 @@ namespace Sayl.UI.Forms
             var invoice = _invoices[_grid.CurrentRow.Index];
 
             using var payment = new PaymentForm(invoice.NetAmount, hasCustomer: invoice.PartyId.HasValue);
-            if (payment.ShowDialog(this) != DialogResult.OK || payment.PaymentInfo == null)
+            if (payment.ShowDialog(this) != DialogResult.OK || payment.PaymentsList.Count == 0)
                 return;
 
             Result result;
             using (var scope = Program.Services.CreateScope())
             {
                 var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
-                result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentInfo);
+                result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentsList);
             }
 
             UiHelpers.ShowResult(this, result, "تم استكمال الفاتورة بنجاح.");
@@ -153,7 +153,8 @@ namespace Sayl.UI.Forms
             using (var scope = Program.Services.CreateScope())
             {
                 var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
-                result = await checkoutService.CancelSuspendedInvoiceAsync(invoice.InvoiceId);
+                result = await checkoutService.CancelSuspendedInvoiceAsync(invoice.InvoiceId,
+                    SessionState.CurrentUser?.UserId ?? 0);
             }
 
             UiHelpers.ShowResult(this, result, "تم إلغاء الفاتورة.");

@@ -265,6 +265,15 @@ namespace Sayl.UI.Forms
             _btnSuspend = AppTheme.MakeButton("تعليق الفاتورة", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
             _btnSuspend.Click += async (_, _) => await CheckoutAsync(suspend: true);
 
+            var btnReturn = AppTheme.MakeButton("مرتجع بيع", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 54);
+            btnReturn.Click += (_, _) => ShowReturnForm();
+
+            var btnCash = AppTheme.MakeButton("قبض / صرف نقد", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: Color.FromArgb(191, 219, 254), height: 54);
+            btnCash.Click += (_, _) => ShowCashMovement();
+
+            var btnCloseSession = AppTheme.MakeButton("إغلاق الجلسة (Z)", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 54);
+            btnCloseSession.Click += async (_, _) => await CloseSessionFlowAsync();
+
             var btnSuspended = AppTheme.MakeButton("الفواتير المعلقة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 54);
             btnSuspended.Click += (_, _) => ShowSuspendedInvoices();
 
@@ -283,7 +292,7 @@ namespace Sayl.UI.Forms
             Control[] rows =
             {
                 _lblCustomer, btnCustomer, _lblSubtotal, discountRow, taxRow, _lblNet,
-                _btnPay, _btnSuspend, btnSuspended, btnReceive, btnClear
+                _btnPay, _btnSuspend, btnReturn, btnCash, btnCloseSession, btnSuspended, btnReceive, btnClear
             };
 
             foreach (var c in rows)
@@ -316,12 +325,25 @@ namespace Sayl.UI.Forms
                 }
                 else
                 {
-                    var opened = await posService.OpenSessionAsync(userId, 0);
+                    // جلسة جديدة: إدخال النقد الافتتاحي (الإلغاء = فتح بصفر)
+                    decimal opening = 0;
+                    using (var openForm = new OpenSessionForm())
+                    {
+                        if (openForm.ShowDialog(this) == DialogResult.OK)
+                            opening = openForm.OpeningAmount;
+                    }
+
+                    var opened = await posService.OpenSessionAsync(userId, opening);
                     if (opened.IsSuccess)
                         _sessionId = opened.Data;
                 }
 
                 _lblSession.Text = _sessionId.HasValue ? $"الجلسة #{_sessionId.Value}" : "بدون جلسة";
+
+                // نسبة الضريبة الافتراضية من الإعدادات
+                var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                decimal tax = await settings.GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
+                _txtTax.Text = tax > 0 ? tax.ToString("0.##") : "0";
             }
             catch
             {
@@ -508,7 +530,7 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            DtoPaymentInfo? payment = null;
+            List<DtoPaymentInfo> payments = new();
 
             if (!suspend)
             {
@@ -518,9 +540,9 @@ namespace Sayl.UI.Forms
                     return;
 
                 using var payForm = new PaymentForm(NetTotal, hasCustomer: _customerId.HasValue);
-                if (payForm.ShowDialog(this) != DialogResult.OK || payForm.PaymentInfo == null)
+                if (payForm.ShowDialog(this) != DialogResult.OK || payForm.PaymentsList.Count == 0)
                     return;
-                payment = payForm.PaymentInfo;
+                payments = payForm.PaymentsList;
             }
             else
             {
@@ -544,7 +566,7 @@ namespace Sayl.UI.Forms
                 DiscountPercent = DiscountPercent,
                 DiscountAmount = 0,
                 TaxPercent = TaxPercent,
-                Payment = payment,
+                Payments = payments,
                 Notes = null
             };
 
@@ -564,7 +586,96 @@ namespace Sayl.UI.Forms
             UiHelpers.ShowInfo(this, suspend
                 ? $"تم تعليق الفاتورة رقم {result.Data}."
                 : $"تمت عملية البيع بنجاح. رقم الفاتورة: {result.Data}");
+
+            if (!suspend)
+                _ = PrintReceiptIfEnabledAsync(result.Data);
+
             ClearCart();
+        }
+
+        // ─────────────────────────────────────────────────
+        // طباعة الإيصال الحراري تلقائيًا (حسب الإعدادات)
+        // ─────────────────────────────────────────────────
+        private async Task PrintReceiptIfEnabledAsync(int invoiceId)
+        {
+            try
+            {
+                bool autoPrint;
+                string printerName;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                    autoPrint = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
+                    printerName = await settings.GetAsync(clsSettingsService.KeyReceiptPrinter);
+                }
+
+                if (!autoPrint || string.IsNullOrWhiteSpace(printerName))
+                    return;
+
+                Common.DTOs.ViewModel.InvoicePrintVM? invoice = null;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                    var result = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
+                    if (result.IsSuccess)
+                        invoice = result.Data;
+                }
+
+                if (invoice == null)
+                    return;
+
+                var (ok, message) = await ReceiptPrinter.PrintInvoiceAsync(invoice, printerName);
+                if (!ok)
+                    UiHelpers.ShowError(this, message + " — يمكنك الطباعة من قسم فواتير البيع.");
+            }
+            catch
+            {
+                // فشل الطباعة لا يعطل سير البيع
+            }
+        }
+
+        // ─────────────────────────────────────────────────
+        // المرتجع / النقد / إغلاق الجلسة
+        // ─────────────────────────────────────────────────
+        private void ShowReturnForm()
+        {
+            using var form = new ReturnForm();
+            form.ShowDialog(this);
+        }
+
+        private void ShowCashMovement()
+        {
+            if (!_sessionId.HasValue)
+            {
+                UiHelpers.ShowError(this, "لا توجد جلسة مفتوحة.");
+                return;
+            }
+
+            using var form = new CashMovementForm(_sessionId.Value);
+            form.ShowDialog(this);
+        }
+
+        private async Task CloseSessionFlowAsync()
+        {
+            if (!_sessionId.HasValue)
+            {
+                UiHelpers.ShowError(this, "لا توجد جلسة مفتوحة.");
+                return;
+            }
+
+            bool confirmed = ConfirmationDialog.Show(this, "إغلاق الجلسة",
+                "سيتم عرض تقرير الجلسة وطلب عدّ النقد. متابعة؟");
+            if (!confirmed)
+                return;
+
+            using var form = new CloseSessionForm(_sessionId.Value);
+            form.ShowDialog(this);
+
+            if (form.Closed)
+            {
+                ClearCart();
+                await OpenSessionAsync();
+            }
         }
 
         // ─────────────────────────────────────────────────

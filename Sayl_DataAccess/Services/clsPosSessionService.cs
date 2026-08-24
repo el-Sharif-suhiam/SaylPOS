@@ -1,4 +1,4 @@
-using Common.DTOs.ViewModel;
+﻿using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -64,7 +64,7 @@ namespace Sayl.Core.Services
             {
                 UserId = userId,
                 OpeningAmount = openingAmount,
-                StartedAt = DateTime.UtcNow,
+                StartedAt = DateTime.Now,
                 Status = enPosSessionStatusType.open
             };
 
@@ -88,15 +88,37 @@ namespace Sayl.Core.Services
             if (session.Status != enPosSessionStatusType.open)
                 return Result.Fail("الجلسة مغلقة بالفعل.");
 
-            decimal sessionIncome = await _dbContext.Payments
+            // النقد المتوقع في الدرج = الافتتاحي + مبيعات نقدي − مرتجعات نقدي + قبض − صرف
+            // (نفس حساب clsCashService.GetSessionCashSummaryAsync — الشبكة والتحويل لا تدخل الدرج)
+            var sessionInvoiceIds = _dbContext.Invoices
+                .Where(i => i.SessionId == sessionId && i.Status == enInvoicesStatus.completed)
+                .Select(i => (int?)i.InvoiceId);
+
+            decimal cashIncome = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income
-                         && p.Invoice != null
-                         && p.Invoice.SessionId == sessionId)
+                         && p.PaymentMethod == "cash"
+                         && p.InvoiceId != null
+                         && sessionInvoiceIds.Contains(p.InvoiceId))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
-            session.ExpectedAmount = session.OpeningAmount + sessionIncome;
+            decimal cashOutcome = await _dbContext.Payments
+                .Where(p => p.Type == enPaymentType.outcome
+                         && p.PaymentMethod == "cash"
+                         && p.InvoiceId != null
+                         && sessionInvoiceIds.Contains(p.InvoiceId))
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            decimal cashIn = await _dbContext.CashMovements
+                .Where(m => m.SessionId == sessionId && m.MovementType == 'I')
+                .SumAsync(m => (decimal?)m.Amount) ?? 0m;
+
+            decimal cashOut = await _dbContext.CashMovements
+                .Where(m => m.SessionId == sessionId && m.MovementType == 'O')
+                .SumAsync(m => (decimal?)m.Amount) ?? 0m;
+
+            session.ExpectedAmount = session.OpeningAmount + cashIncome - cashOutcome + cashIn - cashOut;
             session.ClosingAmount = closingAmount;
-            session.ClosedAt = DateTime.UtcNow;
+            session.ClosedAt = DateTime.Now;
             session.Status = enPosSessionStatusType.closed;
 
             await _dbContext.SaveChangesAsync();

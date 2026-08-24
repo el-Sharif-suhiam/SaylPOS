@@ -94,7 +94,8 @@ namespace Sayl.UI.UserControls
             using (var scope = Program.Services.CreateScope())
             {
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
-                result = await roleService.DeleteRoleAsync(role.RoleId);
+                result = await roleService.DeleteRoleAsync(role.RoleId,
+                    SessionState.CurrentUser?.UserId ?? 0);
             }
 
             UiHelpers.ShowResult(this, result);

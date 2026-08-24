@@ -29,7 +29,68 @@ namespace Sayl.UI.Forms
             BuildSections();
             BuildUi();
 
-            Shown += (_, _) => SelectSection(_sections.Keys.First());
+            Shown += async (_, _) =>
+            {
+                SelectSection(_sections.Keys.First());
+                await RunDailyBackupIfDueAsync();
+            };
+
+            FormClosing += async (_, args) =>
+            {
+                if (_backupOnCloseStarted) return;
+                _backupOnCloseStarted = true;
+                args.Cancel = true;
+                await BackupOnCloseAsync();
+                Close();
+            };
+        }
+
+        private bool _backupOnCloseStarted;
+
+        /// <summary>نسخة احتياطية يومية عند فتح البرنامج (إن لم تُجرَ اليوم).</summary>
+        private async Task RunDailyBackupIfDueAsync()
+        {
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                string lastBackup = await settings.GetAsync(clsSettingsService.KeyLastBackupDate);
+                if (lastBackup == DateTime.Today.ToString("yyyy-MM-dd"))
+                    return;
+
+                string folder = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
+                    clsBackupService.DefaultBackupFolder);
+
+                var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
+                var result = await backupService.BackupAsync(folder);
+                if (result.IsSuccess)
+                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+            }
+            catch
+            {
+                // فشل النسخ اليومي لا يعطل عمل البرنامج
+            }
+        }
+
+        /// <summary>نسخة احتياطية عند إغلاق البرنامج.</summary>
+        private async Task BackupOnCloseAsync()
+        {
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                string folder = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
+                    clsBackupService.DefaultBackupFolder);
+
+                var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
+                var result = await backupService.BackupAsync(folder);
+                if (result.IsSuccess)
+                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+            }
+            catch
+            {
+                // نغلق البرنامج حتى لو فشل النسخ (لا نحبس المستخدم)
+            }
         }
 
         // ─────────────────────────────────────────────────
@@ -49,8 +110,9 @@ namespace Sayl.UI.Forms
 
             if (SessionState.IsAdmin)
             {
-                _sections["المستخدمون"] = () => new SectionPlaceholderControl("المستخدمون");
-                _sections["الأدوار والصلاحيات"] = () => new SectionPlaceholderControl("الأدوار والصلاحيات");
+                _sections["المستخدمون"] = () => new UsersControl();
+                _sections["الأدوار والصلاحيات"] = () => new RolesControl();
+                _sections["الإعدادات"] = () => new SettingsControl();
             }
         }
 

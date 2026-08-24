@@ -400,5 +400,38 @@ namespace Sayl.Core.Services
             int diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
             return date.AddDays(-diff);
         }
+
+        // ─────────────────────────────────────────────────
+        // الدفعات القريبة من انتهاء الصلاحية (تنبيهات 30/60/90 يوم)
+        // ─────────────────────────────────────────────────
+        public async Task<Result<List<ExpiringBatchVM>>> GetExpiringBatchesAsync(int withinDays = 90)
+        {
+            if (withinDays <= 0)
+                withinDays = 90;
+
+            DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+            DateOnly until = today.AddDays(withinDays);
+
+            var result = await _dbContext.Batches
+                .Include(b => b.Product)
+                .Where(b => b.BatchQuantity > 0
+                         && b.ExpiryDate != null
+                         && b.ExpiryDate <= until)
+                .OrderBy(b => b.ExpiryDate)
+                .Select(b => new ExpiringBatchVM
+                {
+                    BatchId = b.BatchId,
+                    ProductId = b.ProductId,
+                    ProductName = b.Product.Name,
+                    BatchNumber = b.BatchNumber,
+                    ExpiryDate = b.ExpiryDate!.Value,
+                    Quantity = b.BatchQuantity,
+                    DaysUntilExpiry = b.ExpiryDate!.Value.DayNumber - today.DayNumber,
+                    IsExpired = b.ExpiryDate < today
+                })
+                .ToListAsync();
+
+            return Result<List<ExpiringBatchVM>>.Ok(result);
+        }
     }
 }

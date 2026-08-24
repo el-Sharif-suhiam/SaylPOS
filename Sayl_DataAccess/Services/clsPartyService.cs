@@ -97,7 +97,7 @@ namespace Sayl.Core.Services
              if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
                  party.Notes = dtoParty.Notes;
 
-             party.UpdatedAt = DateTime.UtcNow;
+             party.UpdatedAt = DateTime.Now;
              await _dbContext.SaveChangesAsync();
              return Result.Ok("تم تحديث الطرف بنجاح.");
          }

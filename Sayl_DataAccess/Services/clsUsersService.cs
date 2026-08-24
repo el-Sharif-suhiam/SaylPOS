@@ -15,9 +15,24 @@ namespace Sayl.Core.Services
     {
         private readonly SaylDbContext _dbContext;
 
+        // قفل الحساب بعد 5 محاولات فاشلة لمدة 15 دقيقة (في الذاكرة — كافٍ لتشغيل أوفلاين على جهاز واحد)
+        private static readonly Dictionary<string, (int Count, DateTime LockUntil)> _failedLogins = new();
+        private const int MaxLoginAttempts = 5;
+        private const int LockMinutes = 15;
+
         public clsUsersService(SaylDbContext dbContext)
         {
             _dbContext = dbContext;
+        }
+
+        /// <summary>سياسة كلمة المرور: 8 أحرف على الأقل وتحتوي حروفًا وأرقامًا.</summary>
+        public static string? ValidatePasswordPolicy(string password)
+        {
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 8)
+                return "كلمة المرور يجب أن تكون 8 أحرف على الأقل.";
+            if (!password.Any(char.IsLetter) || !password.Any(char.IsDigit))
+                return "كلمة المرور يجب أن تحتوي على حروف وأرقام.";
+            return null;
         }
 
         public async Task<List<UserVM>> GetUsersAsync()
@@ -57,6 +72,10 @@ namespace Sayl.Core.Services
 
                 if (string.IsNullOrWhiteSpace(req.password))
                     return Result.Fail("كلمة المرور مطلوبة.");
+
+                string? policyError = ValidatePasswordPolicy(req.password);
+                if (policyError != null)
+                    return Result.Fail(policyError);
 
                 if (req.RoleId <= 0)
                     return Result.Fail("الدور غير صالح.");
@@ -166,6 +185,16 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
                 return Result<UserVM>.Fail("اسم المستخدم وكلمة المرور مطلوبان.");
 
+            // قفل الحساب بعد المحاولات الفاشلة المتكررة
+            lock (_failedLogins)
+            {
+                if (_failedLogins.TryGetValue(username, out var state) && state.LockUntil > DateTime.Now)
+                {
+                    int remaining = (int)Math.Ceiling((state.LockUntil - DateTime.Now).TotalMinutes);
+                    return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {remaining} دقيقة.");
+                }
+            }
+
             var user = await _dbContext.Users
                 .Include(u => u.Role)
                 .Include(u => u.Employee)
@@ -178,7 +207,15 @@ namespace Sayl.Core.Services
                 return Result<UserVM>.Fail("هذا الحساب معطَّل. راجع المدير.");
 
             if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
+            {
+                RegisterFailedLogin(username);
                 return Result<UserVM>.Fail("كلمة المرور غير صحيحة.");
+            }
+
+            lock (_failedLogins)
+            {
+                _failedLogins.Remove(username);
+            }
 
             // إنشاء سجل دخول
             _dbContext.SystemLogs.Add(new SystemLog
@@ -186,7 +223,7 @@ namespace Sayl.Core.Services
                 UserId = user.UserId,
                 Action = "Login",
                 Details = $"تسجيل دخول المستخدم '{user.Username}'",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             });
             await _dbContext.SaveChangesAsync();
 
@@ -201,6 +238,17 @@ namespace Sayl.Core.Services
             return Result<UserVM>.Ok(userVm, "تم تسجيل الدخول بنجاح.");
         }
 
+        private static void RegisterFailedLogin(string username)
+        {
+            lock (_failedLogins)
+            {
+                var (count, _) = _failedLogins.TryGetValue(username, out var s) ? s : (0, DateTime.MinValue);
+                count++;
+                var lockUntil = count >= MaxLoginAttempts ? DateTime.Now.AddMinutes(LockMinutes) : DateTime.MinValue;
+                _failedLogins[username] = (count >= MaxLoginAttempts ? 0 : count, lockUntil);
+            }
+        }
+
       
         public async Task<Result> LogoutAsync(int userId)
         {
@@ -213,7 +261,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "Logout",
                 Details = $"تسجيل خروج المستخدم '{user.Username}'",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             });
             await _dbContext.SaveChangesAsync();
 
@@ -237,6 +285,10 @@ namespace Sayl.Core.Services
             if (!BCrypt.Net.BCrypt.Verify(oldPassword, user.PasswordHash))
                 return Result.Fail("كلمة المرور القديمة غير صحيحة.");
 
+            string? policyError = ValidatePasswordPolicy(newPassword);
+            if (policyError != null)
+                return Result.Fail(policyError);
+
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
 
             _dbContext.SystemLogs.Add(new SystemLog
@@ -244,7 +296,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "ChangePassword",
                 Details = $"المستخدم '{user.Username}' غيّر كلمة مروره.",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             });
             await _dbContext.SaveChangesAsync();
 
@@ -256,8 +308,9 @@ namespace Sayl.Core.Services
         // ──────────────────────────────────────────────────────
         public async Task<Result> ResetPasswordAsync(int userId, string newPassword)
         {
-            if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
-                return Result.Fail("كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف.");
+            string? policyError = ValidatePasswordPolicy(newPassword);
+            if (policyError != null)
+                return Result.Fail(policyError);
 
             var user = await _dbContext.Users.FindAsync(userId);
             if (user == null)
@@ -270,7 +323,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "ResetPassword",
                 Details = $"تم إعادة تعيين كلمة مرور المستخدم '{user.Username}' بواسطة مسؤول.",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             });
             await _dbContext.SaveChangesAsync();
 

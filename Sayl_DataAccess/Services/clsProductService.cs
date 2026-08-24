@@ -1,4 +1,4 @@
-using Common.DTOs;
+﻿using Common.DTOs;
 using Common.Results;
 using Common.Utils;
 using Microsoft.EntityFrameworkCore;
@@ -148,7 +148,7 @@ namespace Sayl.Core.Services
                     CostPrice = dtoProduct.CostPrice,
                     ReorderLevel = dtoProduct.ReorderLevel,
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 _dbContext.Products.Add(product);
@@ -161,7 +161,7 @@ namespace Sayl.Core.Services
                         ProductId = product.ProductId,
                         QuantityAvailable = 0,
                         QuantityReserved = 0,
-                        UpdatedAt = DateTime.UtcNow
+                        UpdatedAt = DateTime.Now
                     });
                     await _dbContext.SaveChangesAsync();
                 }
@@ -229,8 +229,12 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تحديث المنتج بنجاح.");
         }
 
-        public async Task<Result> DeactivateProductAsync(int productId)
+        public async Task<Result> DeactivateProductAsync(int productId, int actorUserId)
         {
+            var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
+            if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Accountant))
+                return Result.Fail("تعطيل المنتجات يتطلب صلاحية محاسب أو أعلى.");
+
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)
                 return Result.Fail("المنتج غير موجود.");
@@ -240,6 +244,8 @@ namespace Sayl.Core.Services
                 return Result.Fail("لا يمكن تعطيل المنتج لوجود كميات محجوزة.");
 
             product.IsActive = false;
+
+            clsAudit.Log(_dbContext, actorUserId, "DeactivateProduct", $"تعطيل المنتج '{product.Name}' (رقم {productId})");
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم تعطيل المنتج بنجاح.");
         }

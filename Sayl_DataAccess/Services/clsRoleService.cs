@@ -99,8 +99,12 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تحديث الدور بنجاح.");
         }
 
-        public async Task<Result> DeleteRoleAsync(byte roleId)
+        public async Task<Result> DeleteRoleAsync(byte roleId, int actorUserId)
         {
+            var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
+            if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Admin))
+                return Result.Fail("حذف الأدوار يتطلب صلاحية مدير النظام.");
+
             var role = await _dbContext.Roles.FindAsync(roleId);
             if (role == null)
                 return Result.Fail("الدور غير موجود.");
@@ -110,6 +114,8 @@ namespace Sayl.Core.Services
                 return Result.Fail("لا يمكن حذف الدور لأنه مستخدم من قبل مستخدمين.");
 
             _dbContext.Roles.Remove(role);
+
+            clsAudit.Log(_dbContext, actorUserId, "DeleteRole", $"حذف الدور '{role.Name}' (قيمة {role.RoleValue})");
             bool saved = (await _dbContext.SaveChangesAsync()) > 0;
 
             return saved ? Result.Ok("تم حذف الدور بنجاح.") : Result.Fail("فشل حذف الدور.");

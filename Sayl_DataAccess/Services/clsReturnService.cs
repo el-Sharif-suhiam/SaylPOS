@@ -1,4 +1,4 @@
-using Common.DTOs.RequestModels;
+﻿using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -69,7 +69,7 @@ namespace Sayl.Core.Services
                     SessionId = originalInvoice.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 foreach (var item in request.Items)
@@ -107,6 +107,9 @@ namespace Sayl.Core.Services
                 }
 
                 await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total);
+
+                clsAudit.Log(_dbContext, request.UserId, "CustomerReturn",
+                    $"مرتجع بيع على الفاتورة #{originalInvoice.InvoiceId} — القيمة: {total:N2}");
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -171,7 +174,7 @@ namespace Sayl.Core.Services
                     UserId = request.UserId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 foreach (var item in request.Items)
@@ -270,13 +273,13 @@ namespace Sayl.Core.Services
                         Quantity = quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.Now
                     });
                 }
             }
 
             inventory.QuantityAvailable += quantity;
-            inventory.UpdatedAt = DateTime.UtcNow;
+            inventory.UpdatedAt = DateTime.Now;
         }
 
         private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
@@ -310,13 +313,13 @@ namespace Sayl.Core.Services
                         Quantity = -quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.Now
                     });
                 }
             }
 
             inventory.QuantityAvailable -= quantity;
-            inventory.UpdatedAt = DateTime.UtcNow;
+            inventory.UpdatedAt = DateTime.Now;
         }
 
         private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal)
@@ -336,10 +339,10 @@ namespace Sayl.Core.Services
                     PartyType = 'C',
                     PartyId = originalInvoice.PartyId,
                     Amount = cashRefund,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                    PaymentDate = DateOnly.FromDateTime(DateTime.Now),
                     PaymentMethod = "cash",
                     Notes = $"استرداد نقدي عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
             }
 
@@ -372,10 +375,10 @@ namespace Sayl.Core.Services
                     PartyType = 'S',
                     PartyId = originalInvoice.PartyId,
                     Amount = cashRefund,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                    PaymentDate = DateOnly.FromDateTime(DateTime.Now),
                     PaymentMethod = "cash",
                     Notes = $"استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
             }
 

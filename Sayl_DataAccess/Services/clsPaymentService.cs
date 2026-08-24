@@ -1,4 +1,4 @@
-using Common.DTOs.RequestModels;
+﻿using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
@@ -99,7 +99,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
 
                 decimal totalPaid = paidSoFar + request.Amount;
@@ -171,7 +171,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
 
                 customer.Balance -= request.Amount;
@@ -218,7 +218,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 });
 
                 supplier.Balance -= request.Amount;

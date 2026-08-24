@@ -102,7 +102,7 @@ namespace Sayl.UI.UserControls
             {
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
                 result = product.IsActive
-                    ? await productService.DeactivateProductAsync(product.ProductId)
+                    ? await productService.DeactivateProductAsync(product.ProductId, SessionState.CurrentUser?.UserId ?? 0)
                     : await productService.ActivateProductAsync(product.ProductId);
             }
 

@@ -12,10 +12,14 @@ namespace DependencyInjection
         public static IServiceCollection AddSaylServices(this IServiceCollection services, string connectionString)
         {
             services.AddDbContext<SaylDbContext>(options =>
-                options.UseSqlServer(connectionString)
-                .LogTo(Console.WriteLine, LogLevel.Information)
-                .EnableSensitiveDataLogging()
-            );
+            {
+                var builder = options.UseSqlServer(connectionString);
+#if DEBUG
+                // تسجيل تفصيلي للتطوير فقط — لا يُفعَّل في الإطلاق لأسباب أمنية وأداء
+                builder.LogTo(Console.WriteLine, LogLevel.Information)
+                       .EnableSensitiveDataLogging();
+#endif
+            });
             services.AddScoped<clsCustomerService>();
             services.AddScoped<clsPartyService>();
             services.AddScoped<clsEmployeeService>();
@@ -32,6 +36,9 @@ namespace DependencyInjection
             services.AddScoped<clsReturnService>();
             services.AddScoped<clsPurchaseService>();
             services.AddScoped<clsInvoiceService>();
+            services.AddScoped<clsSettingsService>();
+            services.AddScoped<clsCashService>();
+            services.AddScoped<clsBackupService>();
             return services;
         }
 

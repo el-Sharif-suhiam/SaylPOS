@@ -16,6 +16,9 @@ namespace Sayl.UI
         {
             ApplicationConfiguration.Initialize();
 
+            // ترميزات Windows (CP1256 للعربية على الطابعات الحرارية)
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
             // تسجيل الأخطاء غير المتوقعة في ملف للتشخيص
             Application.ThreadException += (_, e) =>
                 File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
