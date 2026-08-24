@@ -1,3 +1,4 @@
+using Common.DTOs;
 using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
 using Common.Results;
@@ -9,7 +10,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>
-    /// واجهة الكاشير: بحث سريع، سلة بيع، خصم/ضريبة، دفع، تعليق واستكمال الفواتير المعلقة، واستلام المخزون.
+    /// واجهة الكاشير: بحث حي أثناء الكتابة، سلة بيع في المنتصف، وأزرار مجمعة بلمسات كبيرة.
     /// </summary>
     public class PosForm : Form
     {
@@ -22,17 +23,36 @@ namespace Sayl.UI.Forms
             public decimal Total => Price * Quantity;
         }
 
+        private sealed class SearchItem
+        {
+            public DtoProduct Product { get; init; } = null!;
+            public int Stock { get; init; }
+        }
+
         private readonly List<CartItem> _cart = new();
+        private Dictionary<int, int> _stockByProduct = new();
         private int? _sessionId;
 
+        // شريط العلوي
         private TextBox _txtSearch = null!;
-        private Panel _searchResultsPanel = null!;
+        private Label _lblSession = null!;
+
+        // قائمة البحث الحية
+        private Panel _searchPopup = null!;
         private ListBox _lstResults = null!;
+        private System.Windows.Forms.Timer _searchTimer = null!;
+        private int _searchSeq;
+
+        // منطقة السلة
+        private Label _lblItemsBadge = null!;
+        private Label _lblStockWarn = null!;
         private DataGridView _gridCart = null!;
+        private System.Windows.Forms.Timer _warnTimer = null!;
+
+        // لوحة الأوامر
         private Label _lblCustomer = null!;
         private Label _lblSubtotal = null!;
         private Label _lblNet = null!;
-        private Label _lblSession = null!;
         private TextBox _txtDiscount = null!;
         private TextBox _txtTax = null!;
         private Button _btnPay = null!;
@@ -44,272 +64,694 @@ namespace Sayl.UI.Forms
         public PosForm()
         {
             BuildUi();
-            Load += async (_, _) => await OpenSessionAsync();
+            Load += async (_, _) =>
+            {
+                await OpenSessionAsync();
+                await RefreshStockAsync();
+            };
         }
 
-        // ─────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════
         // بناء الواجهة
-        // ─────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "سيل — نقاط البيع";
             WindowState = FormWindowState.Maximized;
-            MinimumSize = new Size(1100, 680);
+            MinimumSize = new Size(1150, 700);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = AppTheme.Bg;
             RightToLeft = RightToLeft.Yes;
-            Font = AppTheme.FontBody;
-            KeyPreview = true;
 
-            BuildTopBar();
-            // ترتيب الإرساء معكوس: Fill (الشبكة) يُضاف قبل لوحة الأوامر حتى تحجز اللوحة مكانها
-            BuildCartGrid();
-            BuildActionPanel();
+            BuildCartArea();     // Fill (يُرسّى أخيرًا)
+            BuildActionPanel();  // Dock Right
+            BuildTopBar();       // Dock Top (يمتد بكامل العرض)
+            BuildSearchPopup();
         }
 
+        // ───────────────── الشريط العلوي ─────────────────
         private void BuildTopBar()
         {
-            var top = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = AppTheme.SidebarBg, Padding = new Padding(16, 10, 16, 10) };
+            var top = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = AppTheme.SidebarBg, Padding = new Padding(14, 12, 14, 12) };
 
             _lblSession = new Label
             {
                 Text = "جارٍ فتح الجلسة...",
                 Dock = DockStyle.Left,
-                Width = 200,
+                Width = 170,
                 TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = AppTheme.TextMuted
+                ForeColor = AppTheme.TextMuted,
+                Font = new Font("Segoe UI", 9.5F)
             };
 
             var lblBrand = new Label
             {
                 Text = "سيل | نقاط البيع",
                 Dock = DockStyle.Left,
-                Width = 170,
-                TextAlign = ContentAlignment.MiddleRight,
+                Width = 165,
+                TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold)
             };
 
+            var searchHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 0, 24, 0) };
             _txtSearch = new TextBox
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 14F),
-                BackColor = AppTheme.FieldBg
+                BackColor = Color.FromArgb(31, 41, 55),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
             };
-            _txtSearch.PlaceholderText = "امسح الباركود أو اكتب اسم المنتج ثم Enter";
+            _txtSearch.PlaceholderText = "اكتب اسم المنتج للبحث الفوري أو امسح الباركود ثم Enter";
+            _txtSearch.TextChanged += (_, _) => OnSearchTextChanged();
             _txtSearch.KeyDown += Search_KeyDown;
+            searchHost.Controls.Add(_txtSearch);
 
-            var btnLogout = new Button
-            {
-                Text = "خروج",
-                Dock = DockStyle.Left,
-                Width = 90,
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.FromArgb(248, 113, 113),
-                BackColor = Color.Transparent,
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnLogout.FlatAppearance.BorderSize = 1;
-            btnLogout.FlatAppearance.BorderColor = Color.FromArgb(55, 65, 81);
+            var btnLogout = AppTheme.MakeButton("خروج", Color.FromArgb(31, 41, 55),
+                foreColor: Color.FromArgb(252, 165, 165), hoverColor: Color.FromArgb(55, 65, 81), height: 50);
+            btnLogout.Dock = DockStyle.Left;
+            btnLogout.Width = 92;
+            btnLogout.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnLogout.Click += async (_, _) => await LogoutAsync();
 
-            // ترتيب الإرساء (آخر عنصر يُرسّى أولًا): بحث Fill ثم الجلسة ثم الشعار ثم الخروج
-            top.Controls.Add(_txtSearch);
+            // ترتيب الإرساء المعكوس: الأخير يُرسّى أولًا
+            top.Controls.Add(_txtSearch.Parent!);
             top.Controls.Add(_lblSession);
             top.Controls.Add(lblBrand);
             top.Controls.Add(btnLogout);
 
-            // لوحة نتائج البحث العائمة
-            _searchResultsPanel = new Panel
+            Controls.Add(top);
+        }
+
+        // ───────────────── قائمة نتائج البحث الحية ─────────────────
+        private void BuildSearchPopup()
+        {
+            _searchPopup = new Panel
             {
                 Visible = false,
-                Width = 520,
-                Height = 260,
+                Width = 600,
+                Height = 320,
                 BackColor = AppTheme.CardBg,
                 BorderStyle = BorderStyle.FixedSingle
             };
+
             _lstResults = new ListBox
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 12F),
+                DrawMode = DrawMode.OwnerDrawFixed,
+                ItemHeight = 54,
                 BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 11F),
                 IntegralHeight = false
             };
+            _lstResults.DrawItem += LstResults_DrawItem;
             _lstResults.Click += (_, _) => AddSelectedResult();
-            _searchResultsPanel.Controls.Add(_lstResults);
-            _searchResultsPanel.BringToFront();
+            _lstResults.KeyDown += LstResults_KeyDown;
+            _searchPopup.Controls.Add(_lstResults);
 
-            Controls.Add(top);
-            Controls.Add(_searchResultsPanel);
+            Controls.Add(_searchPopup);
+            _searchPopup.BringToFront();
 
-            // تثبيت لوحة النتائج أسفل مربع البحث عند تغيّر المقاس
-            top.Resize += (_, _) => PositionResultsPanel(top);
-            PositionResultsPanel(top);
+            _searchTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            _searchTimer.Tick += async (_, _) =>
+            {
+                _searchTimer.Stop();
+                await RunLiveSearchAsync();
+            };
+
+            _warnTimer = new System.Windows.Forms.Timer { Interval = 4000 };
+            _warnTimer.Tick += (_, _) =>
+            {
+                _lblStockWarn.Text = "";
+                _warnTimer.Stop();
+            };
+
+            Resize += (_, _) => { if (_searchPopup.Visible) HideSearchPopup(); };
         }
 
-        private void PositionResultsPanel(Panel top)
+        private void LstResults_DrawItem(object? sender, DrawItemEventArgs e)
         {
-            _searchResultsPanel.Left = top.ClientSize.Width - 16 - _searchResultsPanel.Width;
-            _searchResultsPanel.Top = top.Bottom + 4;
+            e.DrawBackground();
+            if (e.Index < 0 || e.Index >= _lstResults.Items.Count)
+                return;
+
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            using var bgBrush = new SolidBrush(selected ? AppTheme.PrimaryLight : AppTheme.CardBg);
+            e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+            var item = (SearchItem)_lstResults.Items[e.Index]!;
+
+            using var nameBrush = new SolidBrush(AppTheme.TextPrimary);
+            using var subBrush = new SolidBrush(selected ? AppTheme.PrimaryDark : AppTheme.TextMuted);
+            using var nameFont = new Font("Segoe UI", 11.5F, FontStyle.Bold);
+            using var subFont = new Font("Segoe UI", 9F);
+
+            var format = new StringFormat(StringFormatFlags.DirectionRightToLeft);
+            var rect = new Rectangle(e.Bounds.X + 12, e.Bounds.Y + 5, e.Bounds.Width - 24, e.Bounds.Height - 10);
+
+            string stockText = item.Product.Type == "stock"
+                ? $"متوفر: {item.Stock}"
+                : "غير مخزني";
+            var stockBrush = new SolidBrush(
+                item.Product.Type != "stock" ? AppTheme.TextMuted :
+                item.Stock <= 0 ? AppTheme.Danger :
+                item.Stock <= 10 ? AppTheme.Warning : AppTheme.Success);
+
+            e.Graphics.DrawString(item.Product.Name, nameFont, nameBrush,
+                new Rectangle(rect.X, rect.Y, rect.Width - 150, 26), format);
+            e.Graphics.DrawString($"{UiHelpers.Money(item.Product.BasePrice)}  •  {stockText}", subFont, stockBrush,
+                new Rectangle(rect.X, rect.Y + 27, rect.Width - 24, 20), format);
         }
 
-        private void BuildCartGrid()
+        private void RepositionSearchPopup()
         {
-            _gridCart = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                BackColor = AppTheme.CardBg
-            };
-            UiHelpers.StyleGrid(_gridCart);
-            _gridCart.ReadOnly = false;
-            _gridCart.Columns.Add("colProduct", "المنتج");
-            _gridCart.Columns.Add("colPrice", "السعر");
-
-            var colQty = new DataGridViewTextBoxColumn
-            {
-                Name = "colQty",
-                HeaderText = "الكمية",
-                ReadOnly = false
-            };
-            _gridCart.Columns.Add(colQty);
-
-            _gridCart.Columns.Add("colTotal", "الإجمالي");
-            _gridCart.Columns["colProduct"].FillWeight = 45;
-            _gridCart.Columns["colPrice"].FillWeight = 18;
-            _gridCart.Columns["colQty"].FillWeight = 15;
-            _gridCart.Columns["colTotal"].FillWeight = 15;
-
-            var colRemove = new DataGridViewButtonColumn
-            {
-                Name = "colRemove",
-                HeaderText = "",
-                Text = "حذف",
-                UseColumnTextForButtonValue = true,
-                FlatStyle = FlatStyle.Flat,
-                FillWeight = 7
-            };
-            colRemove.DefaultCellStyle.ForeColor = AppTheme.Danger;
-            _gridCart.Columns.Add(colRemove);
-
-            _gridCart.CellEndEdit += (_, _) => RefreshCart();
-            _gridCart.CellClick += GridCart_CellClick;
-
-            Controls.Add(_gridCart);
+            var host = _txtSearch.Parent!;
+            var screenPoint = host.PointToScreen(new Point(host.Width - _searchPopup.Width - 4, host.Bottom + 6));
+            _searchPopup.Location = PointToClient(screenPoint);
+            _searchPopup.BringToFront();
         }
 
-        private void BuildActionPanel()
+        private void ShowSearchPopup(int resultCount)
         {
-            var panel = new Panel { Dock = DockStyle.Right, Width = 310, BackColor = AppTheme.CardBg, Padding = new Padding(18, 14, 18, 14) };
+            RepositionSearchPopup();
+            _searchPopup.Height = Math.Min(resultCount * _lstResults.ItemHeight + 8, 380);
+            _searchPopup.Visible = true;
+            _searchPopup.BringToFront();
+        }
 
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        private void HideSearchPopup()
+        {
+            _searchPopup.Visible = false;
+            ActiveControl = _txtSearch;
+        }
 
-            _lblCustomer = new Label
+        private void OnSearchTextChanged()
+        {
+            _searchTimer.Stop();
+
+            if (string.IsNullOrWhiteSpace(_txtSearch.Text))
             {
-                Text = "عميل مجهول",
-                Dock = DockStyle.Top,
-                Height = 44,
-                TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = AppTheme.FieldBg,
-                ForeColor = AppTheme.TextPrimary,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold)
-            };
+                HideSearchPopup();
+                return;
+            }
 
-            var btnCustomer = AppTheme.MakeButton("اختيار العميل", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 46);
-            btnCustomer.Click += (_, _) => PickCustomer();
+            _searchTimer.Start();
+        }
 
-            _lblSubtotal = new Label
+        private async Task RunLiveSearchAsync()
+        {
+            string term = _txtSearch.Text?.Trim() ?? "";
+            if (term.Length == 0)
             {
-                Text = "الإجمالي: 0.00",
-                Dock = DockStyle.Top,
-                Height = 36,
-                TextAlign = ContentAlignment.MiddleCenter,
+                HideSearchPopup();
+                return;
+            }
+
+            int seq = ++_searchSeq;
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
+
+                // باركود مطابق تمامًا = إضافة فورية (سيناريو الماسح الضوئي)
+                if (term.Length >= 6 && term.All(char.IsDigit))
+                {
+                    var byBarcode = await productService.GetProductByBarcodeAsync(term);
+                    if (seq != _searchSeq) return;
+                    if (byBarcode.IsSuccess && byBarcode.Data != null)
+                    {
+                        AddToCart(byBarcode.Data);
+                        FinishSearchInput();
+                        return;
+                    }
+                }
+
+                var matches = (await productService.GetProductsListAsync(term))
+                    .Take(8)
+                    .Select(p => new SearchItem
+                    {
+                        Product = p,
+                        Stock = _stockByProduct.TryGetValue(p.ProductId, out int st) ? st : 0
+                    })
+                    .ToList();
+
+                if (seq != _searchSeq) return;
+
+                _lstResults.BeginUpdate();
+                _lstResults.Items.Clear();
+                foreach (var m in matches)
+                    _lstResults.Items.Add(m);
+                _lstResults.EndUpdate();
+
+                if (matches.Count == 0)
+                    HideSearchPopup();
+                else
+                {
+                    ShowSearchPopup(matches.Count);
+                    _lstResults.SelectedIndex = 0;
+                }
+            }
+            catch
+            {
+                // فشل البحث لا يعطل الكاشير
+            }
+        }
+
+        private void Search_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Down && _searchPopup.Visible && _lstResults.Items.Count > 0)
+            {
+                e.SuppressKeyPress = true;
+                _lstResults.Focus();
+                _lstResults.SelectedIndex = Math.Max(0, _lstResults.SelectedIndex);
+                return;
+            }
+
+            if (e.KeyCode != Keys.Enter)
+                return;
+
+            e.SuppressKeyPress = true;
+            _searchTimer.Stop();
+            _ = SearchCommitAsync();
+        }
+
+        /// <summary>Enter في مربع البحث: اختيار المحدد إن كانت القائمة ظاهرة، وإلا بحث مباشر.</summary>
+        private async Task SearchCommitAsync()
+        {
+            if (_searchPopup.Visible && _lstResults.SelectedIndex >= 0)
+            {
+                AddSelectedResult();
+                return;
+            }
+
+            string term = _txtSearch.Text?.Trim() ?? "";
+            if (term.Length == 0) return;
+
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
+
+                var byBarcode = await productService.GetProductByBarcodeAsync(term);
+                if (byBarcode.IsSuccess && byBarcode.Data != null)
+                {
+                    AddToCart(byBarcode.Data);
+                    FinishSearchInput();
+                    return;
+                }
+
+                await RunLiveSearchAsync();
+                if (_lstResults.Items.Count == 1)
+                    AddSelectedResult();
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر البحث عن المنتج.");
+            }
+        }
+
+        private void LstResults_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                AddSelectedResult();
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                e.SuppressKeyPress = true;
+                HideSearchPopup();
+            }
+            else if (e.KeyCode == Keys.Up && _lstResults.SelectedIndex <= 0)
+            {
+                e.SuppressKeyPress = true;
+                _txtSearch.Focus();
+            }
+        }
+
+        private void AddSelectedResult()
+        {
+            if (_lstResults.SelectedIndex < 0 || _lstResults.SelectedIndex >= _lstResults.Items.Count)
+                return;
+
+            if (_lstResults.Items[_lstResults.SelectedIndex] is not SearchItem item)
+                return;
+
+            AddToCart(item.Product);
+            FinishSearchInput();
+        }
+
+        private void FinishSearchInput()
+        {
+            _searchSeq++;
+            _searchTimer.Stop();
+            _txtSearch.Clear();
+            HideSearchPopup();
+            _txtSearch.Focus();
+        }
+
+        // ───────────────── منطقة السلة (المنتصف) ─────────────────
+        private void BuildCartArea()
+        {
+            var container = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Bg, Padding = new Padding(16, 12, 16, 12) };
+
+            // شريط عنوان السلة
+            var header = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = AppTheme.CardBg, Padding = new Padding(16, 0, 16, 0) };
+            header.Paint += (s, e) =>
+                e.Graphics.DrawLine(new Pen(AppTheme.BorderColor), 0, header.Height - 1, header.Width, header.Height - 1);
+
+            var lblTitle = new Label
+            {
+                Text = "الفاتورة الحالية",
+                Dock = DockStyle.Right,
+                Width = 160,
+                TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 ForeColor = AppTheme.TextPrimary
             };
 
-            var discountRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 46, ColumnCount = 2 };
-            discountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-            discountRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
-            var lblDiscount = new Label { Text = "خصم %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtDiscount = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0" };
+            _lblItemsBadge = new Label
+            {
+                Text = "لا توجد بنود",
+                Dock = DockStyle.Right,
+                Width = 130,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = AppTheme.TextMuted
+            };
+
+            _lblStockWarn = new Label
+            {
+                Text = "",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                ForeColor = AppTheme.Danger
+            };
+
+            header.Controls.Add(_lblStockWarn);
+            header.Controls.Add(_lblItemsBadge);
+            header.Controls.Add(lblTitle);
+
+            // شبكة السلة
+            _gridCart = new DataGridView { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
+            StyleCartGrid();
+
+            container.Controls.Add(_gridCart);
+            container.Controls.Add(header);
+
+            Controls.Add(container);
+        }
+
+        private void StyleCartGrid()
+        {
+            UiHelpers.StyleGrid(_gridCart);
+            _gridCart.ReadOnly = false;
+            _gridCart.RowTemplate.Height = 48;
+            _gridCart.Font = new Font("Segoe UI", 12F);
+
+            _gridCart.Columns.Clear();
+
+            _gridCart.Columns.Add("colProduct", "المنتج");
+
+            var cPrice = new DataGridViewCellStyle { Format = "N2", Alignment = DataGridViewContentAlignment.MiddleCenter };
+            _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colPrice", HeaderText = "السعر", DefaultCellStyle = cPrice, ReadOnly = true });
+
+            var colMinus = new DataGridViewButtonColumn { Name = "colMinus", HeaderText = " ", Text = "−", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 6 };
+            colMinus.DefaultCellStyle.ForeColor = AppTheme.Primary;
+            colMinus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
+
+            var colQty = new DataGridViewTextBoxColumn { Name = "colQty", HeaderText = "الكمية", ReadOnly = true, FillWeight = 10 };
+            colQty.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            colQty.DefaultCellStyle.Font = new Font("Segoe UI", 13F, FontStyle.Bold);
+
+            var colPlus = new DataGridViewButtonColumn { Name = "colPlus", HeaderText = " ", Text = "+", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 6 };
+            colPlus.DefaultCellStyle.ForeColor = AppTheme.Success;
+            colPlus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
+
+            var colTotal = new DataGridViewTextBoxColumn { Name = "colTotal", HeaderText = "الإجمالي", ReadOnly = true, FillWeight = 16 };
+            colTotal.DefaultCellStyle = new DataGridViewCellStyle(cPrice) { Font = new Font("Segoe UI", 12F, FontStyle.Bold) };
+
+            var colDelete = new DataGridViewButtonColumn { Name = "colDelete", HeaderText = "حذف", Text = "حذف", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 8 };
+            colDelete.DefaultCellStyle.ForeColor = AppTheme.Danger;
+
+            _gridCart.Columns.AddRange(new DataGridViewColumn[] { colMinus, colQty, colPlus, colTotal, colDelete });
+
+            _gridCart.Columns["colProduct"].FillWeight = 39;
+            _gridCart.Columns["colPrice"].FillWeight = 15;
+            _gridCart.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+            _gridCart.CellClick += GridCart_CellClick;
+        }
+
+        private void GridCart_CellClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            HideSearchPopup();
+
+            if (e.RowIndex < 0 || e.RowIndex >= _cart.Count)
+                return;
+
+            string? colName = _gridCart.Columns[e.ColumnIndex].Name;
+            var item = _cart[e.RowIndex];
+
+            switch (colName)
+            {
+                case "colPlus":
+                    if (_stockByProduct.TryGetValue(item.ProductId, out int stock) &&
+                        _stockByProduct[item.ProductId] > 0 && item.Quantity + 1 > stock)
+                        ShowStockWarn($"تنبيه: المتاح من '{item.ProductName}' هو {stock} فقط");
+                    item.Quantity++;
+                    break;
+
+                case "colMinus":
+                    if (item.Quantity > 1) item.Quantity--;
+                    break;
+
+                case "colDelete":
+                    _cart.RemoveAt(e.RowIndex);
+                    break;
+
+                default:
+                    return;
+            }
+
+            RefreshCart();
+        }
+
+        private void ShowStockWarn(string message)
+        {
+            _lblStockWarn.Text = message;
+            _warnTimer.Stop();
+            _warnTimer.Start();
+        }
+
+        // ───────────────── لوحة الأوامر (يمين) ─────────────────
+        private void BuildActionPanel()
+        {
+            var panel = new Panel { Dock = DockStyle.Right, Width = 388, BackColor = AppTheme.Bg, Padding = new Padding(4, 12, 12, 12) };
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.Bg,
+                Padding = new Padding(0)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            // 1) بطاقة العميل
+            var customerCard = MakeCard(64);
+            _lblCustomer = new Label
+            {
+                Text = "عميل مجهول",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = AppTheme.TextPrimary,
+                Padding = new Padding(0, 0, 10, 0)
+            };
+            var btnCustomer = AppTheme.MakeButton("اختيار العميل", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
+            btnCustomer.Dock = DockStyle.Left;
+            btnCustomer.Width = 128;
+            btnCustomer.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnCustomer.Click += (_, _) => PickCustomer();
+            customerCard.Controls.Add(_lblCustomer);
+            customerCard.Controls.Add(btnCustomer);
+            AddRow(layout, customerCard, 68);
+
+            // 2) بطاقة الإجماليات
+            var totalsCard = MakeCard(128);
+            var totals = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = AppTheme.CardBg };
+            totals.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            totals.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+
+            _lblSubtotal = new Label
+            {
+                Text = "الإجمالي: 0.00",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = AppTheme.TextPrimary
+            };
+            totals.SetColumnSpan(_lblSubtotal, 2);
+            totals.Controls.Add(_lblSubtotal, 0, 0);
+
+            var lblDiscount = new Label { Text = "خصم %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
+            _txtDiscount = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F) };
             _txtDiscount.TextChanged += (_, _) => RefreshTotals();
-            discountRow.Controls.Add(lblDiscount, 0, 0);
-            discountRow.Controls.Add(_txtDiscount, 1, 0);
+            totals.Controls.Add(lblDiscount, 0, 1);
+            totals.Controls.Add(_txtDiscount, 1, 1);
 
-            var taxRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 46, ColumnCount = 2 };
-            taxRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-            taxRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
-            var lblTax = new Label { Text = "ضريبة %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtTax = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0" };
+            var lblTax = new Label { Text = "ضريبة %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
+            _txtTax = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F) };
             _txtTax.TextChanged += (_, _) => RefreshTotals();
-            taxRow.Controls.Add(lblTax, 0, 0);
-            taxRow.Controls.Add(_txtTax, 1, 0);
+            totals.Controls.Add(lblTax, 0, 2);
+            totals.Controls.Add(_txtTax, 1, 2);
 
+            totalsCard.Controls.Add(totals);
+            AddRow(layout, totalsCard, 132);
+
+            // 3) الصافي
             _lblNet = new Label
             {
                 Text = "الصافي: 0.00",
                 Dock = DockStyle.Top,
-                Height = 52,
+                Height = 58,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 17F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = AppTheme.Primary
             };
+            AddRow(layout, _lblNet, 62);
 
-            _btnPay = AppTheme.MakeButton("دفع", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 60);
-            _btnPay.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
+            // 4) زر الدفع الكبير
+            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 78);
+            _btnPay.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             _btnPay.Click += async (_, _) => await CheckoutAsync(suspend: false);
+            AddRow(layout, _btnPay, 82);
 
+            // 5) تعليق + مسح (صفان متجاوران)
             _btnSuspend = AppTheme.MakeButton("تعليق الفاتورة", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
+            _btnSuspend.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             _btnSuspend.Click += async (_, _) => await CheckoutAsync(suspend: true);
 
-            var btnReturn = AppTheme.MakeButton("مرتجع بيع", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 54);
-            btnReturn.Click += (_, _) => ShowReturnForm();
-
-            var btnCash = AppTheme.MakeButton("قبض / صرف نقد", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: Color.FromArgb(191, 219, 254), height: 54);
-            btnCash.Click += (_, _) => ShowCashMovement();
-
-            var btnCloseSession = AppTheme.MakeButton("إغلاق الجلسة (Z)", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 54);
-            btnCloseSession.Click += async (_, _) => await CloseSessionFlowAsync();
-
-            var btnSuspended = AppTheme.MakeButton("الفواتير المعلقة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 54);
-            btnSuspended.Click += (_, _) => ShowSuspendedInvoices();
-
-            var btnReceive = AppTheme.MakeButton("استلام مخزون", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 54);
-            btnReceive.Visible = SessionState.CanReceiveStock;
-            btnReceive.Click += (_, _) => Program.Services.GetRequiredService<ReceiveStockForm>().ShowDialog(this);
-
-            var btnClear = AppTheme.MakeButton("مسح السلة", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
+            var btnClear = AppTheme.MakeButton("مسح السلة", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 54);
+            btnClear.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnClear.FlatAppearance.BorderSize = 1;
+            btnClear.FlatAppearance.BorderColor = AppTheme.BorderColor;
             btnClear.Click += (_, _) =>
             {
                 if (_cart.Count == 0) return;
                 if (ConfirmationDialog.Show(this, "مسح السلة", "هل تريد مسح جميع بنود الفاتورة؟"))
                     ClearCart();
             };
+            AddRow(layout, MakeTwoColumns(_btnSuspend, btnClear), 58);
 
-            Control[] rows =
+            // 6) عنوان قسم العمليات
+            var lblOps = new Label
             {
-                _lblCustomer, btnCustomer, _lblSubtotal, discountRow, taxRow, _lblNet,
-                _btnPay, _btnSuspend, btnReturn, btnCash, btnCloseSession, btnSuspended, btnReceive, btnClear
+                Text = "── عمليات أخرى ──",
+                Dock = DockStyle.Top,
+                Height = 26,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = AppTheme.TextMuted,
+                Font = new Font("Segoe UI", 9F)
             };
+            AddRow(layout, lblOps, 30);
 
-            foreach (var c in rows)
+            // 7) عمليات 2×2
+            var btnReturn = AppTheme.MakeButton("مرتجع بيع", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 52);
+            btnReturn.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnReturn.Margin = new Padding(0, 0, 4, 8);
+            btnReturn.Click += (_, _) => ShowReturnForm();
+
+            var btnCash = AppTheme.MakeButton("قبض وصرف", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: Color.FromArgb(191, 219, 254), height: 52);
+            btnCash.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnCash.Margin = new Padding(4, 0, 0, 8);
+            btnCash.Click += (_, _) => ShowCashMovement();
+
+            var btnSuspended = AppTheme.MakeButton("فواتير معلقة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 52);
+            btnSuspended.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnSuspended.Margin = new Padding(0, 0, 4, 0);
+            btnSuspended.Click += (_, _) => ShowSuspendedInvoices();
+
+            var btnCloseSession = AppTheme.MakeButton("إغلاق (Z)", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 52);
+            btnCloseSession.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnCloseSession.Margin = new Padding(4, 0, 0, 0);
+            btnCloseSession.Click += async (_, _) => await CloseSessionFlowAsync();
+
+            var opsGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 112, ColumnCount = 2, RowCount = 2, BackColor = AppTheme.Bg, Margin = new Padding(0) };
+            opsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            opsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            opsGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            opsGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            btnReturn.Dock = DockStyle.Fill;
+            btnCash.Dock = DockStyle.Fill;
+            btnSuspended.Dock = DockStyle.Fill;
+            btnCloseSession.Dock = DockStyle.Fill;
+            opsGrid.Controls.Add(btnReturn, 0, 0);
+            opsGrid.Controls.Add(btnCash, 1, 0);
+            opsGrid.Controls.Add(btnSuspended, 0, 1);
+            opsGrid.Controls.Add(btnCloseSession, 1, 1);
+            AddRow(layout, opsGrid, 112);
+
+            // 8) استلام المخزون (حسب الصلاحية)
+            var btnReceive = AppTheme.MakeButton("استلام مخزون", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 50);
+            btnReceive.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            btnReceive.Visible = SessionState.CanReceiveStock;
+            btnReceive.Click += (_, _) =>
             {
-                c.Margin = new Padding(0, 0, 0, 10);
-                layout.Controls.Add(c);
-                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            }
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+                Program.Services.GetRequiredService<ReceiveStockForm>().ShowDialog(this);
+                _ = RefreshStockAsync();
+            };
+            AddRow(layout, btnReceive, 54);
+
+            // صف مرن يملأ المساحة المتبقية
+            AddRow(layout, new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Bg }, 0, SizeType.Percent);
 
             panel.Controls.Add(layout);
             Controls.Add(panel);
         }
 
-        // ─────────────────────────────────────────────────
-        // الجلسة
-        // ─────────────────────────────────────────────────
+        private static Panel MakeCard(int height)
+        {
+            var card = new Panel { Dock = DockStyle.Top, Height = height, BackColor = AppTheme.CardBg, Padding = new Padding(8) };
+            card.Paint += (s, e) =>
+            {
+                using var pen = new Pen(AppTheme.BorderColor);
+                var rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
+                using var path = AppTheme.CreateRoundedPath(rect, 10);
+                e.Graphics.DrawPath(pen, path);
+            };
+            return card;
+        }
+
+        private static Control MakeTwoColumns(Control right, Control left)
+        {
+            var two = new TableLayoutPanel { Dock = DockStyle.Top, Height = right.Height, ColumnCount = 2, BackColor = AppTheme.Bg, Margin = new Padding(0) };
+            two.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            two.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            right.Dock = DockStyle.Fill;
+            left.Dock = DockStyle.Fill;
+            right.Margin = new Padding(0, 0, 4, 0);
+            left.Margin = new Padding(4, 0, 0, 0);
+            two.Controls.Add(right, 0, 0);
+            two.Controls.Add(left, 1, 0);
+            return two;
+        }
+
+        private static void AddRow(TableLayoutPanel layout, Control control, int height, SizeType sizeType = SizeType.Absolute)
+        {
+            control.Margin = new Padding(0, 0, 0, 10);
+            control.Dock = sizeType == SizeType.Percent ? DockStyle.Fill : DockStyle.Top;
+            if (sizeType == SizeType.Percent)
+                control.Height = 0;
+            layout.Controls.Add(control);
+            layout.RowStyles.Add(new RowStyle(sizeType, sizeType == SizeType.Percent ? 100 : height));
+        }
+
+        // ───────────────── الجلسة والمخزون ─────────────────
         private async Task OpenSessionAsync()
         {
             int userId = SessionState.CurrentUser?.UserId ?? 0;
@@ -351,78 +793,24 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ─────────────────────────────────────────────────
-        // البحث وإضافة المنتجات
-        // ─────────────────────────────────────────────────
-        private void Search_KeyDown(object? sender, KeyEventArgs e)
+        private async Task RefreshStockAsync()
         {
-            if (e.KeyCode != Keys.Enter)
-                return;
-
-            e.SuppressKeyPress = true;
-            _ = SearchAndAddAsync(_txtSearch.Text?.Trim() ?? "");
-        }
-
-        private async Task SearchAndAddAsync(string term)
-        {
-            if (string.IsNullOrWhiteSpace(term))
-                return;
-
             try
             {
                 using var scope = Program.Services.CreateScope();
-                var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-
-                // محاولة الباركود أولًا
-                var byBarcode = await productService.GetProductByBarcodeAsync(term);
-                if (byBarcode.IsSuccess && byBarcode.Data != null)
-                {
-                    AddToCart(byBarcode.Data);
-                    _txtSearch.Clear();
-                    return;
-                }
-
-                var matches = await productService.GetProductsListAsync(term);
-                if (matches.Count == 0)
-                {
-                    UiHelpers.ShowInfo(this, $"لا يوجد منتج مطابق لـ '{term}'.");
-                    return;
-                }
-
-                if (matches.Count == 1)
-                {
-                    AddToCart(matches[0]);
-                    _txtSearch.Clear();
-                    return;
-                }
-
-                _lstResults.Items.Clear();
-                _lstResults.Tag = matches;
-                foreach (var p in matches)
-                    _lstResults.Items.Add($"{p.Name} — {UiHelpers.Money(p.BasePrice)}");
-                _searchResultsPanel.Visible = true;
-                _searchResultsPanel.BringToFront();
+                var reports = scope.ServiceProvider.GetRequiredService<clsReportService>();
+                var result = await reports.GetInventoryStatusAsync();
+                if (result.IsSuccess && result.Data != null)
+                    _stockByProduct = result.Data.ToDictionary(x => x.ProductId, x => x.QuantityAvailable);
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر البحث عن المنتج.");
+                // عرض المخزون تحسين فقط — لا يعطل البيع
             }
         }
 
-        private void AddSelectedResult()
-        {
-            if (_lstResults.Tag is not List<Common.DTOs.DtoProduct> matches ||
-                _lstResults.SelectedIndex < 0 ||
-                _lstResults.SelectedIndex >= matches.Count)
-                return;
-
-            AddToCart(matches[_lstResults.SelectedIndex]);
-            _searchResultsPanel.Visible = false;
-            _txtSearch.Clear();
-            _txtSearch.Focus();
-        }
-
-        private void AddToCart(Common.DTOs.DtoProduct product)
+        // ───────────────── البحث والإضافة للسلة ─────────────────
+        private void AddToCart(DtoProduct product)
         {
             var existing = _cart.FirstOrDefault(i => i.ProductId == product.ProductId);
             if (existing != null)
@@ -436,36 +824,27 @@ namespace Sayl.UI.Forms
                     Quantity = 1
                 });
 
+            if (_stockByProduct.TryGetValue(product.ProductId, out int stock) &&
+                product.Type == "stock")
+            {
+                int inCart = _cart.First(i => i.ProductId == product.ProductId).Quantity;
+                if (inCart > stock)
+                    ShowStockWarn($"تنبيه: المتاح من '{product.Name}' هو {stock} فقط");
+            }
+
             RefreshCart();
         }
 
-        // ─────────────────────────────────────────────────
-        // السلة والإجماليات
-        // ─────────────────────────────────────────────────
-        private void GridCart_CellClick(object? sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex != _gridCart.Columns["colRemove"].Index)
-                return;
-
-            if (e.RowIndex < _cart.Count)
-            {
-                _cart.RemoveAt(e.RowIndex);
-                RefreshCart();
-            }
-        }
-
+        // ───────────────── السلة والإجماليات ─────────────────
         private void RefreshCart()
         {
-            // قراءة الكميات المعدلة من الشبكة قبل إعادة البناء
-            for (int i = 0; i < _gridCart.Rows.Count && i < _cart.Count; i++)
-            {
-                if (int.TryParse(_gridCart.Rows[i].Cells["colQty"].Value?.ToString(), out int q) && q > 0)
-                    _cart[i].Quantity = q;
-            }
-
             _gridCart.Rows.Clear();
             foreach (var item in _cart)
-                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), item.Quantity, UiHelpers.Money(item.Total));
+                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity, "+", UiHelpers.Money(item.Total), "حذف");
+
+            int totalUnits = _cart.Sum(i => i.Quantity);
+            _lblItemsBadge.Text = _cart.Count == 0 ? "لا توجد بنود" : $"{_cart.Count} بند • {totalUnits} قطعة";
+            _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Primary;
 
             RefreshTotals();
         }
@@ -505,9 +884,7 @@ namespace Sayl.UI.Forms
             RefreshCart();
         }
 
-        // ─────────────────────────────────────────────────
-        // العميل
-        // ─────────────────────────────────────────────────
+        // ───────────────── العميل ─────────────────
         private void PickCustomer()
         {
             using var picker = new CustomerPickerForm();
@@ -519,11 +896,11 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ─────────────────────────────────────────────────
-        // الدفع / التعليق
-        // ─────────────────────────────────────────────────
+        // ───────────────── الدفع / التعليق ─────────────────
         private async Task CheckoutAsync(bool suspend)
         {
+            HideSearchPopup();
+
             if (_cart.Count == 0)
             {
                 UiHelpers.ShowError(this, "السلة فارغة. أضف منتجات أولًا.");
@@ -591,11 +968,10 @@ namespace Sayl.UI.Forms
                 _ = PrintReceiptIfEnabledAsync(result.Data);
 
             ClearCart();
+            await RefreshStockAsync();
         }
 
-        // ─────────────────────────────────────────────────
-        // طباعة الإيصال الحراري تلقائيًا (حسب الإعدادات)
-        // ─────────────────────────────────────────────────
+        // ───────────────── طباعة الإيصال الحراري تلقائيًا ─────────────────
         private async Task PrintReceiptIfEnabledAsync(int invoiceId)
         {
             try
@@ -612,7 +988,7 @@ namespace Sayl.UI.Forms
                 if (!autoPrint || string.IsNullOrWhiteSpace(printerName))
                     return;
 
-                Common.DTOs.ViewModel.InvoicePrintVM? invoice = null;
+                InvoicePrintVM? invoice = null;
                 using (var scope = Program.Services.CreateScope())
                 {
                     var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
@@ -634,13 +1010,12 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ─────────────────────────────────────────────────
-        // المرتجع / النقد / إغلاق الجلسة
-        // ─────────────────────────────────────────────────
+        // ───────────────── المرتجع / النقد / إغلاق الجلسة ─────────────────
         private void ShowReturnForm()
         {
             using var form = new ReturnForm();
             form.ShowDialog(this);
+            _ = RefreshStockAsync();
         }
 
         private void ShowCashMovement()
@@ -678,13 +1053,11 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ─────────────────────────────────────────────────
-        // الفواتير المعلقة والخروج
-        // ─────────────────────────────────────────────────
         private void ShowSuspendedInvoices()
         {
             using var form = new SuspendedInvoicesForm();
             form.ShowDialog(this);
+            _ = RefreshStockAsync();
         }
 
         private async Task LogoutAsync()
