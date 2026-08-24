@@ -84,12 +84,22 @@ namespace Sayl.Core.Services
             catch (InvalidOperationException ex)
             {
                 await transaction.RollbackAsync();
+                // إزالة الكيانات المتتبعة حتى لا تُحقن في العملية القادمة على نفس السياق
+                _dbContext.ChangeTracker.Clear();
                 return Result<int>.Fail(ex.Message);
             }
-            catch
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Result<int>.Fail("فشلت عملية البيع. تم إلغاء جميع التغييرات.");
+                _dbContext.ChangeTracker.Clear();
+                string details = ex.Message;
+                var inner = ex.InnerException;
+                while (inner != null)
+                {
+                    details += " ← " + inner.Message;
+                    inner = inner.InnerException;
+                }
+                return Result<int>.Fail($"فشلت عملية البيع ({ex.GetType().Name}): {details}");
             }
         }
 
@@ -155,11 +165,13 @@ namespace Sayl.Core.Services
             catch (InvalidOperationException ex)
             {
                 await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
                 return Result.Fail(ex.Message);
             }
             catch
             {
                 await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
                 return Result.Fail("فشل إكمال الفاتورة المعلقة.");
             }
         }
@@ -212,11 +224,13 @@ namespace Sayl.Core.Services
             catch (InvalidOperationException ex)
             {
                 await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
                 return Result.Fail(ex.Message);
             }
             catch
             {
                 await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
                 return Result.Fail("فشل إلغاء الفاتورة.");
             }
         }

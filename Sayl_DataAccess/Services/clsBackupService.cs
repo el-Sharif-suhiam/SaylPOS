@@ -32,7 +32,7 @@ namespace Sayl.Core.Services
                 string fileName = $"{dbName}_{DateTime.Now:yyyyMMdd_HHmmss}.bak";
                 string fullPath = Path.Combine(backupFolder, fileName);
 
-                string sql = "BACKUP DATABASE [" + dbName.Replace("]", "]]") + "] TO DISK = @path WITH INIT, NAME = @name, STATS = 0";
+                string sql = "BACKUP DATABASE [" + dbName.Replace("]", "]]") + "] TO DISK = @path WITH INIT, NAME = @name";
                 var parameters = new[]
                 {
                     new SqlParameter("@path", fullPath),
