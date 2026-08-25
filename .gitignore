@@ -17,3 +17,8 @@ packages/
 
 # Rider
 .idea/
+
+# Installer build artifacts
+installer/staging/
+installer/output/
+installer/redist/
