@@ -7,7 +7,7 @@ namespace Sayl.UI.Forms
     /// نافذة الدفع: دفعة واحدة أو دفعات مقسومة (نقدي + شبكة...) مع حساب المتبقي.
     /// تُرجع قائمة الدفعات عبر الخاصية PaymentsList عند النجاح.
     /// </summary>
-    public class PaymentForm : Form
+    public class PaymentForm : DialogForm
     {
         private readonly decimal _netTotal;
         private readonly bool _hasCustomer;
@@ -30,14 +30,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "الدفع";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 560);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label
             {

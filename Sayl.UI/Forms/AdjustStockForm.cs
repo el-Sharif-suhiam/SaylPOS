@@ -8,7 +8,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>تسوية مخزون يدوية: زيادة أو نقصان كمية مع سبب.</summary>
-    public class AdjustStockForm : Form
+    public class AdjustStockForm : DialogForm
     {
         private readonly int? _preselectedProductId;
 
@@ -31,14 +31,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "تسوية مخزون";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 540);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label { Text = "تسوية مخزون يدوية", Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 

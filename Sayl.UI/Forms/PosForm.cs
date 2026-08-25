@@ -78,10 +78,11 @@ namespace Sayl.UI.Forms
         {
             Text = "سيل — نقاط البيع";
             WindowState = FormWindowState.Maximized;
-            MinimumSize = new Size(1150, 700);
+            MinimumSize = new Size(1024, 640);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = AppTheme.Bg;
             RightToLeft = RightToLeft.Yes;
+            Icon = Brand.AppIcon;
 
             BuildCartArea();     // Fill (يُرسّى أخيرًا)
             BuildActionPanel();  // Dock Right
@@ -104,6 +105,11 @@ namespace Sayl.UI.Forms
                 Font = new Font("Segoe UI", 9.5F)
             };
 
+            var _logoMark = Brand.MakeLogo(46, AppTheme.SidebarBg);
+            _logoMark.Dock = DockStyle.Left;
+            _logoMark.Margin = new Padding(0);
+            _logoMark.Padding = new Padding(2);
+
             var lblBrand = new Label
             {
                 Text = "سيل | نقاط البيع",
@@ -119,7 +125,7 @@ namespace Sayl.UI.Forms
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 14F),
-                BackColor = Color.FromArgb(31, 41, 55),
+                BackColor = AppTheme.SidebarHover,
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
@@ -128,8 +134,8 @@ namespace Sayl.UI.Forms
             _txtSearch.KeyDown += Search_KeyDown;
             searchHost.Controls.Add(_txtSearch);
 
-            var btnLogout = AppTheme.MakeButton("خروج", Color.FromArgb(31, 41, 55),
-                foreColor: Color.FromArgb(252, 165, 165), hoverColor: Color.FromArgb(55, 65, 81), height: 50);
+            var btnLogout = AppTheme.MakeButton("خروج", AppTheme.SidebarHover,
+                foreColor: Color.FromArgb(252, 165, 165), hoverColor: AppTheme.PrimaryDark, height: 50);
             btnLogout.Dock = DockStyle.Left;
             btnLogout.Width = 92;
             btnLogout.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
@@ -139,6 +145,7 @@ namespace Sayl.UI.Forms
             top.Controls.Add(_txtSearch.Parent!);
             top.Controls.Add(_lblSession);
             top.Controls.Add(lblBrand);
+            top.Controls.Add(_logoMark);
             top.Controls.Add(btnLogout);
 
             Controls.Add(top);
@@ -482,9 +489,10 @@ namespace Sayl.UI.Forms
             colMinus.DefaultCellStyle.ForeColor = AppTheme.Primary;
             colMinus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
 
-            var colQty = new DataGridViewTextBoxColumn { Name = "colQty", HeaderText = "الكمية", ReadOnly = true, FillWeight = 10 };
+            var colQty = new DataGridViewTextBoxColumn { Name = "colQty", HeaderText = "الكمية", ReadOnly = false, FillWeight = 10 };
             colQty.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             colQty.DefaultCellStyle.Font = new Font("Segoe UI", 13F, FontStyle.Bold);
+            colQty.DefaultCellStyle.BackColor = AppTheme.FieldBg;
 
             var colPlus = new DataGridViewButtonColumn { Name = "colPlus", HeaderText = " ", Text = "+", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 6 };
             colPlus.DefaultCellStyle.ForeColor = AppTheme.Success;
@@ -503,11 +511,52 @@ namespace Sayl.UI.Forms
             _gridCart.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             _gridCart.CellClick += GridCart_CellClick;
+            _gridCart.CellValidating += GridCart_CellValidating;
+            _gridCart.CellEndEdit += GridCart_CellEndEdit;
+        }
+
+        private void GridCart_CellValidating(object? sender, DataGridViewCellValidatingEventArgs e)
+        {
+            if (_gridCart.Columns[e.ColumnIndex].Name != "colQty") return;
+            if (!decimal.TryParse(e.FormattedValue?.ToString()?.Trim(), out _))
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void GridCart_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _cart.Count) return;
+            if (_gridCart.Columns[e.ColumnIndex].Name != "colQty") return;
+
+            var item = _cart[e.RowIndex];
+            string raw = _gridCart[e.ColumnIndex, e.RowIndex].Value?.ToString() ?? "";
+            int qty = decimal.TryParse(raw.Trim(), out decimal d) ? (int)Math.Round(d) : item.Quantity;
+
+            if (qty < 1) qty = 1;
+
+            // حد أقصى صلب: لا تجاوز الكمية المتاحة
+            if (_stockByProduct.TryGetValue(item.ProductId, out int stock) &&
+                stock > 0 && qty > stock)
+            {
+                qty = stock;
+                ShowStockWarn($"تم تقييد الكمية إلى المتاح من '{item.ProductName}' ({stock})");
+            }
+
+            item.Quantity = qty;
+            BeginInvoke(new Action(RefreshCart));
         }
 
         private void GridCart_CellClick(object? sender, DataGridViewCellEventArgs e)
         {
             HideSearchPopup();
+
+            // إثبات الكمية المكتوبة أولًا قبل أي عملية (+ / − / حذف)
+            if (_gridCart.IsCurrentCellInEditMode)
+            {
+                if (!_gridCart.EndEdit())
+                    _gridCart.CancelEdit();
+            }
 
             if (e.RowIndex < 0 || e.RowIndex >= _cart.Count)
                 return;
@@ -518,9 +567,12 @@ namespace Sayl.UI.Forms
             switch (colName)
             {
                 case "colPlus":
-                    if (_stockByProduct.TryGetValue(item.ProductId, out int stock) &&
-                        _stockByProduct[item.ProductId] > 0 && item.Quantity + 1 > stock)
-                        ShowStockWarn($"تنبيه: المتاح من '{item.ProductName}' هو {stock} فقط");
+                    if (_stockByProduct.TryGetValue(item.ProductId, out int stockPlus) &&
+                        stockPlus > 0 && item.Quantity >= stockPlus)
+                    {
+                        ShowStockWarn($"لا يمكن تجاوز المتاح من '{item.ProductName}' ({stockPlus})");
+                        return;
+                    }
                     item.Quantity++;
                     break;
 
@@ -556,7 +608,8 @@ namespace Sayl.UI.Forms
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 BackColor = AppTheme.Bg,
-                Padding = new Padding(0)
+                Padding = new Padding(0),
+                AutoScroll = true
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
@@ -621,12 +674,12 @@ namespace Sayl.UI.Forms
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 17F, FontStyle.Bold),
                 ForeColor = Color.White,
-                BackColor = AppTheme.Primary
+                BackColor = AppTheme.Accent
             };
             AddRow(layout, _lblNet, 62);
 
             // 4) زر الدفع الكبير
-            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 78);
+            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 78);
             _btnPay.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             _btnPay.Click += async (_, _) => await CheckoutAsync(suspend: false);
             AddRow(layout, _btnPay, 82);
@@ -666,7 +719,7 @@ namespace Sayl.UI.Forms
             btnReturn.Margin = new Padding(0, 0, 4, 8);
             btnReturn.Click += (_, _) => ShowReturnForm();
 
-            var btnCash = AppTheme.MakeButton("قبض وصرف", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: Color.FromArgb(191, 219, 254), height: 52);
+            var btnCash = AppTheme.MakeButton("قبض وصرف", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 52);
             btnCash.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnCash.Margin = new Padding(4, 0, 0, 8);
             btnCash.Click += (_, _) => ShowCashMovement();
@@ -814,7 +867,15 @@ namespace Sayl.UI.Forms
         {
             var existing = _cart.FirstOrDefault(i => i.ProductId == product.ProductId);
             if (existing != null)
+            {
+                if (_stockByProduct.TryGetValue(product.ProductId, out int stockAvail) &&
+                    stockAvail > 0 && existing.Quantity >= stockAvail)
+                {
+                    ShowStockWarn($"لا يمكن تجاوز المتاح من '{product.Name}' ({stockAvail})");
+                    return;
+                }
                 existing.Quantity++;
+            }
             else
                 _cart.Add(new CartItem
                 {
@@ -844,7 +905,7 @@ namespace Sayl.UI.Forms
 
             int totalUnits = _cart.Sum(i => i.Quantity);
             _lblItemsBadge.Text = _cart.Count == 0 ? "لا توجد بنود" : $"{_cart.Count} بند • {totalUnits} قطعة";
-            _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Primary;
+            _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Accent;
 
             RefreshTotals();
         }

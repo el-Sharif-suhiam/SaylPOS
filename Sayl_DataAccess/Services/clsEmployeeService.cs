@@ -49,14 +49,14 @@ namespace Sayl.Core.Services
 
             var employee = new Employee
             {
-                Name = clsValidation.ValidateString("Name", dtoEmployee.Name),
+                Name = clsValidation.ValidateString(dtoEmployee.Name, "Name"),
                 Phone = string.IsNullOrWhiteSpace(dtoEmployee.Phone) ? null : dtoEmployee.Phone,
                 Email = string.IsNullOrWhiteSpace(dtoEmployee.Email) ? null : dtoEmployee.Email,
                 Salary = dtoEmployee.Salary,
                 HireDate = dtoEmployee.HireDate.HasValue ? dtoEmployee.HireDate.Value : null,
                 Address = string.IsNullOrWhiteSpace(dtoEmployee.Address) ? null : dtoEmployee.Address,
                 Status = dtoEmployee.Status.ToLower(),
-                Position = clsValidation.ValidateString("Position", dtoEmployee.Position),
+                Position = clsValidation.ValidateString(dtoEmployee.Position, "Position"),
                 Department = string.IsNullOrWhiteSpace(dtoEmployee.Department) ? null : dtoEmployee.Department
             };
 
@@ -75,7 +75,7 @@ namespace Sayl.Core.Services
                 return Result.Fail("الموظف غير موجود.");
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Name))
-                employee.Name = clsValidation.ValidateString("Name", dtoEmployee.Name);
+                employee.Name = clsValidation.ValidateString(dtoEmployee.Name, "Name");
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Phone))
                 employee.Phone = dtoEmployee.Phone;

@@ -11,7 +11,7 @@ namespace Sayl.UI.Forms
     /// <summary>
     /// قائمة الفواتير المعلقة: استكمال (مع الدفع) أو إلغاء.
     /// </summary>
-    public class SuspendedInvoicesForm : Form
+    public class SuspendedInvoicesForm : DialogForm
     {
         private DataGridView _grid = null!;
         private Button _btnResume = null!;
@@ -31,14 +31,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "الفواتير المعلقة";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(640, 560);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label
             {

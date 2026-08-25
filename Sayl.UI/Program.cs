@@ -19,13 +19,14 @@ namespace Sayl.UI
             // ترميزات Windows (CP1256 للعربية على الطابعات الحرارية)
             System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
-            // تسجيل الأخطاء غير المتوقعة في ملف للتشخيص
+            // تسجيل الأخطاء غير المتوقعة في ملف للتشخيص + إظهارها للمستخدم (لا فشل صامت)
             Application.ThreadException += (_, e) =>
-                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
-                    $"[{DateTime.Now:HH:mm:ss}] THREAD: {e.Exception}\n");
+            {
+                LogError("THREAD", e.Exception);
+                ShowUnexpectedError(e.Exception);
+            };
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
-                    $"[{DateTime.Now:HH:mm:ss}] UNHANDLED: {e.ExceptionObject}\n");
+                LogError("UNHANDLED", e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString()));
 
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
@@ -37,17 +38,23 @@ namespace Sayl.UI
 
             var services = new ServiceCollection();
             services.AddSaylServices(connectionString);
-            services.AddTransient<LoginForm>();
+
+            // مصنع LoginForm: يربط حدث النجاح بكل نسخة جديدة (بعد تسجيل الخروج تُبنى نسخة جديدة).
+            services.AddTransient<LoginForm>(_ =>
+            {
+                var login = new LoginForm();
+                login.LoginSucceeded += _ => NavigateAfterLogin();
+                return login;
+            });
+
             services.AddTransient<MainForm>();
             services.AddTransient<PosForm>();
             services.AddTransient<AboutForm>();
+            services.AddTransient<ReceiveStockForm>();
 
             Services = services.BuildServiceProvider();
 
-            var login = Services.GetRequiredService<LoginForm>();
-            login.LoginSucceeded += _ => NavigateAfterLogin();
-
-            Navigator = new AppNavigator(login);
+            Navigator = new AppNavigator(Services.GetRequiredService<LoginForm>());
             Application.Run(Navigator);
         }
 
@@ -63,9 +70,30 @@ namespace Sayl.UI
             }
             catch (Exception ex)
             {
-                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
-                    $"[{DateTime.Now:HH:mm:ss}] NAVIGATE: {ex}\n");
-                throw;
+                LogError("NAVIGATE", ex);
+                ShowUnexpectedError(ex);
+            }
+        }
+
+        /// <summary>سجل الأخطاء مع التاريخ الكامل.</summary>
+        public static void LogError(string source, Exception ex) =>
+            File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {source}: {ex}\n");
+
+        /// <summary>رسالة خطأ مرئية بالعربية عند أي خطأ غير متوقع في الواجهة.</summary>
+        private static void ShowUnexpectedError(Exception ex)
+        {
+            try
+            {
+                MessageBox.Show(
+                    "حدث خطأ غير متوقع:\n" + ex.Message +
+                    "\n\nتم تسجيل التفاصيل في ملف ui-error.log بجوار البرنامج.",
+                    "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+            }
+            catch
+            {
+                // لا شيء أخطر من فشل إظهار رسالة الخطأ نفسها
             }
         }
     }

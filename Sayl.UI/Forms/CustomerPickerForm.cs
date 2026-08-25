@@ -9,7 +9,7 @@ namespace Sayl.UI.Forms
     /// اختيار عميل (بحث + اختيار + إضافة سريعة).
     /// بعد الإغلاق بـ OK تكون الخاصية SelectedCustomer قد عُيِّنت.
     /// </summary>
-    public class CustomerPickerForm : Form
+    public class CustomerPickerForm : DialogForm
     {
         private TextBox _txtSearch = null!;
         private DataGridView _grid = null!;
@@ -29,36 +29,60 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "اختيار العميل";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(560, 560);
+            ClientSize = new Size(620, 600);
+            MinimumSize = new Size(500, 440);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
+
+            // تخطيط متجاوب: شريط علوي (عنوان + بحث) ثم شبكة تتمدد ثم أزرار سفلية
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(16, 12, 16, 12)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // العنوان + البحث
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الشبكة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));   // الأزرار
+
+            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
 
             var lblTitle = new Label
             {
                 Text = "اختيار العميل",
-                Bounds = new Rectangle(0, 18, 560, 32),
-                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
                 Font = AppTheme.FontHeading,
-                ForeColor = AppTheme.TextPrimary
+                ForeColor = AppTheme.TextPrimary,
+                Margin = new Padding(0, 0, 8, 0)
             };
 
             _txtSearch = new TextBox
             {
-                Bounds = new Rectangle(30, 58, 380, 40),
-                Font = AppTheme.FontBody
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 11F),
+                Margin = new Padding(4, 8, 4, 8)
             };
             _txtSearch.PlaceholderText = "ابحث بالاسم أو الجوال ثم Enter";
 
             var btnSearch = AppTheme.MakeButton("بحث", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnSearch.Bounds = new Rectangle(420, 58, 110, 40);
+            btnSearch.Dock = DockStyle.Fill;
+            btnSearch.Margin = new Padding(0, 6, 0, 6);
             btnSearch.Click += async (_, _) => await LoadCustomersAsync(_txtSearch.Text?.Trim() ?? "");
 
-            _grid = new DataGridView { Bounds = new Rectangle(30, 112, 500, 330) };
+            header.Controls.Add(lblTitle, 0, 0);
+            header.Controls.Add(_txtSearch, 1, 0);
+            header.Controls.Add(btnSearch, 2, 0);
+
+            _grid = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false; // نضيف زر اختيار لكل صف
             _grid.Columns.Add("colId", "الرقم");
@@ -82,15 +106,27 @@ namespace Sayl.UI.Forms
             _grid.CellDoubleClick += (_, _) => PickSelected();
 
             _btnPick = AppTheme.MakeButton("إضافة عميل جديد", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover);
-            _btnPick.Bounds = new Rectangle(30, 456, 240, 50);
+            _btnPick.Dock = DockStyle.Fill;
+            _btnPick.Margin = new Padding(0, 6, 4, 0);
             _btnPick.Click += async (_, _) => await QuickAddCustomerAsync();
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnClose.Bounds = new Rectangle(390, 456, 140, 50);
+            btnClose.Dock = DockStyle.Fill;
+            btnClose.Margin = new Padding(4, 6, 0, 0);
             btnClose.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[] { lblTitle, _txtSearch, btnSearch, _grid, _btnPick, btnClose });
+            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            footer.Controls.Add(_btnPick, 0, 0);
+            footer.Controls.Add(btnClose, 1, 0);
+
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(_grid, 0, 1);
+            root.Controls.Add(footer, 0, 2);
+
+            Controls.Add(root);
             CancelButton = btnClose;
             AcceptButton = btnSearch;
         }

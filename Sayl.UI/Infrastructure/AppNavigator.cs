@@ -13,7 +13,7 @@ namespace Sayl.UI.Infrastructure
             Show(initial);
         }
 
-        /// <summary>عرض نافذة جديدة وإخفاء الحالية. تُغلق بقية النوافذ عند إغلاق النافذة الحالية.</summary>
+        /// <summary>عرض نافذة جديدة وإخفاء الحالية (الإغلاق يبقى حدثًا عند إغلاق النافذة الحالية فقط).</summary>
         public void Show(Form next)
         {
             var previous = _current;

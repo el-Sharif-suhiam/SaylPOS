@@ -7,7 +7,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>استلام مخزون جديد: منتج + رقم دفعة + كمية + تاريخ انتهاء (اختياري).</summary>
-    public class ReceiveStockForm : Form
+    public class ReceiveStockForm : DialogForm
     {
         private TextBox _txtSearch = null!;
         private ListBox _lstProducts = null!;
@@ -27,14 +27,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "استلام مخزون";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(560, 620);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label
             {

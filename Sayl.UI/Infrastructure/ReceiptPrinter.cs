@@ -43,7 +43,18 @@ namespace Sayl.UI.Infrastructure
             [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
         }
 
-        public static IEnumerable<string> GetInstalledPrinters() => System.Drawing.Printing.PrinterSettings.InstalledPrinters.Cast<string>();
+        public static IEnumerable<string> GetInstalledPrinters()
+        {
+            // قد يفشل تعداد الطابعات إذا كانت خدمة الطباعة متوقفة (RPC unavailable) — لا نعطل الواجهة.
+            try
+            {
+                return System.Drawing.Printing.PrinterSettings.InstalledPrinters.Cast<string>().ToList();
+            }
+            catch
+            {
+                return Enumerable.Empty<string>();
+            }
+        }
 
         /// <summary>إرسال بايتات خام إلى طابعة.</summary>
         private static bool SendBytesToPrinter(string printerName, byte[] bytes)

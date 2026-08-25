@@ -8,7 +8,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>عرض تفاصيل فاتورة (بنود ومدفوعات) مع إمكانية الطباعة.</summary>
-    public class InvoiceDetailsForm : Form
+    public class InvoiceDetailsForm : DialogForm
     {
         private readonly int _invoiceId;
 
@@ -28,27 +28,50 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "تفاصيل الفاتورة";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(680, 720);
+            ClientSize = new Size(680, 700);
+            MinimumSize = new Size(520, 440);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
+
+            // تخطيط متجاوب: الجداول تتمدد وتنكمش مع النافذة دون قصّ أو تراكب
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(16, 12, 16, 12)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));   // الترويسة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));   // «البنود»
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 46));    // جدول البنود
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));   // «المدفوعات»
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 24));    // جدول المدفوعات
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الإجماليات
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));   // أزرار
 
             _lblHeader = new Label
             {
                 Text = "جارٍ التحميل...",
-                Bounds = new Rectangle(20, 14, 640, 92),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopRight,
                 Font = new Font("Segoe UI", 11F),
                 ForeColor = AppTheme.TextPrimary
             };
 
-            var lblItems = new Label { Text = "البنود", Bounds = new Rectangle(20, 112, 640, 26), TextAlign = ContentAlignment.MiddleRight, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblItems = new Label
+            {
+                Text = "البنود",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = AppTheme.FontHeading,
+                ForeColor = AppTheme.TextPrimary
+            };
 
-            _gridItems = new DataGridView { Bounds = new Rectangle(20, 140, 640, 240) };
+            _gridItems = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridItems);
             _gridItems.Columns.Add("colProduct", "المنتج");
             _gridItems.Columns.Add("colBatch", "الدفعة");
@@ -61,9 +84,16 @@ namespace Sayl.UI.Forms
             _gridItems.Columns["colPrice"].FillWeight = 17;
             _gridItems.Columns["colTotal"].FillWeight = 17;
 
-            var lblPayments = new Label { Text = "المدفوعات", Bounds = new Rectangle(20, 388, 640, 26), TextAlign = ContentAlignment.MiddleRight, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblPayments = new Label
+            {
+                Text = "المدفوعات",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = AppTheme.FontHeading,
+                ForeColor = AppTheme.TextPrimary
+            };
 
-            _gridPayments = new DataGridView { Bounds = new Rectangle(20, 416, 640, 130) };
+            _gridPayments = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridPayments);
             _gridPayments.Columns.Add("colDate", "التاريخ");
             _gridPayments.Columns.Add("colMethod", "الطريقة");
@@ -75,24 +105,38 @@ namespace Sayl.UI.Forms
             _lblTotals = new Label
             {
                 Text = "",
-                Bounds = new Rectangle(20, 552, 640, 56),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                BackColor = AppTheme.FieldBg
+                BackColor = AppTheme.FieldBg,
+                Padding = new Padding(8, 0, 8, 0)
             };
 
             var btnPrint = AppTheme.MakeButton("طباعة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnPrint.Bounds = new Rectangle(20, 626, 200, 50);
+            btnPrint.Dock = DockStyle.Fill;
+            btnPrint.Margin = new Padding(0, 0, 4, 0);
             btnPrint.Click += (_, _) => PrintInvoice();
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnClose.Bounds = new Rectangle(460, 626, 200, 50);
+            btnClose.Dock = DockStyle.Fill;
+            btnClose.Margin = new Padding(4, 0, 0, 0);
             btnClose.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[]
-            {
-                _lblHeader, lblItems, _gridItems, lblPayments, _gridPayments, _lblTotals, btnPrint, btnClose
-            });
+            var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            buttons.Controls.Add(btnPrint, 0, 0);
+            buttons.Controls.Add(btnClose, 1, 0);
+
+            root.Controls.Add(_lblHeader, 0, 0);
+            root.Controls.Add(lblItems, 0, 1);
+            root.Controls.Add(_gridItems, 0, 2);
+            root.Controls.Add(lblPayments, 0, 3);
+            root.Controls.Add(_gridPayments, 0, 4);
+            root.Controls.Add(_lblTotals, 0, 5);
+            root.Controls.Add(buttons, 0, 6);
+
+            Controls.Add(root);
             CancelButton = btnClose;
         }
 

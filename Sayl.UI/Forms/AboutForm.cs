@@ -3,51 +3,72 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>نافذة «حول البرنامج»: اسم المشروع، الإصدار، ووصف مختصر.</summary>
-    public class AboutForm : Form
+    public class AboutForm : DialogForm
     {
         public AboutForm()
         {
             Text = "حول البرنامج";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(460, 380);
+            ClientSize = new Size(460, 410);
+            MinimumSize = new Size(420, 370);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 20);
+            CornerRadius = 20;
 
-            var header = new Panel
+            var root = new TableLayoutPanel
             {
-                Bounds = new Rectangle(0, 0, 460, 130),
-                BackColor = AppTheme.Primary
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                Padding = new Padding(0)
             };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));   // الترويسة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));    // الإصدار
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // الوصف
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));    // الزر
 
-            var lblLogo = new Label
+            // ── الترويسة: شعار دائري + الاسم على خلفية زرقاء ──
+            var header = new TableLayoutPanel
             {
-                Text = "س",
-                Bounds = new Rectangle(194, 14, 72, 72),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 30F, FontStyle.Bold),
-                ForeColor = Color.White,
-                BackColor = Color.FromArgb(29, 78, 216)
+                Dock = DockStyle.Fill,
+                BackColor = AppTheme.Primary,
+                ColumnCount = 1,
+                Margin = new Padding(0)
             };
-            AppTheme.ApplyRoundedRegion(lblLogo, 36);
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+
+            var logoHost = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Primary };
+            var logo = Brand.MakeLogo(88, AppTheme.Primary);
+
+            void CenterLogo()
+            {
+                logo.Location = new Point(
+                    (logoHost.Width - logo.Width) / 2,
+                    (logoHost.Height - logo.Height) / 2);
+            }
+            logoHost.Resize += (_, _) => CenterLogo();
+            logoHost.Controls.Add(logo);
 
             var lblName = new Label
             {
                 Text = "سيل — Sayl",
-                Bounds = new Rectangle(0, 92, 460, 30),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 15F, FontStyle.Bold),
                 ForeColor = Color.White,
-                BackColor = Color.Transparent
+                Font = new Font("Segoe UI", 14.5F, FontStyle.Bold)
             };
+
+            header.Controls.Add(logoHost, 0, 0);
+            header.Controls.Add(lblName, 0, 1);
 
             var lblVersion = new Label
             {
                 Text = "الإصدار 1.0.0",
-                Bounds = new Rectangle(0, 148, 460, 24),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextMuted
             };
@@ -55,22 +76,24 @@ namespace Sayl.UI.Forms
             var lblDescription = new Label
             {
                 Text = "نظام متكامل للمبيعات وإدارة المخزون\nللمتاجر والصيدليات والمطاعم والأعمال الصغيرة.\n\nمبني على .NET 10 و SQL Server وواجهات WinForms.",
-                Bounds = new Rectangle(40, 182, 380, 110),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopCenter,
-                ForeColor = AppTheme.TextPrimary
+                ForeColor = AppTheme.TextPrimary,
+                Padding = new Padding(24, 10, 24, 0)
             };
 
+            var btnCloseHost = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(24, 8, 24, 12) };
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnClose.Bounds = new Rectangle(60, 304, 340, 50);
+            btnClose.Dock = DockStyle.Fill;
             btnClose.DialogResult = DialogResult.Cancel;
+            btnCloseHost.Controls.Add(btnClose);
 
-            header.Controls.Add(lblName);
-            header.Controls.Add(lblLogo);
-            Controls.Add(header);
-            Controls.Add(lblVersion);
-            Controls.Add(lblDescription);
-            Controls.Add(btnClose);
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(lblVersion, 0, 1);
+            root.Controls.Add(lblDescription, 0, 2);
+            root.Controls.Add(btnCloseHost, 0, 3);
 
+            Controls.Add(root);
             CancelButton = btnClose;
         }
     }

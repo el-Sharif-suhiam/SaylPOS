@@ -10,7 +10,7 @@ namespace Sayl.UI.Forms
     /// <summary>
     /// مرتجع بيع في نقطة البيع: إدخال رقم الفاتورة، اختيار الكميات المرتجعة، تنفيذ المرتجع.
     /// </summary>
-    public class ReturnForm : Form
+    public class ReturnForm : DialogForm
     {
         private TextBox _txtInvoiceId = null!;
         private Button _btnLoad = null!;
@@ -30,14 +30,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "مرتجع بيع";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(620, 600);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label { Text = "مرتجع بيع", Bounds = new Rectangle(0, 18, 620, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 

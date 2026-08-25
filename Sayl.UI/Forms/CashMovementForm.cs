@@ -6,7 +6,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>قبض/صرف نقد داخل جلسة البيع (معاملات خارج المبيعات).</summary>
-    public class CashMovementForm : Form
+    public class CashMovementForm : DialogForm
     {
         private readonly int _sessionId;
 
@@ -26,14 +26,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "قبض / صرف نقد";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 400);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label { Text = "حركة نقدية", Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 

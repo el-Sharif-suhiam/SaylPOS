@@ -6,7 +6,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>فتح جلسة بيع جديدة: إدخال النقد الافتتاحي في الدرج.</summary>
-    public class OpenSessionForm : Form
+    public class OpenSessionForm : DialogForm
     {
         private TextBox _txtOpening = null!;
 
@@ -20,14 +20,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "فتح جلسة بيع";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 320);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label { Text = "فتح جلسة بيع جديدة", Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 

@@ -7,14 +7,16 @@ namespace Sayl.UI.Infrastructure
     /// </summary>
     internal static class AppTheme
     {
-        // ── الألوان ──
-        public static readonly Color Primary = Color.FromArgb(37, 99, 235);
-        public static readonly Color PrimaryDark = Color.FromArgb(29, 78, 216);
-        public static readonly Color PrimaryLight = Color.FromArgb(219, 234, 254);
+        // ── الألوان (هوية سيل: كحلي #004080 + برتقالي #FF8C00) ──
+        public static readonly Color Primary = Color.FromArgb(0, 64, 128);          // #004080
+        public static readonly Color PrimaryDark = Color.FromArgb(0, 51, 95);       // #00335F
+        public static readonly Color PrimaryLight = Color.FromArgb(220, 233, 247);  // تدرج فاتح كحلي
+        public static readonly Color Accent = Color.FromArgb(255, 140, 0);          // #FF8C00
+        public static readonly Color AccentDark = Color.FromArgb(216, 118, 0);      // #D87600
         public static readonly Color Bg = Color.FromArgb(243, 244, 246);
         public static readonly Color CardBg = Color.White;
-        public static readonly Color SidebarBg = Color.FromArgb(17, 24, 39);
-        public static readonly Color SidebarHover = Color.FromArgb(31, 41, 55);
+        public static readonly Color SidebarBg = Color.FromArgb(0, 43, 84);         // #002B54
+        public static readonly Color SidebarHover = Color.FromArgb(11, 59, 105);    // #0B3B69
         public static readonly Color BorderColor = Color.FromArgb(229, 231, 235);
         public static readonly Color FieldBg = Color.FromArgb(249, 250, 251);
         public static readonly Color TextPrimary = Color.FromArgb(17, 24, 39);
@@ -90,6 +92,45 @@ namespace Sayl.UI.Infrastructure
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = hoverColor ?? ControlPaint.Dark(backColor, 0.05f);
             b.FlatAppearance.MouseDownBackColor = hoverColor ?? ControlPaint.Dark(backColor, 0.1f);
+            return b;
+        }
+
+        /// <summary>
+        /// زر دائري مثالي مرسوم بتنعيم كامل (Anti-Alias) بدل قصّ Region المسنن.
+        /// parentBack يطابق لون خلفية النافذة لتبقى زوايا المربع غير مرئية.
+        /// </summary>
+        public static Button MakeCircleButton(string text, int diameter, Color back, Color hoverBack,
+            Color fore, Color parentBack, float fontSize = 13f)
+        {
+            bool hovered = false;
+            var b = new Button
+            {
+                Text = text,
+                Size = new Size(diameter, diameter),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = fore,
+                BackColor = parentBack,
+                Font = new Font("Segoe UI", fontSize, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = parentBack;
+            b.FlatAppearance.MouseDownBackColor = parentBack;
+
+            b.Paint += (_, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                var rect = new Rectangle(1, 1, b.Width - 3, b.Height - 3);
+                using var brush = new SolidBrush(hovered ? hoverBack : back);
+                g.FillEllipse(brush, rect);
+                TextRenderer.DrawText(g, text, b.Font, rect, fore,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPadding);
+            };
+            b.MouseEnter += (_, _) => { hovered = true; b.Invalidate(); };
+            b.MouseLeave += (_, _) => { hovered = false; b.Invalidate(); };
             return b;
         }
     }

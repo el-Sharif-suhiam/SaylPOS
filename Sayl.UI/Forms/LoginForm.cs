@@ -12,7 +12,7 @@ namespace Sayl.UI.Forms
     /// شاشة تسجيل الدخول: اختيار المستخدم من القائمة + كلمة المرور.
     /// عند النجاح تُطلق حدث LoginSucceeded ويتولى Program فتح الواجهة المناسبة.
     /// </summary>
-    public class LoginForm : Form
+    public class LoginForm : DialogForm
     {
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HTCAPTION = 0x2;
@@ -57,36 +57,41 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "تسجيل الدخول — سيل";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(560, 620);
             BackColor = AppTheme.SidebarBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             KeyPreview = true;
-            AppTheme.ApplyRoundedRegion(this, 26);
+            CornerRadius = 26;
+            Icon = Brand.AppIcon;
 
             MouseDown += StartDrag;
+
+            // شعار الهوية: موجة + سهم + ميزان
+            var logo = Brand.MakeLogo(96, AppTheme.SidebarBg);
+            logo.Bounds = new Rectangle((560 - 96) / 2, 22, 96, 96);
 
             var lblBrand = new Label
             {
                 Text = "سيل",
-                Bounds = new Rectangle(0, 52, 560, 64),
+                Bounds = new Rectangle(0, 118, 560, 34),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
                 BackColor = Color.Transparent,
-                Font = new Font("Segoe UI", 32F, FontStyle.Bold)
+                Font = new Font("Segoe UI", 17F, FontStyle.Bold)
             };
 
             var lblTagline = new Label
             {
-                Text = "نظام المبيعات وإدارة المخزون",
-                Bounds = new Rectangle(0, 118, 560, 26),
+                Text = "نظام سيل لإدارة المبيعات المتدفقة",
+                Bounds = new Rectangle(0, 150, 560, 20),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(156, 163, 175),
                 BackColor = Color.Transparent
             };
 
+            logo.MouseDown += StartDrag;
             lblBrand.MouseDown += StartDrag;
             lblTagline.MouseDown += StartDrag;
 
@@ -189,35 +194,17 @@ namespace Sayl.UI.Forms
             card.Controls.Add(_btnLogin);
             card.Controls.Add(_lblError);
 
-            var btnAbout = new Button
-            {
-                Text = "؟",
-                Bounds = new Rectangle(16, 16, 42, 42),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = AppTheme.TextOnDark,
-                BackColor = AppTheme.SidebarHover,
-                Font = AppTheme.FontHeading,
-                Cursor = Cursors.Hand
-            };
-            btnAbout.FlatAppearance.BorderSize = 0;
-            btnAbout.FlatAppearance.MouseOverBackColor = AppTheme.PrimaryDark;
-            AppTheme.ApplyRoundedRegion(btnAbout, 21);
+            var btnAbout = AppTheme.MakeCircleButton("؟", 44,
+                back: AppTheme.SidebarHover, hoverBack: AppTheme.PrimaryDark,
+                fore: AppTheme.TextOnDark, parentBack: AppTheme.SidebarBg, fontSize: 16f);
+            btnAbout.Bounds = new Rectangle(16, 16, 44, 44);
             btnAbout.Click += (_, _) =>
                 Program.Services.GetRequiredService<AboutForm>().ShowDialog(this);
 
-            var btnClose = new Button
-            {
-                Text = "×",
-                Bounds = new Rectangle(ClientSize.Width - 58, 16, 42, 42),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = AppTheme.TextOnDark,
-                BackColor = AppTheme.SidebarHover,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnClose.FlatAppearance.BorderSize = 0;
-            btnClose.FlatAppearance.MouseOverBackColor = AppTheme.Danger;
-            AppTheme.ApplyRoundedRegion(btnClose, 21);
+            var btnClose = AppTheme.MakeCircleButton("×", 44,
+                back: AppTheme.SidebarHover, hoverBack: AppTheme.Danger,
+                fore: AppTheme.TextOnDark, parentBack: AppTheme.SidebarBg, fontSize: 15f);
+            btnClose.Bounds = new Rectangle(ClientSize.Width - 60, 16, 44, 44);
             btnClose.Click += (_, _) => Close();
 
             _lblConnectionStatus = new Label
@@ -236,6 +223,7 @@ namespace Sayl.UI.Forms
                 ForeColor = Color.FromArgb(107, 114, 128)
             };
 
+            Controls.Add(logo);
             Controls.Add(lblBrand);
             Controls.Add(lblTagline);
             Controls.Add(card);

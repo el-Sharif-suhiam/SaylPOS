@@ -123,11 +123,12 @@ namespace Sayl.UI.Forms
         {
             Text = "سيل — لوحة التحكم";
             WindowState = FormWindowState.Maximized;
-            MinimumSize = new Size(1150, 700);
+            MinimumSize = new Size(960, 600);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = AppTheme.Bg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
+            Icon = Brand.AppIcon;
 
             var sidebar = new Panel
             {
@@ -159,8 +160,12 @@ namespace Sayl.UI.Forms
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 124));
 
-            // العلامة التجارية
+            // العلامة التجارية: شعار + اسم
             var brandPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+
+            var sidebarLogo = Brand.MakeLogo(42, AppTheme.SidebarBg);
+            sidebarLogo.Dock = DockStyle.Left;
+
             var lblApp = new Label
             {
                 Text = "سيل",
@@ -171,6 +176,7 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(0, 0, 10, 0)
             };
             brandPanel.Controls.Add(lblApp);
+            brandPanel.Controls.Add(sidebarLogo);
             layout.Controls.Add(brandPanel, 0, 0);
 
             // قائمة الأقسام

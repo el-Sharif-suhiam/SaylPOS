@@ -10,9 +10,8 @@ namespace Sayl.UI.Controls
     {
         public static bool Show(IWin32Window? owner, string title, string message, bool dangerStyle = true)
         {
-            using var dlg = new Form
+            using var dlg = new DialogForm
             {
-                FormBorderStyle = FormBorderStyle.None,
                 StartPosition = owner != null ? FormStartPosition.CenterParent : FormStartPosition.CenterScreen,
                 Size = new Size(430, 250),
                 BackColor = AppTheme.CardBg,
@@ -20,7 +19,6 @@ namespace Sayl.UI.Controls
                 ShowInTaskbar = false,
                 KeyPreview = true
             };
-            AppTheme.ApplyRoundedRegion(dlg, 18);
 
             var layout = new TableLayoutPanel
             {

@@ -7,7 +7,7 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.Forms
 {
     /// <summary>إغلاق جلسة البيع (تقرير Z): ملخص النقد + العدّ الفعلي + الفرق.</summary>
-    public class CloseSessionForm : Form
+    public class CloseSessionForm : DialogForm
     {
         private readonly int _sessionId;
 
@@ -29,14 +29,12 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             Text = "إغلاق الجلسة";
-            FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 520);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
-            AppTheme.ApplyRoundedRegion(this, 18);
 
             var lblTitle = new Label { Text = "إغلاق جلسة البيع (تقرير Z)", Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 

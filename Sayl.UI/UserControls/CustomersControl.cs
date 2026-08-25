@@ -29,11 +29,24 @@ namespace Sayl.UI.UserControls
                 Grid.Columns.Add("colBalance", "الرصيد");
                 Grid.Columns.Add("colCredit", "حد الائتمان");
                 Grid.Columns.Add("colStatus", "الحالة");
-                Grid.Columns["colName"].FillWeight = 32;
-                Grid.Columns["colPhone"].FillWeight = 22;
-                Grid.Columns["colBalance"].FillWeight = 16;
-                Grid.Columns["colCredit"].FillWeight = 16;
-                Grid.Columns["colStatus"].FillWeight = 14;
+                Grid.Columns["colName"].FillWeight = 30;
+                Grid.Columns["colPhone"].FillWeight = 20;
+                Grid.Columns["colBalance"].FillWeight = 15;
+                Grid.Columns["colCredit"].FillWeight = 15;
+                Grid.Columns["colStatus"].FillWeight = 12;
+
+                var colDetails = new DataGridViewButtonColumn
+                {
+                    Name = "colDetails",
+                    HeaderText = "",
+                    Text = "التفاصيل",
+                    UseColumnTextForButtonValue = true,
+                    FlatStyle = FlatStyle.Flat,
+                    FillWeight = 8
+                };
+                colDetails.DefaultCellStyle.ForeColor = AppTheme.Primary;
+                colDetails.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+                Grid.Columns.Add(colDetails);
 
                 Grid.Rows.Clear();
                 foreach (var c in _customers.Where(c => c.Party != null))
@@ -53,6 +66,64 @@ namespace Sayl.UI.UserControls
             AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
             AddToolbarButton("تعطيل", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
+
+            if (SessionState.IsAdmin)
+            {
+                AddToolbarGap();
+                AddToolbarButton("إعادة تفعيل", AppTheme.Success, Color.FromArgb(21, 128, 61),
+                    async (_, _) => await ActivateAsync(), 130);
+            }
+
+            Grid.CellClick += Grid_CellClick;
+        }
+
+        private void Grid_CellClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _customers.Count) return;
+            if (Grid.Columns[e.ColumnIndex].Name != "colDetails") return;
+
+            var visible = _customers.Where(c => c.Party != null).ToList();
+            if (e.RowIndex >= visible.Count) return;
+
+            var customer = visible[e.RowIndex];
+            var party = customer.Party!;
+            using var form = new PartyDetailsForm(party,
+                ("الرصيد الحالي", UiHelpers.Money(customer.Balance ?? 0)),
+                ("حد الائتمان", UiHelpers.Money(customer.CreditLimit ?? 0)));
+            form.ShowDialog(FindForm());
+        }
+
+        private async Task ActivateAsync()
+        {
+            int idx = Grid.CurrentRow?.Index ?? -1;
+            var visible = _customers.Where(c => c.Party != null).ToList();
+            if (idx < 0 || idx >= visible.Count)
+            {
+                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                return;
+            }
+
+            var party = visible[idx].Party!;
+            if (party.IsActive)
+            {
+                UiHelpers.ShowInfo(this, $"العميل '{party.Name}' نشط بالفعل.");
+                return;
+            }
+
+            if (!ConfirmationDialog.Show(this, "إعادة تفعيل عميل",
+                    $"سيتم إعادة تفعيل العميل '{party.Name}'. هل أنت متأكد؟", dangerStyle: false))
+                return;
+
+            Common.Results.Result result;
+            using (var scope = Program.Services.CreateScope())
+            {
+                var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
+                result = await partyService.ActivatePartyAsync(party.PartyId);
+            }
+
+            UiHelpers.ShowResult(this, result);
+            if (result.IsSuccess)
+                await LoadDataAsync();
         }
 
         private void EditSelected()

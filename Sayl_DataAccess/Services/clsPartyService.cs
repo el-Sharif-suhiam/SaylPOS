@@ -31,7 +31,7 @@ namespace Sayl.Core.Services
              {
                  Party newParty = new Party
                  {
-                     Name = clsValidation.ValidateString("Name", dtoParty.Name),
+                     Name = clsValidation.ValidateString(dtoParty.Name, "Name"),
                      PartyType = dtoParty.PartyType,
                      IsActive = dtoParty.IsActive,
                      Email = string.IsNullOrWhiteSpace(dtoParty.Email) ? null : dtoParty.Email,
@@ -73,7 +73,7 @@ namespace Sayl.Core.Services
                  return Result.Fail("الطرف غير موجود.");
 
              if (!string.IsNullOrWhiteSpace(dtoParty.Name))
-                 party.Name = clsValidation.ValidateString("Name", dtoParty.Name);
+                 party.Name = clsValidation.ValidateString(dtoParty.Name, "Name");
 
              // السماح بتغيير النوع إلى 'B' فقط إذا كان حاليًا ليس 'B' (اختياري)
              if (party.PartyType != 'B' && dtoParty.PartyType == 'B')

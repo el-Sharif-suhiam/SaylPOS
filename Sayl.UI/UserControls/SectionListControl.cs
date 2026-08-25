@@ -48,6 +48,7 @@ namespace Sayl.UI.UserControls
             btn.Width = width;
             btn.Margin = new Padding(4, 0, 0, 0);
             btn.Padding = new Padding(4, 0, 4, 0);
+            btn.Click += onClick;
             _toolbar.Controls.Add(btn);
             btn.BringToFront();
         }
