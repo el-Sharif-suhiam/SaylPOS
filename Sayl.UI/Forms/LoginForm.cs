@@ -58,7 +58,7 @@ namespace Sayl.UI.Forms
         {
             Text = "تسجيل الدخول — سيل";
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(560, 620);
+            ClientSize = new Size(520, 660);
             BackColor = AppTheme.SidebarBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -69,13 +69,13 @@ namespace Sayl.UI.Forms
             MouseDown += StartDrag;
 
             // شعار الهوية: موجة + سهم + ميزان
-            var logo = Brand.MakeLogo(96, AppTheme.SidebarBg);
-            logo.Bounds = new Rectangle((560 - 96) / 2, 22, 96, 96);
+            var logo = Brand.MakeLogo(84, AppTheme.SidebarBg);
+            logo.Bounds = new Rectangle((560 - 84) / 2, 22, 84, 84);
 
             var lblBrand = new Label
             {
                 Text = "سيل",
-                Bounds = new Rectangle(0, 118, 560, 34),
+                Bounds = new Rectangle(0, 105, 560, 38),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
                 BackColor = Color.Transparent,
@@ -85,7 +85,7 @@ namespace Sayl.UI.Forms
             var lblTagline = new Label
             {
                 Text = "نظام سيل لإدارة المبيعات المتدفقة",
-                Bounds = new Rectangle(0, 150, 560, 20),
+                Bounds = new Rectangle(0, 150, 560, 24),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(156, 163, 175),
                 BackColor = Color.Transparent
@@ -97,7 +97,7 @@ namespace Sayl.UI.Forms
 
             var card = new Panel
             {
-                Bounds = new Rectangle(40, 168, 480, 372),
+                Bounds = new Rectangle(40, 198, 480, 342),
                 BackColor = AppTheme.CardBg
             };
             AppTheme.ApplyRoundedRegion(card, 18);
@@ -210,7 +210,7 @@ namespace Sayl.UI.Forms
             _lblConnectionStatus = new Label
             {
                 Text = "جارٍ التحقق من الاتصال بقاعدة البيانات...",
-                Bounds = new Rectangle(0, 550, 560, 22),
+                Bounds = new Rectangle(0, 586, 560, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextMuted
             };
@@ -218,7 +218,7 @@ namespace Sayl.UI.Forms
             var lblFooter = new Label
             {
                 Text = "© سيل 2026 — جميع الحقوق محفوظة",
-                Bounds = new Rectangle(0, 576, 560, 22),
+                Bounds = new Rectangle(0, 616, 560, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(107, 114, 128)
             };
