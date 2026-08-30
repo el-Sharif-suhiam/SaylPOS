@@ -3,8 +3,8 @@
 ## 1. Overview
 Sayl is a sales and inventory management system built on C# / .NET 10 with SQL Server and EF Core.
 It serves retail stores, pharmacies, restaurants, and small businesses.
-The current UI: WinForms (not started yet).
-Your job: complete the remaining services in the business/data layer first, then help build WinForms UI.
+The UI is WinForms (built): LoginForm, PosForm (cashier), MainForm dashboard with 13 sections.
+All backend services are implemented. Remaining work is listed in TASK.md.
 
 ## 2. Architecture
 - Single-layer services: services combine business logic and data access.
@@ -15,8 +15,13 @@ Your job: complete the remaining services in the business/data layer first, then
 
 ## 3. Projects
 - `Common`: contains DTOs, Enums, Results, Validation.
-- `Sayl.Core`: contains Models, DbContext, Services.
-- `WinForms UI`: not created yet.
+- `Sayl.Core` (folder `Sayl_DataAccess`): contains Models, DbContext, Services.
+- `DependencyInjection`: DI registration extensions.
+- `Sayl.UI`: WinForms UI (Forms, UserControls, Infrastructure/AppTheme).
+- `PosLicensing`: offline RSA-2048 licensing library (HWID-bound licenses).
+- `KeygenTool`: vendor-only WinForms tool that generates key pairs and issues licenses (never ship it).
+- `installer/`: Inno Setup script (English wizard) + build-installer.ps1; auto-installs SQL Express, creates SaylDB, supports MAIN/TERMINAL roles.
+- Licensing is enforced at startup in Sayl.UI Program.cs (`ActivationManager.IsActivated()` before login).
 
 ## 4. Database (main tables)
 - `Parties`: parties (customers/suppliers). Columns: PartyId, PartyType, Name, Phone...
@@ -42,23 +47,19 @@ Your job: complete the remaining services in the business/data layer first, then
 - **Suspended invoice**: when suspending, stock is reserved (increase `QuantityReserved`) without deducting quantity. When completing, actual deduction happens and reservation is released.
 - **Transactions**: complex operations (Checkout) use `BeginTransactionAsync` with full commit/rollback.
 
-## 6. Implemented services
-- `clsPartyService`: add/update/deactivate parties.
-- `clsEmployeeService`: employee management.
-- `clsCustomerService`: customer management.
-- `clsSupplierService`: supplier management.
-- `clsAuthService`: login/logout/change password.
-- `clsUserService`: user management (under review).
-- `clsStockService`: stock receive/sell (FEFO).
-- `clsCheckoutService`: full checkout with suspended invoice.
+## 6. Implemented services (all of them)
+- `clsPartyService`, `clsEmployeeService`, `clsCustomerService`, `clsSupplierService`
+- `clsUsersService`: login/logout/change password/user management (+`clsPermissions`)
+- `clsProductService`: CRUD, barcode lookup, batches list
+- `clsRoleService`, `clsExpenseService`, `clsSettingsService`, `clsBackupService`
+- `clsStockService`: receive/sell (FEFO) + manual adjustment + batch transfer
+- `clsCheckoutService`: full checkout with suspended invoices
+- `clsInvoiceService`: lists, details, print model; `clsPurchaseService`: purchase invoices (used by PurchaseForm)
+- `clsPaymentService`, `clsReturnService` (customer/supplier), `clsPosSessionService`, `clsCashService`
+- `clsReportService`: daily sales, inventory status, profit (COGS), top selling, dashboard summary, sales trend, expiring batches
 
-## 7. Remaining services (to implement)
-- `clsProductService`: add/update/view products.
-- `clsRoleService`: role management.
-- `clsExpenseService`: expense management.
-- `clsReportService`: sales, inventory, profit reports.
-- `clsStockService` additions: stock adjustment, batch transfer.
-- Any other supporting services.
+## 7. Remaining services
+None. Remaining work is outside services — see TASK.md (DB restore, tests, license hardening).
 
 ## 8. Agent instructions
 - Do not change current design or names.

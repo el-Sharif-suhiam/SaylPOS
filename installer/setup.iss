@@ -1,6 +1,5 @@
 ﻿; ============================================================================
-; Sayl POS - Inno Setup script (v3: zero-question database setup,
-; Arabic-first wizard UI)
+; Sayl POS - Inno Setup script (v4: zero-question database setup, English UI)
 ;
 ; Two installation roles, designed for non-technical users:
 ;   MAIN     - installs app + (auto-installs free SQL Server Express if no
@@ -33,11 +32,14 @@ AppVersion={#APP_VERSION}
 AppPublisher=Sayl
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
+; This app installs a machine-wide SQL Server instance, so admin is REQUIRED.
+; No "current user" downgrade - otherwise SQL setup (which needs elevation)
+; cannot run and C:\ and Program Files writes fail.
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog commandline
+PrivilegesRequiredOverridesAllowed=commandline
 OutputDir=output
 OutputBaseFilename=SaylPOS-Setup-{#APP_VERSION}
-Compression=lzma2/max
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\Sayl.UI\Assets\sayl.ico
@@ -46,7 +48,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 
 [Languages]
-Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
@@ -227,7 +228,7 @@ begin
   ErrMsg := '';
   try
     Conn := CreateOleObject('ADODB.Connection');
-    Conn.ConnectionTimeout := 3;
+    Conn.ConnectionTimeout := 2;
     Conn.CommandTimeout := 600;
     Conn.Open(BuildOleDbConnString(InitialCatalog));
     Result := True;
@@ -268,6 +269,13 @@ begin
     if Doc.load(XmlPath) then
     begin
       Content := Doc.documentElement.text;
+      { Defensive: an envelope may begin with a UTF-8 BOM (U+FEFF) if a
+        script was saved with one; SQL Server rejects it as an unknown token.
+        Depending on the ANSI/Unicode layering it may also arrive as '?'. }
+      if (Length(Content) > 0) and (Ord(Content[1]) = 65279) then
+        Content := Copy(Content, 2, Length(Content) - 1);
+      while (Length(Content) > 0) and (Copy(Content, 1, 1) = '?') do
+        Content := Copy(Content, 2, Length(Content) - 1);
       Result := Content <> '';
     end;
   except
@@ -374,10 +382,49 @@ begin
   AppendLog(Log, 'Firewall UDP 1434 rule code ' + IntToStr(ResCode) + '.');
 end;
 
-{ Silently install the bundled SQL Server Express. }
+{ Returns the last non-empty lines of a text file (error tail). }
+function ReadErrorTail(const Path: String; MaxLines: Integer): String;
+var
+  Lines: TStringList;
+  I, Start, Count: Integer;
+begin
+  Result := '';
+  if not FileExists(Path) then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(Path);
+    except
+      Exit;
+    end;
+    Start := Lines.Count - MaxLines;
+    if Start < 0 then Start := 0;
+    Count := 0;
+    for I := Start to Lines.Count - 1 do
+    begin
+      if Trim(Lines[I]) <> '' then
+      begin
+        if Count < MaxLines then
+        begin
+          Result := Result + Trim(Lines[I]) + NL;
+          Count := Count + 1;
+        end;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ Silently install the bundled SQL Server Express.
+  Robust path: unpack the 266 MB bootstrap to a SHORT folder first
+  (deep temp paths break the SQL self-extractor / MSI 260-char limit),
+  then run the extracted setup.exe. Exit codes 0 AND 3010 (success +
+  reboot required) are treated as success - 3010 is NOT a failure. }
 function InstallSqlExpress(Log: TStringList): Boolean;
 var
-  Src, Params: String;
+  Src, Params, SummaryPath: String;
   ResCode: Integer;
 begin
   Result := False;
@@ -387,26 +434,46 @@ begin
     AppendLog(Log, 'ERROR: SQLEXPR_x64_ENU.exe was not found inside the installer.');
     Exit;
   end;
+
+  { SQL Server 2022's SQLEXPR_x64_ENU.exe is a self-contained installer that
+    IGNORES the old /q /x: extraction switch (it extracts nothing), so we run
+    /ACTION=Install directly. The installer always elevates
+    (PrivilegesRequired=admin), so the child inherits admin rights. }
   Params := '/Q /ACTION=Install /IACCEPTSQLSERVERLICENSETERMS ' +
-    '/FEATURES=SQL /INSTANCENAME=' + SaylInstance + ' ' +
+    '/SUPPRESSPRIVACYSTATEMENTNOTICE /FEATURES=SQL ' +
+    '/INSTANCENAME=' + SaylInstance + ' ' +
     '/SQLSVCSTARTUPTYPE=AUTOMATIC /SQLSYSADMINACCOUNTS="BUILTIN\Administrators" ' +
     '/ADDCURRENTUSERASSQLADMIN=True /SECURITYMODE=SQL /SAPWD="' + SqlPass + '" ' +
     '/TCPENABLED=1 /NPENABLED=0 /UPDATEENABLED=0 /ENU /HIDECONSOLE';
-  AppendLog(Log, 'Installing SQL Server Express (5-15 minutes, one time)...');
+  AppendLog(Log, 'Installing SQL Server Express directly from the bundled installer (5-15 minutes, one time)...');
   WizardForm.StatusLabel.Caption :=
-    'جارٍ تثبيت محرك قاعدة البيانات المجاني... يرجى الانتظار (مرة واحدة فقط، من 5 إلى 15 دقيقة)' + NL +
-    'Installing the free database engine... please wait (once only, 5-15 minutes)';
+    'Installing the free database engine... please wait (one time only, 5-15 minutes)';
+  WizardForm.Repaint;
+
   if not Exec(Src, Params, '', SWHIDE, ewWaitUntilTerminated, ResCode) then
   begin
-    AppendLog(Log, 'ERROR: could not launch SQL Server Express setup.');
-    Exit;
+    { Last-resort: re-launch so the SQL setup definitely gets admin rights. }
+    AppendLog(Log, 'WARN: direct launch failed, retrying elevated...');
+    if not ShellExec('runas', Src, Params, '', SW_SHOWNORMAL, ewWaitUntilTerminated, ResCode) then
+    begin
+      AppendLog(Log, 'ERROR: could not launch SQL Server Express setup.');
+      Exit;
+    end;
   end;
-  if ResCode <> 0 then
+
+  { 0 = success; 3010 = success but Windows requests a reboot - BOTH OK }
+  if (ResCode <> 0) and (ResCode <> 3010) then
   begin
-    AppendLog(Log, 'ERROR: SQL Server Express setup exit code ' + IntToStr(ResCode) +
-      '. See C:\Program Files\Microsoft SQL Server\<version>\Setup Bootstrap\Log\Summary.txt');
+    AppendLog(Log, 'ERROR: SQL Server Express setup exit code ' + IntToStr(ResCode) + '.');
+    SummaryPath := ExpandConstant('{commonpf}\Microsoft SQL Server\160\Setup Bootstrap\Log\Summary.txt');
+    if FileExists(SummaryPath) then
+      AppendLog(Log, '--- SQL Server Summary.txt (last entries) ---' + NL +
+        ReadErrorTail(SummaryPath, 15));
     Exit;
   end;
+  if ResCode = 3010 then
+    AppendLog(Log, 'SQL Server Express installed OK, but Windows may request a restart.');
+
   AppendLog(Log, 'SQL Server Express installed OK.');
   Result := True;
 end;
@@ -455,8 +522,38 @@ begin
     Server := '';
 end;
 
+{ Instance keys live under HKLM\SOFTWARE\Microsoft\Microsoft SQL Server.
+  Real engines appear as '<VERSION>.<NAME>' (e.g. 'MSSQL17.SAYL',
+  'MSSQL17.MSSQLSERVER'). We match on the '.<NAME>' suffix so version
+  prefixes pass, while generic keys like 'MSSQLServer' (present on any
+  machine with SQL components) never produce a false positive. }
+function SqlInstanceKeyExists(const InstanceName: String): Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Suffix: String;
+begin
+  Result := False;
+  Suffix := '.' + Uppercase(InstanceName);
+  if RegGetSubkeyNames(HKLM, 'SOFTWARE\Microsoft\Microsoft SQL Server', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      if Pos(Suffix, Uppercase(Names[I])) > 0 then
+      begin
+        Result := True;
+        Exit;
+      end;
+end;
+
+{ NOTE: LocalDB is deliberately NOT a candidate. Probing '(localdb)\...' can
+  AUTO-START the instance, freezing the wizard for 5-15 seconds on dev PCs
+  that happen to have it installed. Shop terminals never use LocalDB - if no
+  real engine exists we install our own SQL Express anyway. }
+
 { Detect an existing local engine or plan a fresh Express install.
-  Used by BOTH the interactive wizard and silent installs. }
+  Used by BOTH the interactive wizard and silent installs.
+  Registry-gated: we only open a real connection to engines that are
+  actually installed, so machines without any SQL Server skip all the
+  multi-second network timeouts entirely. }
 procedure PrepareMainRole;
 var
   SavedPwd: String;
@@ -469,44 +566,47 @@ begin
   DbJustCreated := False;
   Trace('P0: PrepareMainRole start');
 
-  { probe common local instances with Windows authentication }
+  { show activity while probing - paint this first so the brief checks
+    never look like a freeze }
+  DbInfoLabel.Caption :=
+    'Checking this PC for an existing database engine...';
+  WizardForm.Repaint;
+
+  { probe only engines that actually exist on this machine }
   InstanceFound := False;
 
-  FinalServer := '.\' + SaylInstance;
-  Trace('P1: probing .\' + SaylInstance);
-  if TryProbe(FinalServer) then
-    InstanceFound := True;
+  if SqlInstanceKeyExists(SaylInstance) then
+  begin
+    FinalServer := '.\' + SaylInstance;
+    Trace('P1: probing .\' + SaylInstance);
+    if TryProbe(FinalServer) then
+      InstanceFound := True;
+  end;
 
-  if not InstanceFound then
+  if (not InstanceFound) and SqlInstanceKeyExists('SQLEXPRESS') then
   begin
     FinalServer := '.\SQLEXPRESS';
     Trace('P2: probing .\SQLEXPRESS');
     if TryProbe(FinalServer) then
       InstanceFound := True;
   end;
-  if not InstanceFound then
-  begin
-    FinalServer := '(localdb)\MSSQLLocalDB';
-    Trace('P3: probing LocalDB');
-    if TryProbe(FinalServer) then
-      InstanceFound := True;
-  end;
-  if not InstanceFound then
+
+  if (not InstanceFound) and SqlInstanceKeyExists('MSSQLSERVER') then
   begin
     FinalServer := '.';
-    Trace('P4: probing .');
+    Trace('P3: probing .');
     if TryProbe(FinalServer) then
       InstanceFound := True;
   end;
-  Trace('P5: probes done, found=' + IntToStr(Ord(InstanceFound)));
+  Trace('P4: probes done, found=' + IntToStr(Ord(InstanceFound)));
 
   if InstanceFound then
   begin
     UseSqlAuth := False;
-    DbInfoLabel.Caption := 'تم العثور على محرك قواعد بيانات موجود على هذا الجهاز:' + NL +
+    DbInfoLabel.Caption :=
+      'An existing database engine was found on this PC:' + NL +
       FinalServer + NL +
-      'سيتم استخدامه مباشرة، ولن يتم تثبيت أي شيء إضافي.' + NL +
-      '(An existing database engine was found and will be used - nothing extra installed.)';
+      'It will be used directly - nothing extra will be installed.';
   end
   else
   begin
@@ -517,12 +617,62 @@ begin
     else
       SqlPass := GenerateAccessCode();
     DbInfoLabel.Caption :=
-      'سيتم تثبيت محرك قاعدة بيانات مجاني (SQL Server Express) تلقائياً وبصمت تام.' + NL +
-      'هذه الخطوة تتم مرة واحدة فقط وقد تستغرق من 5 إلى 15 دقيقة. لا حاجة للإنترنت.' + NL +
-      '(A free database engine will be installed automatically - once only, no internet needed.)';
+      'A free database engine (SQL Server Express) will be installed automatically and silently.' + NL +
+      'This step runs once only and may take 5-15 minutes. No internet needed.';
   end;
   StateReady := True;
   Trace('P9: PrepareMainRole done, found=' + IntToStr(Ord(InstanceFound)));
+end;
+
+{ Polls the instance until it accepts connections or the timeout passes.
+  SQL Server can take a while to become ready after install/restart, so
+  we never give up after the first failed probe. }
+function WaitForInstanceReady(const Server: String; TimeoutSec: Integer): Boolean;
+var
+  Tries: Integer;
+  ProbeServer: String;
+begin
+  Result := False;
+  Tries := 0;
+  while Tries < (TimeoutSec div 5) do
+  begin
+    ProbeServer := Server;
+    if TryProbe(ProbeServer) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Tries := Tries + 1;
+    if Tries < (TimeoutSec div 5) then
+      Sleep(5000);
+  end;
+end;
+
+{ A previous attempt may have left the SAYL instance installed but its
+  service stopped (e.g. interrupted right after setup, or before reboot).
+  Try to start it instead of blind-reinstalling over an existing engine. }
+procedure TryStartExistingInstance(Log: TStringList);
+var
+  Svc: String;
+  ResCode: Integer;
+begin
+  if InstanceFound then
+    Exit;
+  if SqlInstanceKeyExists(SaylInstance) then
+  begin
+    Svc := 'MSSQL$' + SaylInstance;
+    AppendLog(Log, 'Existing instance ' + SaylInstance +
+      ' found but not reachable - starting service ' + Svc + ' ...');
+    Exec('net.exe', 'start "' + Svc + '"', '', SWHIDE, ewWaitUntilTerminated, ResCode);
+    if WaitForInstanceReady(FinalServer, 120) then
+    begin
+      InstanceFound := True;
+      AppendLog(Log, 'Existing instance ' + FinalServer + ' started successfully.');
+    end
+    else
+      AppendLog(Log, 'WARNING: could not start existing instance ' + FinalServer +
+        ' - it will be repaired/reinstalled.');
+  end;
 end;
 
 { ---------- wizard pages ---------- }
@@ -603,15 +753,15 @@ end;
 
 procedure CreateRolePage;
 begin
-  RolePage := CreateCustomPage(wpWelcome, 'نوع التثبيت / Installation type',
-    'كيف سيُستخدم هذا الجهاز؟ / How will this computer be used?');
+  RolePage := CreateCustomPage(wpWelcome, 'Installation type',
+    'How will this computer be used?');
 
   RoleMainRadio := TRadioButton.Create(RolePage);
   RoleMainRadio.Parent := RolePage.Surface;
   RoleMainRadio.Left := ScaleX(8);
   RoleMainRadio.Top := ScaleY(8);
   RoleMainRadio.Width := ScaleX(430);
-  RoleMainRadio.Caption := 'الجهاز الرئيسي - تثبيت البرنامج وقاعدة البيانات هنا';
+  RoleMainRadio.Caption := 'Main computer - install the program and database here';
   RoleMainRadio.Checked := True;
 
   HintMain := TLabel.Create(RolePage);
@@ -619,45 +769,46 @@ begin
   HintMain.Left := ScaleX(28);
   HintMain.Top := ScaleY(32);
   HintMain.Width := ScaleX(420);
-  HintMain.Height := ScaleY(56);
+  HintMain.Height := ScaleY(68);
+  HintMain.AutoSize := False;
   HintMain.WordWrap := True;
   HintMain.Font.Color := clGrayText;
   HintMain.Caption :=
-    'اختر هذا لمحل بجهاز واحد، أو لأول جهاز في محل يعمل بعدة أجهزة.' + NL +
-    'كل شيء سيتم تلقائياً: البرنامج، قاعدة البيانات، والإعدادات.' + NL +
-    '(Main computer - single-PC shop, or the first PC of a multi-terminal shop.)';
+    'Choose this for a single-PC shop, or for the first PC of a shop with several terminals. ' +
+    'Everything is automatic: the program, the database, and the settings are prepared without any questions.';
 
   RoleTermRadio := TRadioButton.Create(RolePage);
   RoleTermRadio.Parent := RolePage.Surface;
   RoleTermRadio.Left := ScaleX(8);
   RoleTermRadio.Top := ScaleY(104);
   RoleTermRadio.Width := ScaleX(430);
-  RoleTermRadio.Caption := 'جهاز إضافي (كاشير) - يتصل بالبيانات الموجودة على الجهاز الرئيسي';
+  RoleTermRadio.Caption := 'Extra terminal (cashier) - connects to the data on the main PC';
 
   HintTerm := TLabel.Create(RolePage);
   HintTerm.Parent := RolePage.Surface;
   HintTerm.Left := ScaleX(28);
   HintTerm.Top := ScaleY(128);
   HintTerm.Width := ScaleX(420);
-  HintTerm.Height := ScaleY(56);
+  HintTerm.Height := ScaleY(68);
+  HintTerm.AutoSize := False;
   HintTerm.WordWrap := True;
   HintTerm.Font.Color := clGrayText;
   HintTerm.Caption :=
-    'يجب تثبيت الجهاز الرئيسي أولاً. ستحتاج اسمه ورمز الدخول الذي ظهر عند انتهاء تثبيته.' + NL +
-    '(Extra terminal - connects to the main PC over the network.)';
+    'The main PC must be installed first. You will need its computer name and access code, ' +
+    'which were displayed when the main PC setup finished.';
 end;
 
 procedure CreateTermPage;
 begin
-  TermPage := CreateCustomPage(RolePage.ID, 'الاتصال بالجهاز الرئيسي',
-    'أدخل البيانات التي ظهرت عند انتهاء تثبيت الجهاز الرئيسي.');
+  TermPage := CreateCustomPage(RolePage.ID, 'Connect to the main PC',
+    'Enter the details that were shown when the main PC setup finished.');
 
   TermHostLabel := TLabel.Create(TermPage);
   TermHostLabel.Parent := TermPage.Surface;
   TermHostLabel.Left := ScaleX(0);
   TermHostLabel.Top := ScaleY(8);
   TermHostLabel.Width := ScaleX(430);
-  TermHostLabel.Caption := 'اسم الجهاز الرئيسي (مثل: SHOP-PC أو 192.168.1.10):';
+  TermHostLabel.Caption := 'Main computer name (e.g. SHOP-PC or 192.168.1.10):';
 
   TermHostEdit := TEdit.Create(TermPage);
   TermHostEdit.Parent := TermPage.Surface;
@@ -670,7 +821,7 @@ begin
   TermPassLabel.Left := ScaleX(0);
   TermPassLabel.Top := ScaleY(64);
   TermPassLabel.Width := ScaleX(430);
-  TermPassLabel.Caption := 'رمز الدخول (Access Code):';
+  TermPassLabel.Caption := 'Access Code:';
 
   TermPassEdit := TEdit.Create(TermPage);
   TermPassEdit.Parent := TermPage.Surface;
@@ -686,19 +837,20 @@ begin
   TermStatusLabel.Width := ScaleX(430);
   TermStatusLabel.Height := ScaleY(56);
   TermStatusLabel.WordWrap := True;
+  TermStatusLabel.AutoSize := False;
   TermStatusLabel.Font.Color := clGrayText;
   TermStatusLabel.Caption :=
-    'لست متأكداً ماذا تكتب؟ شغّل المثبّت مرة أخرى على الجهاز الرئيسي - ' +
-    'سيظهر اسم الجهاز ورمز الدخول عند الانتهاء.';
+    'Not sure what to type? Run the installer again on the main PC - the ' +
+    'computer name and access code are displayed when it finishes.';
 end;
 
 procedure CreateDbPage;
 begin
   DbPage := CreateInputOptionPage(RolePage.ID,
-    'قاعدة البيانات',
-    'كل شيء تلقائي - لا تحتاج لتغيير أي شيء.',
-    'سيتم إعداد قاعدة البيانات بالكامل دون أي تدخل منك. ' +
-    'الخيارات التالية للاستخدام المتقدم فقط.', False, False);
+    'Database',
+    'Everything is automatic - you do not need to change anything.',
+    'The database will be set up fully automatically. ' +
+    'The options below are for advanced use only.', False, False);
 
   DbInfoLabel := TLabel.Create(DbPage);
   DbInfoLabel.Parent := DbPage.Surface;
@@ -707,6 +859,7 @@ begin
   DbInfoLabel.Width := ScaleX(430);
   DbInfoLabel.Height := ScaleY(72);
   DbInfoLabel.WordWrap := True;
+  DbInfoLabel.AutoSize := False;
   DbInfoLabel.Caption := '';
 
   AdvCheck := TCheckBox.Create(DbPage);
@@ -715,7 +868,7 @@ begin
   AdvCheck.Top := ScaleY(88);
   AdvCheck.Width := ScaleX(430);
   AdvCheck.Caption :=
-    'خيارات متقدمة: استخدام خادم SQL محدد بدلاً من التلقائي (Advanced)';
+    'Advanced: use a specific SQL Server instead of the automatic one';
   AdvCheck.OnClick := @AdvancedToggled;
 
   { --- advanced area (hidden until AdvCheck is ticked) --- }
@@ -836,18 +989,18 @@ begin
   begin
     if Trim(TermHostEdit.Text) = '' then
     begin
-      MsgBox('يرجى كتابة اسم الجهاز الرئيسي.', mbCriticalError, MB_OK);
+      MsgBox('Please enter the main computer name.', mbCriticalError, MB_OK);
       Result := False;
       Exit;
     end;
     if Trim(TermPassEdit.Text) = '' then
     begin
-      MsgBox('يرجى كتابة رمز الدخول.', mbCriticalError, MB_OK);
+      MsgBox('Please enter the access code.', mbCriticalError, MB_OK);
       Result := False;
       Exit;
     end;
     TermStatusLabel.Font.Color := clGrayText;
-    TermStatusLabel.Caption := 'جارٍ التحقق من الاتصال...';
+    TermStatusLabel.Caption := 'Checking connection...';
 
     FinalServer := TrimmedText(TermHostEdit.Text);
     if Pos('\', FinalServer) = 0 then
@@ -861,17 +1014,18 @@ begin
     begin
       Conn.Close;
       TermStatusLabel.Font.Color := clGreen;
-      TermStatusLabel.Caption := 'تم الاتصال بـ ' + FinalServer + ' بنجاح.';
+      TermStatusLabel.Caption := 'Connected to ' + FinalServer + ' successfully.';
     end
     else
     begin
       TermStatusLabel.Font.Color := clRed;
-      TermStatusLabel.Caption := 'تعذر الاتصال: ' + ErrMsg;
-      MsgBox('لم يتمكن الجهاز من الوصول إلى الجهاز الرئيسي.' + NL + NL +
-        'تأكد من:' + NL +
-        '- الجهاز الرئيسي يعمل ولديه برنامج Sayl POS مثبّت' + NL +
-        '- الجهازان متصلان بنفس الشبكة' + NL +
-        '- اسم الجهاز ورمز الدخول مكتوبان تماماً كما ظهرا', mbCriticalError, MB_OK);
+      TermStatusLabel.Caption := 'Could not connect to the main PC.';
+      MsgBox('This PC could not reach the main computer.' + NL + NL +
+        'Please check that:' + NL +
+        '- The main PC is on and has Sayl POS installed' + NL +
+        '- Both PCs are on the same network' + NL +
+        '- The name and access code are typed exactly as shown' + NL + NL +
+        'Technical details:' + NL + ErrMsg, mbCriticalError, MB_OK);
       Result := False;
     end;
     Exit;
@@ -967,19 +1121,25 @@ begin
 
     if IsMainRole then
     begin
-      { 2a) install the engine if nothing usable was found }
+      { 2a) install the engine if nothing usable was found. Recover a
+            stopped-but-existing instance first, then install if needed. }
       if not InstanceFound then
       begin
-        if InstallSqlExpress(Log) then
-        begin
-          SavePassword(SqlPass);
-          ConfigureForLan(Log, SaylInstance);
-          InstanceFound := True;
-        end;
+        TryStartExistingInstance(Log);
+        if not InstanceFound then
+          if InstallSqlExpress(Log) then
+          begin
+            SavePassword(SqlPass);
+            ConfigureForLan(Log, SaylInstance);
+            InstanceFound := True;
+          end;
       end;
 
       if InstanceFound then
       begin
+        { give the engine up to 3 minutes to accept connections }
+        if not WaitForInstanceReady(FinalServer, 180) then
+          AppendLog(Log, 'NOTE: engine is not accepting connections yet.');
         { 2b) ensure the 'sayl' login exists - via WINDOWS admin connection }
         if not CustomLogin then
         begin
@@ -1112,32 +1272,35 @@ begin
       Exit;
 
     if not Ok then
-      MsgBox('لم يكتمل إعداد قاعدة البيانات بنجاح.' + NL + NL +
-        'التفاصيل محفوظة في:' + NL + LogPath + NL + NL +
-        'يمكنك لاحقاً إنشاء القاعدة يدوياً بتشغيل سكربتات SQL الموجودة في:' + NL +
+      MsgBox('Database setup did not complete successfully.' + NL + NL +
+        '--- last log entries ---' + NL + ReadErrorTail(LogPath, 8) + NL +
+        'Full details were saved to:' + NL + LogPath + NL + NL +
+        'If SQL Server just asked for a Windows restart, restart this PC and run this installer again - ' +
+        'it will detect the installed engine and finish the database setup by itself.' + NL + NL +
+        'You can also create the database manually later by running the SQL scripts in:' + NL +
         DbDir, mbCriticalError, MB_OK)
     else
     begin
       { shown on the MAIN PC when terminals will ever connect to it }
       ExtraMsg := '';
       if IsMainRole and (not CustomLogin) and UseSqlAuth and (SqlPass <> '') then
-        ExtraMsg := NL + '--- لأجهزة الكاشير الإضافية ---' + NL +
-          'اسم الجهاز   : ' + GetComputerNameString + NL +
-          'رمز الدخول  : ' + SqlPass + NL +
-          'دوّن هذه البيانات - ستكون مطلوبة عند تثبيت كل جهاز إضافي.' + NL;
+        ExtraMsg := NL + '--- For extra cashier terminals ---' + NL +
+          'Computer name : ' + GetComputerNameString + NL +
+          'Access code   : ' + SqlPass + NL +
+          'Write these down - they will be required when installing each extra terminal.';
       { first admin login - only when demo data was just loaded }
       if RunSeed then
-        SeedMsg := NL + '--- الدخول الأول للمدير ---' + NL +
-          'المستخدم      : admin' + NL +
-          'كلمة المرور  : Admin@123' + NL +
-          '(يُنصح بتغيير كلمة المرور بعد أول تسجيل دخول)' + NL
+        SeedMsg := NL + '--- First admin login ---' + NL +
+          'User     : admin' + NL +
+          'Password : Admin@123' + NL +
+          '(Change the password after the first login)'
       else
         SeedMsg := '';
-      MsgBox('تم إعداد البرنامج وقاعدة البيانات بنجاح.' + NL + NL +
-        'الاتصال     : ' + FinalServer + NL +
-        'القاعدة      : SaylDB' + NL +
-        SeedMsg + ExtraMsg + NL +
-        'السجل الكامل: ' + LogPath, mbInformation, MB_OK);
+      MsgBox('Setup finished successfully.' + NL + NL +
+        'Connection : ' + FinalServer + NL +
+        'Database   : SaylDB' + NL +
+        SeedMsg + ExtraMsg + NL + NL +
+        'Full log: ' + LogPath, mbInformation, MB_OK);
     end;
   finally
     Log.Free;

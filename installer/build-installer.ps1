@@ -50,6 +50,30 @@ if (-not (Test-Path (Join-Path $stagingApp "Sayl.UI.exe"))) {
     throw "Publish output is missing Sayl.UI.exe"
 }
 
+# --- Verify the publish actually shipped the CURRENT license-aware build ---
+# The packaged app MUST include PosLicensing.dll (startup license gate) and
+# the freshly built exe - otherwise we would silently repackage stale code.
+$requiredAppFiles = @(
+    "Sayl.UI.exe",
+    "PosLicensing.dll",
+    "Sayl.Core.dll",
+    "Common.dll",
+    "DependencyInjection.dll",
+    "appsettings.json"
+)
+foreach ($name in $requiredAppFiles) {
+    $file = Join-Path $stagingApp $name
+    if (-not (Test-Path $file)) { throw "Publish output is missing required file: $file" }
+}
+Write-Host "  verified: PosLicensing.dll included (startup license gate will be enforced)."
+$stagedExe = Get-Item (Join-Path $stagingApp "Sayl.UI.exe")
+$srcStamp  = (Get-Item (Join-Path $repoRoot "Sayl.UI\Program.cs")).LastWriteTime
+Write-Host ("  Sayl.UI.exe built at : {0:yyyy-MM-dd HH:mm:ss}" -f $stagedExe.LastWriteTime)
+Write-Host ("  Program.cs last edit : {0:yyyy-MM-dd HH:mm:ss}" -f $srcStamp)
+if ($stagedExe.LastWriteTime -lt $srcStamp) {
+    throw "Staged Sayl.UI.exe is OLDER than the source Program.cs - stale publish detected. Rerun with a clean output."
+}
+
 # --- 2) Stage database scripts ---
 # Each script is copied as-is (for manual use) AND wrapped in an XML envelope
 # (CDATA) so the installer can read exact UTF-8 text via MSXML - Inno's
@@ -70,6 +94,10 @@ foreach ($src in $sqlSources) {
     $bytes = [System.IO.File]::ReadAllBytes($src)
     try   { $text = $utf8Strict.GetString($bytes) }   # valid UTF-8?
     catch { $text = [System.Text.Encoding]::Default.GetString($bytes) }  # fall back to ANSI
+
+    # drop any UTF-8 BOM the source script starts with - it must not be
+    # baked into the CDATA (SQL Server would choke on the leading U+FEFF)
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }
 
     # original script, normalized to UTF-8 (manual reference)
     [System.IO.File]::WriteAllText((Join-Path $stagingDb (Split-Path -Leaf $src)), $text, $utf8NoBom)
@@ -102,8 +130,7 @@ Copy-Item $redistFile (Join-Path $stagingRedist $sqlexprName) -Force
 Write-Host ("  staged: {0} ({1} MB)" -f $sqlexprName, $sizeMB)
 
 # --- 4) Ensure setup.iss is UTF-8 with BOM ---
-# Inno only treats .iss as Unicode when a BOM is present; the script contains
-# Arabic hints for non-technical users.
+# Inno only treats .iss as Unicode when a BOM is present.
 $issPath = Join-Path $installerDir "setup.iss"
 $text = [System.IO.File]::ReadAllText($issPath)
 [System.IO.File]::WriteAllText($issPath, $text, (New-Object System.Text.UTF8Encoding($true)))

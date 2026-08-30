@@ -68,10 +68,15 @@ namespace Sayl.UI.UserControls
             btnBackup.Bounds = new Rectangle(540, y + 176, 200, 48);
             btnBackup.Click += async (_, _) => await BackupNowAsync();
 
-            _lblStatus = new Label { Text = "", Bounds = new Rectangle(320, y + 232, 420, 26), ForeColor = AppTheme.Success };
+            var btnRestore = AppTheme.MakeButton("استعادة نسخة احتياطية", AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5));
+            btnRestore.Bounds = new Rectangle(320, y + 232, 200, 44);
+            btnRestore.Click += async (_, _) => await RestoreNowAsync();
+
+            _lblStatus = new Label { Text = "", Bounds = new Rectangle(540, y + 240, 420, 26), ForeColor = AppTheme.Success };
 
             body.Controls.Add(btnSave);
             body.Controls.Add(btnBackup);
+            body.Controls.Add(btnRestore);
             body.Controls.Add(_lblStatus);
 
             Controls.Add(body);
@@ -172,6 +177,72 @@ namespace Sayl.UI.UserControls
             {
                 _lblStatus.ForeColor = AppTheme.Danger;
                 _lblStatus.Text = "فشل النسخ الاحتياطي.";
+            }
+        }
+
+        private async Task RestoreNowAsync()
+        {
+            string folder = _txtBackupFolder.Text?.Trim() ?? clsBackupService.DefaultBackupFolder;
+
+            using var dlg = new OpenFileDialog
+            {
+                Title = "اختر ملف النسخة الاحتياطية",
+                Filter = "نسخة احتياطية (*.bak)|*.bak|كل الملفات (*.*)|*.*",
+                InitialDirectory = Directory.Exists(folder) ? folder : null
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var confirm = MessageBox.Show(this,
+                "تحذير: الاستعادة ستستبدل جميع البيانات الحالية " +
+                "ببيانات النسخة المختارة، ولن يمكن التراجع.\n\n" +
+                "تأكد من:\n" +
+                "- إغلاق جميع جلسات البيع على كل الأجهزة\n" +
+                "- أخذ نسخة احتياطية جديدة للبيانات الحالية أولًا\n\n" +
+                "هل تريد المتابعة بالاستعادة؟",
+                "تأكيد الاستعادة", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2,
+                MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+            if (confirm != DialogResult.Yes)
+                return;
+
+            try
+            {
+                Result<string> result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
+                    result = await backupService.RestoreAsync(dlg.FileName);
+                }
+
+                if (!result.IsSuccess)
+                {
+                    _lblStatus.ForeColor = AppTheme.Danger;
+                    _lblStatus.Text = result.Message;
+                    UiHelpers.ShowError(this, result.Message);
+                    return;
+                }
+
+                var restart = MessageBox.Show(this,
+                    "تمت استعادة النسخة الاحتياطية بنجاح.\n\n" +
+                    "يُنصح بإعادة تشغيل البرنامج الآن لضمان قراءة أحدث البيانات.\n\n" +
+                    "هل تريد إعادة تشغيل البرنامج الآن؟",
+                    "تمت الاستعادة", MessageBoxButtons.YesNo, MessageBoxIcon.Information,
+                    MessageBoxDefaultButton.Button1,
+                    MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+
+                if (restart == DialogResult.Yes)
+                    Application.Restart();
+                else
+                {
+                    _lblStatus.ForeColor = AppTheme.Success;
+                    _lblStatus.Text = $"تمت الاستعادة: {Path.GetFileName(result.Data)}";
+                }
+            }
+            catch
+            {
+                _lblStatus.ForeColor = AppTheme.Danger;
+                _lblStatus.Text = "فشلت الاستعادة.";
             }
         }
     }

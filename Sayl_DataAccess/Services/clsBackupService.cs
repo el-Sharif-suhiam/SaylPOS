@@ -1,4 +1,5 @@
 using Common.Results;
+using Common.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
@@ -6,8 +7,8 @@ using Sayl.Core.Data;
 namespace Sayl.Core.Services
 {
     /// <summary>
-    /// نسخ احتياطي لقاعدة البيانات (أساسي لتشغيل أوفلاين: البيانات على جهاز واحد).
-    /// نسخ عند الإغلاق + نسخ يومي، مع الاحتفاظ بآخر N نسخة.
+    /// نسخ احتياطي واستعادة لقاعدة البيانات (أساسي لتشغيل أوفلاين: البيانات على جهاز واحد).
+    /// نسخ عند الإغلاق + نسخ يومي، مع الاحتفاظ بآخر N نسخة، واستعادة يدوية آمنة من الإعدادات.
     /// </summary>
     public class clsBackupService
     {
@@ -98,6 +99,99 @@ namespace Sayl.Core.Services
         /// <summary>المسار الافتراضي للنسخ الاحتياطي.</summary>
         public static string DefaultBackupFolder =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SaylBackups");
+
+        // ─────────────────────────────────────────────────
+        // استعادة نسخة احتياطية: بأمان عالٍ — ترفض عند وجود جلسات مفتوحة،
+        // تضع القاعدة في وضع أحادي المستخدم أثناء الاستعادة وتعيدها دائمًا.
+        // ─────────────────────────────────────────────────
+        public async Task<Result<string>> RestoreAsync(string backupFilePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(backupFilePath) || !File.Exists(backupFilePath))
+                    return Result<string>.Fail("ملف النسخة الاحتياطية غير موجود.");
+
+                bool hasOpenSessions = await _dbContext.PosSessions
+                    .AnyAsync(s => s.Status == enPosSessionStatusType.open);
+                if (hasOpenSessions)
+                    return Result<string>.Fail("توجد جلسات بيع مفتوحة. أغلق جميع الجلسات ثم حاول الاستعادة.");
+
+                string dbName = _dbContext.Database.GetDbConnection().Database;
+                string safeName = dbName.Replace("]", "]]");
+                string masterConn = new SqlConnectionStringBuilder(
+                    _dbContext.Database.GetConnectionString())
+                { InitialCatalog = "master" }.ConnectionString;
+
+                await using var conn = new SqlConnection(masterConn);
+                await conn.OpenAsync();
+
+                // المسارات الحالية لملفات البيانات والسجل — نستعاد إليها بـ MOVE
+                // حتى لو جاءت النسخة من جهاز آخر بمسارات مختلفة.
+                string dataLogical = "", dataPath = "", logLogical = "", logPath = "";
+                const string filesSql =
+                    "SELECT mf.name AS [Name], mf.physical_name AS [Physical], mf.type_desc AS [Type] " +
+                    "FROM sys.master_files mf WHERE mf.database_id = DB_ID(@db)";
+                await using (var cmd = new SqlCommand(filesSql, conn) { CommandTimeout = 600 })
+                {
+                    cmd.Parameters.AddWithValue("@db", dbName);
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        string type = reader.GetString(2);
+                        if (type == "ROWS") { dataLogical = reader.GetString(0); dataPath = reader.GetString(1); }
+                        else if (type == "LOG") { logLogical = reader.GetString(0); logPath = reader.GetString(1); }
+                    }
+                }
+
+                if (dataLogical.Length == 0 || logLogical.Length == 0)
+                    return Result<string>.Fail($"قاعدة البيانات '{dbName}' غير موجودة على هذا الخادم. أنشئها أولًا بسكربتات التثبيت.");
+
+                bool singleUser = false;
+                try
+                {
+                    await ExecAsync(conn, $"ALTER DATABASE [{safeName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE");
+                    singleUser = true;
+
+                    string q = "'";
+                    string move =
+                        $" , MOVE N'{dataLogical.Replace(q, "''")}' TO N'{dataPath.Replace(q, "''")}'" +
+                        $" , MOVE N'{logLogical.Replace(q, "''")}' TO N'{logPath.Replace(q, "''")}'";
+                    string restoreSql =
+                        $"RESTORE DATABASE [{safeName}] FROM DISK = @path WITH REPLACE, RECOVERY{move}";
+
+                    await using (var cmd = new SqlCommand(restoreSql, conn) { CommandTimeout = 600 })
+                    {
+                        cmd.Parameters.AddWithValue("@path", backupFilePath);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    return Result<string>.Ok(backupFilePath, "تمت استعادة النسخة الاحتياطية بنجاح.");
+                }
+                catch
+                {
+                    singleUser = false;
+                    try { await ExecAsync(conn, $"ALTER DATABASE [{safeName}] SET MULTI_USER"); } catch { /* أفضل جهد */ }
+                    throw;
+                }
+                finally
+                {
+                    if (singleUser)
+                    {
+                        try { await ExecAsync(conn, $"ALTER DATABASE [{safeName}] SET MULTI_USER"); } catch { /* أفضل جهد */ }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return Result<string>.Fail($"فشلت الاستعادة: {ex.Message}");
+            }
+        }
+
+        private static async Task ExecAsync(SqlConnection conn, string sql)
+        {
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 600 };
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         private static Task CleanupOldBackupsAsync(string backupFolder, int keepLast)
         {

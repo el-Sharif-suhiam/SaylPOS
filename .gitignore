@@ -22,3 +22,7 @@ packages/
 installer/staging/
 installer/output/
 installer/redist/
+
+# Licensing keys - NEVER commit these
+private_key.xml
+public_key.xml

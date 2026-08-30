@@ -54,6 +54,14 @@ namespace Sayl.UI
 
             Services = services.BuildServiceProvider();
 
+            // بوابة التفعيل: لا يعمل البرنامج إلا بعد تفعيل صالح لهذا الجهاز
+            if (!PosLicensing.ActivationManager.IsActivated())
+            {
+                using var activation = new ActivationForm();
+                if (activation.ShowDialog() != DialogResult.OK)
+                    return;
+            }
+
             Navigator = new AppNavigator(Services.GetRequiredService<LoginForm>());
             Application.Run(Navigator);
         }

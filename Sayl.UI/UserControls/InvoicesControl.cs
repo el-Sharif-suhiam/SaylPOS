@@ -99,6 +99,18 @@ namespace Sayl.UI.UserControls
                     new InvoiceDetailsForm(_invoices[idx].InvoiceId).ShowDialog(FindForm());
             };
 
+            if (_type == enInvoicesType.purchase)
+            {
+                AddToolbarButton("فاتورة شراء جديدة", AppTheme.Primary, AppTheme.PrimaryDark,
+                    (_, _) =>
+                    {
+                        using var form = new PurchaseForm();
+                        if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                            _ = LoadDataAsync();
+                    }, 170);
+                AddToolbarGap(8);
+            }
+
             AddToolbarButton("تحديث", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
         }
     }

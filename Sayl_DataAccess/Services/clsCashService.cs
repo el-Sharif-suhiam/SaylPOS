@@ -31,28 +31,37 @@ namespace Sayl.Core.Services
             if (session == null || session.Status != enPosSessionStatusType.open)
                 return Result.Fail("الجلسة غير موجودة أو مغلقة.");
 
-            _dbContext.CashMovements.Add(new CashMovement
+            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
             {
-                SessionId = sessionId,
-                MovementType = movementType,
-                Amount = amount,
-                Reason = reason.Trim(),
-                UserId = userId,
-                CreatedAt = DateTime.Now
-            });
+                _dbContext.CashMovements.Add(new CashMovement
+                {
+                    SessionId = sessionId,
+                    MovementType = movementType,
+                    Amount = amount,
+                    Reason = reason.Trim(),
+                    UserId = userId,
+                    CreatedAt = DateTime.Now
+                });
 
-            await _dbContext.SaveChangesAsync();
+                _dbContext.SystemLogs.Add(new SystemLog
+                {
+                    UserId = userId,
+                    Action = movementType == 'I' ? "CashIn" : "CashOut",
+                    Details = $"مبلغ: {amount:N2} — السبب: {reason.Trim()} — جلسة #{sessionId}",
+                    CreatedAt = DateTime.Now
+                });
 
-            _dbContext.SystemLogs.Add(new SystemLog
+                await _dbContext.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Result.Ok(movementType == 'I' ? "تم تسجيل قبض النقد." : "تم تسجيل صرف النقد.");
+            }
+            catch
             {
-                UserId = userId,
-                Action = movementType == 'I' ? "CashIn" : "CashOut",
-                Details = $"مبلغ: {amount:N2} — السبب: {reason.Trim()} — جلسة #{sessionId}",
-                CreatedAt = DateTime.Now
-            });
-            await _dbContext.SaveChangesAsync();
-
-            return Result.Ok(movementType == 'I' ? "تم تسجيل قبض النقد." : "تم تسجيل صرف النقد.");
+                await transaction.RollbackAsync();
+                return Result.Fail("فشل تسجيل حركة النقد.");
+            }
         }
 
         /// <summary>ملخص نقد الجلسة: الافتتاحي + مبيعات نقدي − مرتجعات نقدي + قبض − صرف.</summary>

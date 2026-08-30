@@ -9,7 +9,7 @@ namespace Sayl.UI.Forms
 {
     /// <summary>
     /// النافذة الرئيسية للمدير/المحاسب: شريط جانبي + لوحة محتوى تستضيف UserControl لكل قسم.
-    /// الأقسام الحالية مؤقتة (SectionPlaceholderControl) وتُستبدل تدريجيًا في المراحل القادمة.
+    /// الأقسام تُستضاف كـ UserControl داخل اللوحة الرئيسية وتُبدَّل عند التنقل.
     /// </summary>
     public class MainForm : Form
     {

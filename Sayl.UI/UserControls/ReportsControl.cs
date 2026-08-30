@@ -1,6 +1,7 @@
 using Common.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Forms;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.UserControls
@@ -16,6 +17,7 @@ namespace Sayl.UI.UserControls
         private Label _lblFrom = null!;
         private Label _lblTo = null!;
         private Button _btnRefresh = null!;
+        private Button _btnPeriodic = null!;
         private DataGridView _grid = null!;
 
         private const int ReportProfit = 0;
@@ -54,8 +56,18 @@ namespace Sayl.UI.UserControls
             _btnRefresh.Width = 140;
             _btnRefresh.Click += async (_, _) => await RunReportAsync();
 
+            _btnPeriodic = AppTheme.MakeButton("تقرير دوري (PDF)", AppTheme.Accent, hoverColor: AppTheme.AccentDark);
+            _btnPeriodic.Dock = DockStyle.Right;
+            _btnPeriodic.Width = 170;
+            _btnPeriodic.Click += (_, _) =>
+            {
+                using var form = new PeriodicReportForm();
+                form.ShowDialog(FindForm());
+            };
+
             // ترتيب الإرساء: الزر أولًا ثم التواريخ ثم النوع (آخر عنصر يُرسّى أولًا)
             filterBar.Controls.Add(_btnRefresh);
+            filterBar.Controls.Add(_btnPeriodic);
             filterBar.Controls.Add(_dtpTo);
             filterBar.Controls.Add(_lblTo);
             filterBar.Controls.Add(_dtpFrom);
