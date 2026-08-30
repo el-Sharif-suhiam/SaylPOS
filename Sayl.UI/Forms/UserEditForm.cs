@@ -39,7 +39,7 @@ namespace Sayl.UI.Forms
             var lblUser = new Label { Text = "اسم المستخدم *", Bounds = new Rectangle(30, 58, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtUserName = new TextBox { Bounds = new Rectangle(30, 82, 360, 36), Font = AppTheme.FontBody };
 
-            var lblPass = new Label { Text = "كلمة المرور *", Bounds = new Rectangle(30, 128, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblPass = new Label { Text = "كلمة المرور * (8 أحرف على الأقل، حروف وأرقام)", Bounds = new Rectangle(30, 128, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtPassword = new TextBox { Bounds = new Rectangle(30, 152, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
 
             var lblRole = new Label { Text = "الدور *", Bounds = new Rectangle(30, 198, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
@@ -69,9 +69,16 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(_txtPassword.Text) || _txtPassword.Text.Length < 6)
+            if (string.IsNullOrWhiteSpace(_txtPassword.Text))
             {
-                UiHelpers.ShowError(this, "كلمة المرور مطلوبة (6 أحرف على الأقل).");
+                UiHelpers.ShowError(this, "كلمة المرور مطلوبة.");
+                return;
+            }
+
+            string? policyError = clsUsersService.ValidatePasswordPolicy(_txtPassword.Text);
+            if (policyError != null)
+            {
+                UiHelpers.ShowError(this, policyError);
                 return;
             }
 
@@ -131,9 +138,10 @@ namespace Sayl.UI.Forms
             btnOk.Bounds = new Rectangle(24, 110, 200, 48);
             btnOk.Click += (_, _) =>
             {
-                if (string.IsNullOrWhiteSpace(_txt.Text) || _txt.Text.Length < 6)
+                string? policyError = clsUsersService.ValidatePasswordPolicy(_txt.Text);
+                if (policyError != null)
                 {
-                    UiHelpers.ShowError(this, "كلمة المرور مطلوبة (6 أحرف على الأقل).");
+                    UiHelpers.ShowError(this, policyError);
                     return;
                 }
                 DialogResult = DialogResult.OK;

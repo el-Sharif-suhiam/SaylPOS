@@ -58,9 +58,92 @@ namespace Sayl.UI.UserControls
         {
             AddToolbarButton("إضافة مستخدم", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => AddUser(), 150);
             AddToolbarGap();
+            AddToolbarButton("تعديل الدور", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => ChangeRole(), 130);
+            AddToolbarGap();
             AddToolbarButton("تفعيل/تعطيل", AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
             AddToolbarGap();
             AddToolbarButton("تغيير كلمة المرور", AppTheme.SidebarBg, AppTheme.SidebarHover, async (_, _) => await ResetPasswordAsync(), 180);
+        }
+
+        /// <summary>تغيير دور مستخدم (أدمن) — الخدمة ChangeRoleAsync.</summary>
+        private void ChangeRole()
+        {
+            int idx = Grid.CurrentRow?.Index ?? -1;
+            if (idx < 0 || idx >= _users.Count)
+            {
+                UiHelpers.ShowError(this, "اختر مستخدمًا من القائمة.");
+                return;
+            }
+
+            if (_roles.Count == 0)
+            {
+                UiHelpers.ShowError(this, "لا توجد أدوار متاحة.");
+                return;
+            }
+
+            var user = _users[idx];
+
+            using var cmb = new Form
+            {
+                Text = $"تغيير دور المستخدم '{user.UserName}'",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(420, 220),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                RightToLeft = RightToLeft.Yes,
+                Font = AppTheme.FontBody,
+                BackColor = AppTheme.CardBg
+            };
+
+            var lbl = new Label { Text = "الدور الجديد", Bounds = new Rectangle(30, 26, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var cmbRole = new ComboBox { Bounds = new Rectangle(30, 52, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            foreach (var r in _roles)
+                cmbRole.Items.Add($"{r.Name} ({r.RoleValue})");
+            int current = _roles.FindIndex(r => r.Name == user.RoleName);
+            cmbRole.SelectedIndex = current >= 0 ? current : 0;
+
+            var btnOk = AppTheme.MakeButton("تغيير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            btnOk.Bounds = new Rectangle(30, 120, 220, 48);
+            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            btnCancel.Bounds = new Rectangle(270, 120, 120, 48);
+            btnCancel.DialogResult = DialogResult.Cancel;
+
+            cmb.Controls.AddRange(new Control[] { lbl, cmbRole, btnOk, btnCancel });
+
+            btnOk.Click += async (_, _) =>
+            {
+                if (cmbRole.SelectedIndex < 0 || cmbRole.SelectedIndex >= _roles.Count)
+                {
+                    UiHelpers.ShowError(cmb, "اختر دورًا.");
+                    return;
+                }
+
+                var newRole = _roles[cmbRole.SelectedIndex];
+                if (newRole.Name == user.RoleName)
+                {
+                    UiHelpers.ShowInfo(cmb, "لم يتغير الدور.");
+                    cmb.Close();
+                    return;
+                }
+
+                Common.Results.Result result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
+                    result = await usersService.ChangeRoleAsync(user.UserId, newRole.RoleId);
+                }
+
+                UiHelpers.ShowResult(cmb, result);
+                if (result.IsSuccess)
+                {
+                    cmb.DialogResult = DialogResult.OK;
+                    cmb.Close();
+                }
+            };
+
+            if (cmb.ShowDialog(FindForm()) == DialogResult.OK)
+                _ = LoadDataAsync();
         }
 
         private void AddUser()

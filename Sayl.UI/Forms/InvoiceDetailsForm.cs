@@ -115,7 +115,7 @@ namespace Sayl.UI.Forms
             var btnPrint = AppTheme.MakeButton("طباعة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnPrint.Dock = DockStyle.Fill;
             btnPrint.Margin = new Padding(0, 0, 4, 0);
-            btnPrint.Click += (_, _) => PrintInvoice();
+            btnPrint.Click += async (_, _) => await PrintPdfAsync();
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Dock = DockStyle.Fill;
@@ -182,64 +182,13 @@ namespace Sayl.UI.Forms
             }
         }
 
-        private void PrintInvoice()
+        /// <summary>طباعة الفاتورة: PDF 80mm في مستندات المستخدم ثم فتح نافذة الطباعة الجاهزة.</summary>
+        private async Task PrintPdfAsync()
         {
             if (_invoice == null)
                 return;
 
-            try
-            {
-                using var doc = new PrintDocument();
-                doc.PrintPage += (_, args) => RenderInvoicePage(args.Graphics, args.MarginBounds);
-                using var dialog = new PrintDialog { Document = doc, UseEXDialog = true };
-                if (dialog.ShowDialog(this) == DialogResult.OK)
-                    doc.Print();
-            }
-            catch
-            {
-                UiHelpers.ShowError(this, "تعذرت الطباعة. تحقق من الطابعة.");
-            }
-        }
-
-        private void RenderInvoicePage(Graphics g, Rectangle bounds)
-        {
-            var inv = _invoice!;
-            g.Clear(Color.White);
-
-            float y = bounds.Top + 10;
-            var titleFont = new Font("Segoe UI", 16F, FontStyle.Bold);
-            var boldFont = new Font("Segoe UI", 10F, FontStyle.Bold);
-            var font = new Font("Segoe UI", 10F);
-
-            StringFormat rtl = new StringFormat(StringFormatFlags.DirectionRightToLeft);
-
-            void Line(string text, Font f, float height)
-            {
-                g.DrawString(text, f, Brushes.Black, new RectangleF(bounds.Left, y, bounds.Width, height), rtl);
-                y += height;
-            }
-
-            Line("سيل — Sayl", titleFont, 34);
-            Line($"فاتورة رقم: {inv.InvoiceId}    التاريخ: {inv.CreatedAt:yyyy-MM-dd HH:mm}", font, 22);
-            Line($"العميل: {inv.PartyName ?? "عميل مجهول"}    الكاشير: {inv.CashierName}", font, 22);
-            Line(new string('-', 70), font, 20);
-
-            foreach (var item in inv.Items)
-                Line($"{item.ProductName}   × {item.Quantity}   @ {UiHelpers.Money(item.ItemPrice)}   = {UiHelpers.Money(item.ItemPrice * item.Quantity)}", font, 22);
-
-            Line(new string('-', 70), font, 20);
-            Line($"الإجمالي: {UiHelpers.Money(inv.TotalAmount)}    الخصم: {UiHelpers.Money(inv.DiscountAmount)}    الضريبة: {UiHelpers.Money(inv.TaxAmount)}", font, 22);
-            Line($"الصافي: {UiHelpers.Money(inv.NetAmount)}", boldFont, 24);
-            Line($"المدفوع: {UiHelpers.Money(inv.PaidAmount)}    المتبقي: {UiHelpers.Money(inv.RemainingAmount)}", font, 22);
-
-            if (inv.Payments.Count > 0)
-            {
-                Line("المدفوعات:", boldFont, 22);
-                foreach (var p in inv.Payments)
-                    Line($"  {p.PaymentDate:yyyy-MM-dd}   {TranslateMethod(p.PaymentMethod)}   {UiHelpers.Money(p.Amount)}", font, 20);
-            }
-
-            Line("شكرًا لتعاملكم معنا!", font, 24);
+            await InvoicePrintHelper.PrintAsync(_invoice.InvoiceId, this);
         }
 
         internal static string TranslateType(string type) => type switch

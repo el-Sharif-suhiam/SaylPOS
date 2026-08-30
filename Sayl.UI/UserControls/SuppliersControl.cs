@@ -65,6 +65,8 @@ namespace Sayl.UI.UserControls
             AddToolbarGap();
             AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
+            AddToolbarButton("سداد رصيد", AppTheme.Success, Color.FromArgb(21, 128, 61), (_, _) => PaySupplierBalance(), 130);
+            AddToolbarGap();
             AddToolbarButton("تعطيل", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
 
             if (SessionState.IsAdmin)
@@ -75,6 +77,30 @@ namespace Sayl.UI.UserControls
             }
 
             Grid.CellClick += Grid_CellClick;
+        }
+
+        /// <summary>سداد على رصيد المورد بدون ربط بفاتورة (PaySupplierAsync).</summary>
+        private void PaySupplierBalance()
+        {
+            int idx = Grid.CurrentRow?.Index ?? -1;
+            var visible = _suppliers.Where(s => s.Party != null).ToList();
+            if (idx < 0 || idx >= visible.Count)
+            {
+                UiHelpers.ShowError(this, "اختر موردًا من القائمة.");
+                return;
+            }
+
+            var supplier = visible[idx];
+            decimal balance = supplier.Balance ?? 0;
+            if (balance <= 0)
+            {
+                UiHelpers.ShowInfo(this, "لا يوجد رصيد مستحق على هذا المورد.");
+                return;
+            }
+
+            using var form = SupplierPaymentForm.ForSupplierBalance(supplier.PartyId, supplier.Party!.Name, balance);
+            if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                _ = LoadDataAsync();
         }
 
         private void Grid_CellClick(object? sender, DataGridViewCellEventArgs e)

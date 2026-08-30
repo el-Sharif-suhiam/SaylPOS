@@ -12,7 +12,7 @@ namespace Sayl.UI.Forms
     /// <summary>
     /// فاتورة شراء جديدة: مورد + بنود (منتج مخزني، دفعة، كمية، تكلفة، انتهاء اختياري)
     /// + خصم وضريبة + دفع كلي/جزئي. تُنشئ الفاتورة عبر clsPurchaseService داخل معاملة واحدة
-    /// فتُحدَّث الدفعات والمخزون ورصيد المورد تلقائيًا في الخدمة.
+    /// فتُحدَّث الدفعات والمخزون وحركة المخزون وتكلفة المنتج ورصيد المورد تلقائيًا في الخدمة.
     /// </summary>
     public class PurchaseForm : DialogForm
     {
@@ -23,6 +23,7 @@ namespace Sayl.UI.Forms
         private TextBox _txtProductSearch = null!;
         private ListBox _lstProducts = null!;
         private List<DtoProduct> _products = new();
+        private Button _btnAddProduct = null!;
 
         private DataGridView _grid = null!;
         private TextBox _txtDiscount = null!;
@@ -38,13 +39,13 @@ namespace Sayl.UI.Forms
 
         private decimal _net;
         private bool _saved;
-
+        private NumericUpDown _nudQty = null!;
         public PurchaseForm()
         {
             Text = "فاتورة شراء جديدة";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(900, 720);
-            MinimumSize = new Size(780, 600);
+            ClientSize = new Size(900, 760);
+            MinimumSize = new Size(880, 660);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -60,78 +61,171 @@ namespace Sayl.UI.Forms
         }
 
         // ── بناء الواجهة ──
+
         private void BuildUi()
         {
+            // ── الحاوية الرئيسية ──
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الترويسة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 170));   // الموردين والمنتجات
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // الجدول (يتمدد)
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 290));   // الإجماليات والأزرار
+
+            // ── الترويسة ──
+            var header = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             var lblTitle = new Label
             {
                 Text = "فاتورة شراء جديدة",
-                Bounds = new Rectangle(0, 14, ClientSize.Width, 30),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
-                ForeColor = AppTheme.TextPrimary,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                ForeColor = AppTheme.TextPrimary
             };
+            var btnCloseTop = AppTheme.MakeCircleButton("×", 44,
+                back: AppTheme.BorderColor, hoverBack: AppTheme.Danger,
+                fore: AppTheme.TextPrimary, parentBack: AppTheme.CardBg, fontSize: 15f);
+            btnCloseTop.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            btnCloseTop.Bounds = new Rectangle(16, 8, 44, 44);
+            btnCloseTop.Click += (_, _) => Close();
+            header.Controls.Add(lblTitle);
+            header.Controls.Add(btnCloseTop);
 
-            // ── المورد ──
-            var lblSupplier = MakeCaption("المورد *", new Rectangle(470, 52, 400, 22));
-            _txtSupplierSearch = new TextBox { Bounds = new Rectangle(740, 76, 130, 34), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            // ── منطقة الموردين والمنتجات ──
+            var selectionPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                Margin = new Padding(0),
+                Padding = new Padding(24, 0, 24, 0)
+            };
+            selectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            selectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+            // المورد (يمين)
+            var supplierPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
+            var lblSupplier = MakeCaption("المورد *", new Rectangle(0, 0, 200, 22));
+            var supplierSearchRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Height = 40
+            };
+            _txtSupplierSearch = new TextBox { Width = 180, Height = 30 };
             _txtSupplierSearch.PlaceholderText = "بحث...";
             _txtSupplierSearch.KeyDown += async (_, args) =>
             {
                 if (args.KeyCode == Keys.Enter)
                 {
                     args.SuppressKeyPress = true;
-                    await LoadSuppliersAsync(_txtSupplierSearch.Text?.Trim() ?? "");
+                    await LoadSuppliersAsync(_txtSupplierSearch.Text.Trim());
                 }
             };
             var btnSupplierSearch = AppTheme.MakeButton("بحث", AppTheme.PrimaryLight,
-                foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 34);
-            btnSupplierSearch.Bounds = new Rectangle(470, 76, 90, 34);
-            btnSupplierSearch.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnSupplierSearch.Click += async (_, _) => await LoadSuppliersAsync(_txtSupplierSearch.Text?.Trim() ?? "");
+                foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 32);
+            btnSupplierSearch.Width = 80;
+            btnSupplierSearch.Click += async (_, _) => await LoadSuppliersAsync(_txtSupplierSearch.Text.Trim());
+            supplierSearchRow.Controls.Add(btnSupplierSearch);
+            supplierSearchRow.Controls.Add(_txtSupplierSearch);
 
             _lstSuppliers = new ListBox
             {
-                Bounds = new Rectangle(470, 114, 400, 96),
+                Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 10.5F),
                 BorderStyle = BorderStyle.FixedSingle,
-                IntegralHeight = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                IntegralHeight = false
             };
+            supplierPanel.Controls.Add(_lstSuppliers);
+            supplierPanel.Controls.Add(supplierSearchRow);
+            supplierPanel.Controls.Add(lblSupplier);
 
-            // ── المنتجات ──
-            var lblProduct = MakeCaption("المنتج المخزني (بحث بالاسم أو الباركود)", new Rectangle(30, 52, 400, 22));
-            _txtProductSearch = new TextBox { Bounds = new Rectangle(300, 76, 130, 34), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            // المنتجات (يسار)
+            var productPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
+            var lblProduct = MakeCaption("المنتج المخزني (بحث بالاسم أو الباركود)", new Rectangle(0, 0, 200, 22));
+            var productSearchRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Height = 40
+            };
+            _txtProductSearch = new TextBox { Width = 180, Height = 30 };
             _txtProductSearch.PlaceholderText = "بحث...";
             _txtProductSearch.KeyDown += async (_, args) =>
             {
                 if (args.KeyCode == Keys.Enter)
                 {
                     args.SuppressKeyPress = true;
-                    await LoadProductsAsync(_txtProductSearch.Text?.Trim() ?? "");
+                    await LoadProductsAsync(_txtProductSearch.Text.Trim());
                 }
             };
             var btnProductSearch = AppTheme.MakeButton("بحث", AppTheme.PrimaryLight,
-                foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 34);
-            btnProductSearch.Bounds = new Rectangle(30, 76, 90, 34);
-            btnProductSearch.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnProductSearch.Click += async (_, _) => await LoadProductsAsync(_txtProductSearch.Text?.Trim() ?? "");
+                foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 32);
+            btnProductSearch.Width = 80;
+            btnProductSearch.Click += async (_, _) => await LoadProductsAsync(_txtProductSearch.Text.Trim());
+
+            _btnAddProduct = AppTheme.MakeButton("إضافة للفاتورة", AppTheme.Accent,
+                hoverColor: AppTheme.AccentDark, height: 32);
+            _btnAddProduct.Width = 130;
+            _btnAddProduct.Enabled = false;
+            _btnAddProduct.Click += (_, _) => AddSelectedItem();
+
+            var lblQty = new Label
+            {
+                Text = "الكمية:",
+                AutoSize = true,
+                ForeColor = AppTheme.TextMuted,
+                Margin = new Padding(4, 6, 2, 0)
+            };
+
+            _nudQty = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 10000,
+                Value = 1,
+                Width = 60,
+                Height = 30,
+                Font = AppTheme.FontBody,
+                Margin = new Padding(2, 2, 4, 0)
+            };
+
+            productSearchRow.Controls.Add(btnProductSearch);
+            productSearchRow.Controls.Add(_txtProductSearch);
+            productSearchRow.Controls.Add(lblQty);
+            productSearchRow.Controls.Add(_nudQty);
+            productSearchRow.Controls.Add(_btnAddProduct);
 
             _lstProducts = new ListBox
             {
-                Bounds = new Rectangle(30, 114, 400, 96),
+                Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 10.5F),
                 BorderStyle = BorderStyle.FixedSingle,
-                IntegralHeight = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                IntegralHeight = false
             };
             _lstProducts.DoubleClick += (_, _) => AddSelectedItem();
+            _lstProducts.SelectedIndexChanged += (_, _) =>
+                _btnAddProduct.Enabled = _lstProducts.SelectedIndex >= 0
+                                      && _lstProducts.SelectedIndex < _products.Count;
+
+            productPanel.Controls.Add(_lstProducts);
+            productPanel.Controls.Add(productSearchRow);
+            productPanel.Controls.Add(lblProduct);
+
+            selectionPanel.Controls.Add(supplierPanel, 1, 0);
+            selectionPanel.Controls.Add(productPanel, 0, 0);
 
             // ── جدول البنود ──
             _grid = new DataGridView
             {
-                Bounds = new Rectangle(30, 222, 840, 240),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Left
+                Dock = DockStyle.Fill,
+                Margin = new Padding(24, 0, 24, 0)
             };
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false;
@@ -165,104 +259,155 @@ namespace Sayl.UI.Forms
                 RecalcTotals();
             };
 
-            // ── الإجماليات ──
-            var lblDiscount = MakeCaption("الخصم", new Rectangle(640, 474, 230, 22));
-            lblDiscount.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _txtDiscount = new TextBox { Bounds = new Rectangle(500, 498, 150, 34), TextAlign = HorizontalAlignment.Center, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _txtDiscount.Text = "0";
+            // ── منطقة الإجماليات والدفع والأزرار ──
+            var bottomPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                Margin = new Padding(0),
+                Padding = new Padding(24, 8, 24, 12)
+            };
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+
+            // الجهة اليمنى: الخصم والضريبة والمدفوع
+            var paymentPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 4,
+                Padding = new Padding(0)
+            };
+            paymentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            paymentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+            var lblDiscount = MakeCaption("الخصم", new Rectangle(0, 0, 100, 22));
+            _txtDiscount = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = HorizontalAlignment.Center,
+                Text = "0",
+                Margin = new Padding(6)
+            };
             _txtDiscount.TextChanged += (_, _) => RecalcTotals();
 
-            var lblTax = MakeCaption("الضريبة %", new Rectangle(320, 474, 140, 22));
-            lblTax.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _txtTaxPercent = new TextBox { Bounds = new Rectangle(180, 498, 120, 34), TextAlign = HorizontalAlignment.Center, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _txtTaxPercent.Text = "0";
+            var lblTax = MakeCaption("الضريبة %", new Rectangle(0, 0, 100, 22));
+            _txtTaxPercent = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = HorizontalAlignment.Center,
+                Text = "0",
+                Margin = new Padding(6)
+            };
             _txtTaxPercent.TextChanged += (_, _) => RecalcTotals();
 
-            _lblSubtotal = new Label
+            var lblPaid = MakeCaption("المدفوع الآن (0 = آجل)", new Rectangle(0, 0, 100, 22));
+            _txtPaid = new TextBox
             {
-                Text = "المجموع: 0.00",
-                Bounds = new Rectangle(30, 474, 260, 24),
-                ForeColor = AppTheme.TextMuted,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left
+                Dock = DockStyle.Fill,
+                TextAlign = HorizontalAlignment.Center,
+                Text = "0",
+                Margin = new Padding(6)
             };
-            _lblNet = new Label
-            {
-                Text = "الصافي: 0.00",
-                Bounds = new Rectangle(30, 502, 260, 30),
-                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
-                ForeColor = AppTheme.PrimaryDark,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left
-            };
-
-            // ── الدفع ──
-            var lblPaid = MakeCaption("المدفوع الآن (0 = آجل)", new Rectangle(640, 546, 230, 22));
-            lblPaid.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            _txtPaid = new TextBox { Bounds = new Rectangle(500, 570, 150, 34), TextAlign = HorizontalAlignment.Center, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            _txtPaid.Text = "0";
             _txtPaid.TextChanged += (_, _) => UpdateRemaining();
 
-            var lblMethod = MakeCaption("طريقة الدفع", new Rectangle(320, 546, 140, 22));
-            lblMethod.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            var lblMethod = MakeCaption("طريقة الدفع", new Rectangle(0, 0, 100, 22));
             _cmbMethod = new ComboBox
             {
-                Bounds = new Rectangle(180, 568, 120, 34),
+                Dock = DockStyle.Fill,
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 FlatStyle = FlatStyle.Flat,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Margin = new Padding(6)
             };
             _cmbMethod.Items.AddRange(new object[] { "نقدي", "بطاقة" });
             _cmbMethod.SelectedIndex = 0;
 
+            paymentPanel.Controls.Add(lblDiscount, 0, 0);
+            paymentPanel.Controls.Add(_txtDiscount, 1, 0);
+            paymentPanel.Controls.Add(lblTax, 0, 1);
+            paymentPanel.Controls.Add(_txtTaxPercent, 1, 1);
+            paymentPanel.Controls.Add(lblPaid, 0, 2);
+            paymentPanel.Controls.Add(_txtPaid, 1, 2);
+            paymentPanel.Controls.Add(lblMethod, 0, 3);
+            paymentPanel.Controls.Add(_cmbMethod, 1, 3);
+
+            // الجهة اليسرى: الإجماليات والملاحظات
+            var totalsPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                Padding = new Padding(6)
+            };
+            _lblSubtotal = new Label
+            {
+                Text = "المجموع: 0.00",
+                Dock = DockStyle.Top,
+                ForeColor = AppTheme.TextMuted,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _lblNet = new Label
+            {
+                Text = "الصافي: 0.00",
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
+                ForeColor = AppTheme.PrimaryDark,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
             _lblRemaining = new Label
             {
                 Text = "المتبقي على المورد: 0.00",
-                Bounds = new Rectangle(30, 572, 260, 26),
+                Dock = DockStyle.Top,
                 ForeColor = AppTheme.Warning,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
-            // ── ملاحظات ──
-            var lblNotes = MakeCaption("ملاحظات", new Rectangle(640, 618, 230, 22));
-            lblNotes.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            var lblNotes = MakeCaption("ملاحظات", new Rectangle(0, 0, 100, 22));
             _txtNotes = new TextBox
             {
-                Bounds = new Rectangle(180, 642, 690, 40),
-                Multiline = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Left
+                Dock = DockStyle.Fill,
+                Multiline = true
             };
 
-            // ── الأزرار ──
+            var btnRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Height = 60
+            };
             _btnSave = AppTheme.MakeButton("حفظ الفاتورة", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
-            _btnSave.Bounds = new Rectangle(520, 664, 180, 48);
-            _btnSave.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            _btnSave.Width = 180;
+            _btnSave.Height = 50;
             _btnSave.Click += async (_, _) => await SaveAsync();
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnClose.Bounds = new Rectangle(320, 664, 160, 48);
-            btnClose.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnClose.Width = 160;
+            btnClose.Height = 50;
             btnClose.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[]
-            {
-                lblTitle,
-                lblSupplier, _txtSupplierSearch, btnSupplierSearch, _lstSuppliers,
-                lblProduct, _txtProductSearch, btnProductSearch, _lstProducts,
-                _grid,
-                lblDiscount, _txtDiscount, lblTax, _txtTaxPercent,
-                _lblSubtotal, _lblNet,
-                lblPaid, _txtPaid, lblMethod, _cmbMethod, _lblRemaining,
-                lblNotes, _txtNotes,
-                _btnSave, btnClose
-            });
+            btnRow.Controls.Add(_btnSave);
+            btnRow.Controls.Add(btnClose);
 
-            AcceptButton = btnProductSearch;
+            totalsPanel.Controls.Add(_lblSubtotal);
+            totalsPanel.Controls.Add(_lblNet);
+            totalsPanel.Controls.Add(_lblRemaining);
+            totalsPanel.Controls.Add(lblNotes);
+            totalsPanel.Controls.Add(_txtNotes);
+            totalsPanel.Controls.Add(btnRow);
+
+            bottomPanel.Controls.Add(paymentPanel, 1, 0);
+            bottomPanel.Controls.Add(totalsPanel, 0, 0);
+
+            // أضف كل الصفوف إلى الجذر
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(selectionPanel, 0, 1);
+            root.Controls.Add(_grid, 0, 2);
+            root.Controls.Add(bottomPanel, 0, 3);
+
+            Controls.Add(root);
             CancelButton = btnClose;
         }
-
         private static Label MakeCaption(string text, Rectangle bounds)
         {
             return new Label
@@ -307,6 +452,8 @@ namespace Sayl.UI.Forms
 
                 if (_products.Count == 0)
                     _lstProducts.Items.Add("لا توجد منتجات مطابقة.");
+                else if (_products.Count == 1)
+                    _lstProducts.SelectedIndex = 0;
             }
             catch
             {
@@ -330,23 +477,65 @@ namespace Sayl.UI.Forms
         }
 
         // ── إضافة بند ──
+        //private void AddSelectedItem()
+        //{
+        //    if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
+        //    {
+        //        UiHelpers.ShowInfo(this, "اختر منتجًا من القائمة أولًا (ابحث ثم انقر نقرًا مزدوجًا على المنتج أو استخدم زر الإضافة).");
+        //        return;
+        //    }
+
+        //    var p = _products[_lstProducts.SelectedIndex];
+        //    int rowIndex = _grid.Rows.Add(p.Name, string.Empty, "1",
+        //        p.CostPrice.ToString("0.##"), string.Empty, string.Empty, "حذف");
+        //    _grid.Rows[rowIndex].Tag = p.ProductId;
+        //    _grid.Rows[rowIndex].Cells["colDelete"].Style.ForeColor = AppTheme.Danger;
+        //    _grid.CurrentCell = _grid.Rows[rowIndex].Cells["colBatch"];
+        //    RecalcTotals();
+        //}
+
+
         private void AddSelectedItem()
         {
             if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
             {
-                UiHelpers.ShowInfo(this, "اختر منتجًا من القائمة أولًا (أو اضغط Enter بعد البحث ثم انقر نقرًا مزدوجًا على المنتج).");
+                UiHelpers.ShowInfo(this, "اختر منتجًا من القائمة أولًا.");
                 return;
             }
 
             var p = _products[_lstProducts.SelectedIndex];
-            int rowIndex = _grid.Rows.Add(p.Name, string.Empty, "1",
-                p.CostPrice.ToString("0.##"), string.Empty, string.Empty, "حذف");
+            int productId = p.ProductId;
+            int requestedQty = (int)_nudQty.Value;   // الكمية المطلوبة
+
+            // 1) ابحث إذا كان المنتج موجودًا مسبقًا
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (row.Tag is int id && id == productId)
+                {
+                    int currentQty = (int)ParseDecimal(row.Cells["colQty"].Value);
+                    row.Cells["colQty"].Value = (currentQty + requestedQty).ToString();
+                    _grid.CurrentCell = row.Cells["colQty"];
+                    RecalcTotals();
+                    return;
+                }
+            }
+
+            // 2) لم يوجد، أضف سطرًا جديدًا بالكمية المطلوبة
+            int rowIndex = _grid.Rows.Add(
+                p.Name,
+                string.Empty,
+                requestedQty.ToString(),
+                p.CostPrice.ToString("0.##"),
+                string.Empty,
+                string.Empty,
+                "حذف");
+
             _grid.Rows[rowIndex].Tag = p.ProductId;
             _grid.Rows[rowIndex].Cells["colDelete"].Style.ForeColor = AppTheme.Danger;
             _grid.CurrentCell = _grid.Rows[rowIndex].Cells["colBatch"];
             RecalcTotals();
         }
-
         // ── الحسابات ──
         private void RefreshRowTotals()
         {
@@ -429,6 +618,7 @@ namespace Sayl.UI.Forms
             }
 
             var items = new List<DtoPurchaseItem>();
+            decimal subtotal = 0;
             foreach (DataGridViewRow row in _grid.Rows)
             {
                 if (row.IsNewRow || row.Tag == null) continue;
@@ -443,11 +633,20 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
-                int qty = (int)ParseDecimal(row.Cells["colQty"].Value);
-                if (qty <= 0)
+                decimal qtyRaw = ParseDecimal(row.Cells["colQty"].Value);
+                int qty = (int)qtyRaw;
+                if (qtyRaw <= 0 || qtyRaw != qty)
                 {
-                    UiHelpers.ShowError(this, $"الكمية يجب أن تكون أكبر من صفر للمنتج: {productName}");
+                    UiHelpers.ShowError(this, $"الكمية يجب أن تكون عددًا صحيحًا أكبر من صفر للمنتج: {productName}");
                     _grid.CurrentCell = row.Cells["colQty"];
+                    return;
+                }
+
+                decimal cost = ParseDecimal(row.Cells["colCost"].Value);
+                if (cost < 0)
+                {
+                    UiHelpers.ShowError(this, $"التكلفة يجب أن تكون صفرًا أو أكثر للمنتج: {productName}");
+                    _grid.CurrentCell = row.Cells["colCost"];
                     return;
                 }
 
@@ -458,12 +657,13 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
+                subtotal += qty * cost;
                 items.Add(new DtoPurchaseItem
                 {
                     ProductId = (int)row.Tag,
                     BatchNumber = batch,
                     Quantity = qty,
-                    UnitCost = Math.Max(0, ParseDecimal(row.Cells["colCost"].Value)),
+                    UnitCost = cost,
                     ExpiryDate = expiry
                 });
             }
@@ -474,20 +674,41 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            decimal discount = Math.Max(0, ParseDecimal(_txtDiscount.Text));
+            if (discount > subtotal)
+            {
+                UiHelpers.ShowError(this, $"الخصم يتجاوز مجموع الفاتورة ({UiHelpers.Money(subtotal)}).");
+                _txtDiscount.Focus();
+                _txtDiscount.SelectAll();
+                return;
+            }
+
+            decimal taxPercent = Math.Max(0, ParseDecimal(_txtTaxPercent.Text));
+            decimal afterDiscount = subtotal - discount;
+            decimal tax = taxPercent > 0 ? afterDiscount * taxPercent / 100 : 0;
+            decimal net = afterDiscount + tax;
+
             decimal paid = Math.Max(0, ParseDecimal(_txtPaid.Text));
+            if (paid > net)
+            {
+                UiHelpers.ShowError(this, $"المدفوع الآن أكبر من صافي الفاتورة ({UiHelpers.Money(net)}).");
+                _txtPaid.Focus();
+                _txtPaid.SelectAll();
+                return;
+            }
 
             var request = new DtoPurchaseRequest
             {
                 SupplierId = _suppliers[_lstSuppliers.SelectedIndex].PartyId,
                 UserId = SessionState.CurrentUser.UserId,
                 Items = items,
-                DiscountAmount = Math.Max(0, ParseDecimal(_txtDiscount.Text)),
-                TaxPercent = Math.Max(0, ParseDecimal(_txtTaxPercent.Text)),
+                DiscountAmount = discount,
+                TaxPercent = taxPercent,
                 Notes = string.IsNullOrWhiteSpace(_txtNotes.Text) ? null : _txtNotes.Text.Trim(),
                 Payment = paid > 0
                     ? new DtoPaymentInfo
                     {
-                        Amount = paid <= _net ? paid : _net,
+                        Amount = paid,
                         PaymentDate = DateOnly.FromDateTime(DateTime.Today),
                         Method = _cmbMethod.SelectedIndex == 1 ? "card" : "cash"
                     }

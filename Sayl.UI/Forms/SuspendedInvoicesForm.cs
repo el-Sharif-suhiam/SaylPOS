@@ -125,12 +125,19 @@ namespace Sayl.UI.Forms
                 result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentsList);
             }
 
-            UiHelpers.ShowResult(this, result, "تم استكمال الفاتورة بنجاح.");
-            if (result.IsSuccess)
+            if (!result.IsSuccess)
             {
-                Changed = true;
-                await LoadInvoicesAsync();
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل استكمال الفاتورة." : result.Message);
+                return;
             }
+
+            Changed = true;
+
+            // اكتملت الفاتورة — سؤال واحد: هل يريد الكاشير طباعتها؟
+            if (ConfirmationDialog.Show(this, "طباعة الفاتورة", "هل تريد طباعة الفاتورة؟", dangerStyle: false))
+                await InvoicePrintHelper.PrintAsync(invoice.InvoiceId, this);
+
+            await LoadInvoicesAsync();
         }
 
         private async Task CancelInvoiceAsync()

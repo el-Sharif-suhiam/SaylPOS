@@ -129,7 +129,7 @@ namespace Sayl.UI.Forms
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
-            _txtSearch.PlaceholderText = "اكتب اسم المنتج للبحث الفوري أو امسح الباركود ثم Enter";
+            _txtSearch.PlaceholderText = " اكتب اسم المنتج للبحث الفوري أو امسح الباركود ثم Enter ";
             _txtSearch.TextChanged += (_, _) => OnSearchTextChanged();
             _txtSearch.KeyDown += Search_KeyDown;
             searchHost.Controls.Add(_txtSearch);
@@ -679,7 +679,7 @@ namespace Sayl.UI.Forms
             AddRow(layout, _lblNet, 62);
 
             // 4) زر الدفع الكبير
-            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 78);
+            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Success, hoverColor: AppTheme.SuccessDark, height: 78);
             _btnPay.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             _btnPay.Click += async (_, _) => await CheckoutAsync(suspend: false);
             AddRow(layout, _btnPay, 82);
@@ -1021,55 +1021,27 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            UiHelpers.ShowInfo(this, suspend
-                ? $"تم تعليق الفاتورة رقم {result.Data}."
-                : $"تمت عملية البيع بنجاح. رقم الفاتورة: {result.Data}");
+            if (suspend)
+            {
+                UiHelpers.ShowInfo(this, $"تم تعليق الفاتورة رقم {result.Data}.");
+                ClearCart();
+                await RefreshStockAsync();
+                return;
+            }
 
-            if (!suspend)
-                _ = PrintReceiptIfEnabledAsync(result.Data);
+            // اكتملت الفاتورة (دفع كامل أو دَين) — سؤال واحد بسيط: هل يريد الكاشير طباعتها؟
+            if (ConfirmationDialog.Show(this, "طباعة الفاتورة",
+                    "هل تريد طباعة الفاتورة؟", dangerStyle: false))
+            {
+                await InvoicePrintHelper.PrintAsync(result.Data, this);
+            }
 
             ClearCart();
             await RefreshStockAsync();
         }
 
-        // ───────────────── طباعة الإيصال الحراري تلقائيًا ─────────────────
-        private async Task PrintReceiptIfEnabledAsync(int invoiceId)
-        {
-            try
-            {
-                bool autoPrint;
-                string printerName;
-                using (var scope = Program.Services.CreateScope())
-                {
-                    var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    autoPrint = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
-                    printerName = await settings.GetAsync(clsSettingsService.KeyReceiptPrinter);
-                }
-
-                if (!autoPrint || string.IsNullOrWhiteSpace(printerName))
-                    return;
-
-                InvoicePrintVM? invoice = null;
-                using (var scope = Program.Services.CreateScope())
-                {
-                    var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                    var result = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
-                    if (result.IsSuccess)
-                        invoice = result.Data;
-                }
-
-                if (invoice == null)
-                    return;
-
-                var (ok, message) = await ReceiptPrinter.PrintInvoiceAsync(invoice, printerName);
-                if (!ok)
-                    UiHelpers.ShowError(this, message + " — يمكنك الطباعة من قسم فواتير البيع.");
-            }
-            catch
-            {
-                // فشل الطباعة لا يعطل سير البيع
-            }
-        }
+        // ───────────────── طباعة الفاتورة بعد إتمامها ─────────────────
+        // (PDF في Documents\Sayl_POS\Invoices ثم فتح نافذة الطباعة بالنسخة الجاهزة)
 
         // ───────────────── المرتجع / النقد / إغلاق الجلسة ─────────────────
         private void ShowReturnForm()

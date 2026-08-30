@@ -1,4 +1,5 @@
 using Common.Enums;
+using LiveChartsCore.Measure;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Forms;
@@ -44,21 +45,22 @@ namespace Sayl.UI.UserControls
             _cmbReportType.SelectedIndex = 0;
             _cmbReportType.SelectedIndexChanged += (_, _) => ToggleDateFields();
 
-            var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
+            var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _lblFrom = lblFrom;
             _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 130, Format = DateTimePickerFormat.Short, Value = DateTime.Today.AddMonths(-1) };
 
-            _lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
+            _lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 130, Format = DateTimePickerFormat.Short, Value = DateTime.Today };
 
-            _btnRefresh = AppTheme.MakeButton("عرض التقرير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            _btnRefresh.Dock = DockStyle.Right;
-            _btnRefresh.Width = 140;
-            _btnRefresh.Click += async (_, _) => await RunReportAsync();
+            //_btnRefresh = AppTheme.MakeButton("عرض التقرير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            //_btnRefresh.Dock = DockStyle.Right;
+            //_btnRefresh.Width = 140;
+            //_btnRefresh.Click += async (_, _) => await RunReportAsync();
 
             _btnPeriodic = AppTheme.MakeButton("تقرير دوري (PDF)", AppTheme.Accent, hoverColor: AppTheme.AccentDark);
             _btnPeriodic.Dock = DockStyle.Right;
             _btnPeriodic.Width = 170;
+            _btnPeriodic.Margin = new Padding(10,0,10,0);
             _btnPeriodic.Click += (_, _) =>
             {
                 using var form = new PeriodicReportForm();
@@ -66,7 +68,7 @@ namespace Sayl.UI.UserControls
             };
 
             // ترتيب الإرساء: الزر أولًا ثم التواريخ ثم النوع (آخر عنصر يُرسّى أولًا)
-            filterBar.Controls.Add(_btnRefresh);
+            //filterBar.Controls.Add(_btnRefresh);
             filterBar.Controls.Add(_btnPeriodic);
             filterBar.Controls.Add(_dtpTo);
             filterBar.Controls.Add(_lblTo);

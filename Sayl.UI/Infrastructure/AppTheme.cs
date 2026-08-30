@@ -23,6 +23,7 @@ namespace Sayl.UI.Infrastructure
         public static readonly Color TextMuted = Color.FromArgb(107, 114, 128);
         public static readonly Color TextOnDark = Color.FromArgb(229, 231, 235);
         public static readonly Color Success = Color.FromArgb(22, 163, 74);
+        public static readonly Color SuccessDark = Color.FromArgb(15, 114, 51);
         public static readonly Color Danger = Color.FromArgb(220, 38, 38);
         public static readonly Color Warning = Color.FromArgb(217, 119, 6);
 

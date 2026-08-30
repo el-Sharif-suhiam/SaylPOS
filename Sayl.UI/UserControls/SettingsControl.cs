@@ -100,7 +100,7 @@ namespace Sayl.UI.UserControls
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
 
-                _txtStoreName.Text = await settings.GetAsync(clsSettingsService.KeyStoreName);
+                _txtStoreName.Text = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
                 _txtStorePhone.Text = await settings.GetAsync(clsSettingsService.KeyStorePhone);
                 _txtVat.Text = await settings.GetAsync(clsSettingsService.KeyVatNumber);
                 _txtFooter.Text = await settings.GetAsync(clsSettingsService.KeyReceiptFooter);

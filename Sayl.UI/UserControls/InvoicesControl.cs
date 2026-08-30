@@ -52,17 +52,50 @@ namespace Sayl.UI.UserControls
                 Grid.Columns["colNet"].FillWeight = 11;
                 Grid.Columns["colView"].FillWeight = 8;
 
+                // زر سداد لفواتير الشراء غير المدفوعة/الجزئية
+                if (_type == enInvoicesType.purchase)
+                {
+                    var colPay = new DataGridViewButtonColumn
+                    {
+                        Name = "colPay",
+                        HeaderText = "",
+                        FillWeight = 8
+                    };
+                    Grid.Columns.Add(colPay);
+                }
+
                 Grid.Rows.Clear();
                 foreach (var inv in _invoices)
                 {
-                    int rowIndex = Grid.Rows.Add(inv.InvoiceId,
-                        inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
-                        inv.PartyName ?? "-",
-                        inv.UserName ?? "-",
-                        TranslateStatus(inv.Status),
-                        TranslatePayment(inv.PaymentStatus),
-                        UiHelpers.Money(inv.NetAmount),
-                        "تفاصيل");
+                    int rowIndex;
+                    if (_type == enInvoicesType.purchase)
+                    {
+                        string payAction = inv.Type == "purchase" && inv.Status == "completed" && inv.PaymentStatus != "paid"
+                            ? "سداد"
+                            : "";
+                        rowIndex = Grid.Rows.Add(inv.InvoiceId,
+                            inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
+                            inv.PartyName ?? "-",
+                            inv.UserName ?? "-",
+                            TranslateStatus(inv.Status),
+                            TranslatePayment(inv.PaymentStatus),
+                            UiHelpers.Money(inv.NetAmount),
+                            "تفاصيل",
+                            payAction);
+                        if (payAction.Length > 0)
+                            Grid.Rows[rowIndex].Cells["colPay"].Style.ForeColor = AppTheme.Success;
+                    }
+                    else
+                    {
+                        rowIndex = Grid.Rows.Add(inv.InvoiceId,
+                            inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
+                            inv.PartyName ?? "-",
+                            inv.UserName ?? "-",
+                            TranslateStatus(inv.Status),
+                            TranslatePayment(inv.PaymentStatus),
+                            UiHelpers.Money(inv.NetAmount),
+                            "تفاصيل");
+                    }
                     Grid.Rows[rowIndex].Cells["colView"].Style.ForeColor = AppTheme.Primary;
                 }
             }
@@ -90,13 +123,56 @@ namespace Sayl.UI.UserControls
 
         protected override void BuildToolbar()
         {
-            Grid.CellClick += (_, args) =>
+            Grid.CellClick += async (_, args) =>
             {
-                if (args.RowIndex < 0 || args.ColumnIndex != Grid.Columns["colView"].Index)
+                if (args.RowIndex < 0)
                     return;
-                int idx = args.RowIndex;
-                if (idx < _invoices.Count)
-                    new InvoiceDetailsForm(_invoices[idx].InvoiceId).ShowDialog(FindForm());
+
+                if (args.ColumnIndex == Grid.Columns["colView"].Index)
+                {
+                    int idx = args.RowIndex;
+                    if (idx < _invoices.Count)
+                        new InvoiceDetailsForm(_invoices[idx].InvoiceId).ShowDialog(FindForm());
+                }
+                else if (_type == enInvoicesType.purchase
+                      && args.ColumnIndex == Grid.Columns["colPay"].Index)
+                {
+                    int idx = args.RowIndex;
+                    if (idx >= _invoices.Count) return;
+                    var inv = _invoices[idx];
+
+                    if (inv.Type != "purchase" || inv.Status != "completed")
+                    {
+                        UiHelpers.ShowInfo(this, "السداد متاح لفواتير الشراء المكتملة فقط.");
+                        return;
+                    }
+
+                    if (inv.PaymentStatus == "paid")
+                    {
+                        UiHelpers.ShowInfo(this, "الفاتورة مسددة بالكامل.");
+                        return;
+                    }
+
+                    // جلب المتبقي الفعلي (صافي − مدفوع) لأن قائمة الفواتير لا تتضمن المدفوع
+                    decimal remaining = inv.NetAmount;
+                    string partyName = inv.PartyName ?? "-";
+                    try
+                    {
+                        using var scope = Program.Services.CreateScope();
+                        var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                        var printResult = await invoiceService.GetInvoiceForPrintAsync(inv.InvoiceId);
+                        if (printResult.IsSuccess && printResult.Data != null)
+                            remaining = printResult.Data.RemainingAmount;
+                    }
+                    catch
+                    {
+                        // نكمل بالصافي كحد أعلى — الخدمة تتحقق من المتبقي الفعلي عند الحفظ
+                    }
+
+                    using var form = SupplierPaymentForm.ForInvoice(inv.InvoiceId, partyName, remaining);
+                    if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                        _ = LoadDataAsync();
+                }
             };
 
             if (_type == enInvoicesType.purchase)
