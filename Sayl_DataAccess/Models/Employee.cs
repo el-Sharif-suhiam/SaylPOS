@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Common.Enums;
 
 namespace Sayl.Core.Models;
 
@@ -15,6 +16,9 @@ public partial class Employee
 
     public decimal? Salary { get; set; }
 
+    /// <summary>طريقة احتساب الراتب (القيمة Salary هي المعدل حسب هذا النوع).</summary>
+    public enSalaryType SalaryType { get; set; }
+
     public DateOnly? HireDate { get; set; }
 
     public string? Address { get; set; }
@@ -27,5 +31,7 @@ public partial class Employee
 
     public DateTime? CreatedAt { get; set; }
 
-    public virtual User Users { get; set; } = new User();
+    public virtual ICollection<EmployeeShift> EmployeeShifts { get; set; } = new List<EmployeeShift>();
+    public virtual ICollection<PayrollRecord> PayrollRecords { get; set; } = new List<PayrollRecord>();
+    public virtual User? User { get; set; }
 }

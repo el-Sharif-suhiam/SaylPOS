@@ -1,0 +1,313 @@
+using Common.DTOs;
+using Common.Enums;
+using Common.Results;
+using Microsoft.EntityFrameworkCore;
+using Sayl.Core.Data;
+using Sayl.Core.Models;
+
+namespace Sayl.Core.Services
+{
+    /// <summary>
+    /// الرواتب: توليد كشوف الفترة (idempotent عبر فهرس فريد)، حساب المرتب حسب نوعه
+    /// (بالساعة/يومي/شهري مع Proration)، الإجازات الرسمية لليومي،
+    /// والصرف (guarded transition) الذي ينشئ مصروفاً بفئة 'رواتب' —
+    /// فيتدفق تلقائيًا في كل تقارير الأرباح والمصروفات دون تعديل أي تقرير.
+    /// </summary>
+    public class clsPayrollService
+    {
+        private readonly SaylDbContext _dbContext;
+
+        public clsPayrollService(SaylDbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
+
+        public const string SalaryExpenseCategory = "رواتب";
+
+        /// <summary>كشوف فترة محددة (كل الموظفين) أو كشوف موظف.</summary>
+        public async Task<List<DtoPayrollRecord>> GetPayrollsAsync(DateOnly? periodFrom = null, DateOnly? periodTo = null, int? employeeId = null)
+        {
+            var query = _dbContext.PayrollRecords
+                .Include(p => p.Employee)
+                .AsQueryable();
+
+            if (periodFrom.HasValue)
+                query = query.Where(p => p.PeriodFrom >= periodFrom.Value);
+            if (periodTo.HasValue)
+                query = query.Where(p => p.PeriodTo <= periodTo.Value);
+            if (employeeId.HasValue)
+                query = query.Where(p => p.EmployeeId == employeeId.Value);
+
+            return await query
+                .OrderByDescending(p => p.PeriodFrom)
+                .ThenBy(p => p.Employee.Name)
+                .Select(p => new DtoPayrollRecord
+                {
+                    PayrollId = p.PayrollId,
+                    EmployeeId = p.EmployeeId,
+                    EmployeeName = p.Employee.Name,
+                    PeriodFrom = p.PeriodFrom,
+                    PeriodTo = p.PeriodTo,
+                    SalaryType = p.SalaryType,
+                    WorkedUnits = p.WorkedUnits,
+                    HolidayUnits = p.HolidayUnits,
+                    Rate = p.Rate,
+                    Gross = p.Gross,
+                    Deductions = p.Deductions,
+                    Additions = p.Additions,
+                    Net = p.Net,
+                    Status = p.Status,
+                    PaidAt = p.PaidAt,
+                    Notes = p.Notes
+                })
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// توليد كشوف فترة لكل الموظفين النشطين (active أو on_leave).
+        /// idempotent: الموظف الذي له كشف للفترة نفسها يُتجاوز (الفهرس الفريد يحمي أيضاً من التزامن).
+        /// - monthly : Proration تلقائي حسب مدة عمل الموظف داخل الفترة (HireDate/الاستقالة).
+        /// - daily   : أيام العمل صفر + الإجازات الرسمية داخل الفترة تُقترح مسبقًا.
+        /// - hourly  : ساعات صفر — المحاسب يعبئها.
+        /// </summary>
+        public async Task<Result<int>> GeneratePayrollsAsync(DateOnly periodFrom, DateOnly periodTo, int actorUserId)
+        {
+            if (periodTo < periodFrom)
+                return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
+
+            if (periodTo > DateOnly.FromDateTime(DateTime.Today))
+                return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
+
+            var employees = await _dbContext.Employees
+                .Where(e => e.Status != "resigned")
+                .ToListAsync();
+
+            if (employees.Count == 0)
+                return Result<int>.Fail("لا يوجد موظفون لتوليد كشوف.");
+
+            // الفهرس الفريد UQ_PayrollRecords_Employee_Period يمنع التكرار حتى مع طلبين متوازيين؛
+            // نلتقطه ونتجاوز الموظف بدل فشل العملية كاملة
+            int created = 0;
+            foreach (var emp in employees)
+            {
+                // نطاق عمل الموظف داخل الفترة (Proration)
+                var from = periodFrom;
+                var to = periodTo;
+                if (emp.HireDate.HasValue && emp.HireDate.Value > from)
+                    from = emp.HireDate.Value;
+                if (to < from)
+                    continue; // لم يُعيَّن بعد داخل هذه الفترة
+
+                decimal rate = emp.Salary ?? 0;
+                decimal workedUnits = 0, holidayUnits = 0, gross = 0;
+
+                switch (emp.SalaryType)
+                {
+                    case enSalaryType.monthly:
+                    {
+                        // Proration: نسبة أيام وجوده الفعلي داخل الفترة
+                        int totalDays = periodTo.DayNumber - periodFrom.DayNumber + 1;
+                        int activeDays = to.DayNumber - from.DayNumber + 1;
+                        gross = rate * activeDays / totalDays;
+                        workedUnits = activeDays;
+                        break;
+                    }
+                    case enSalaryType.daily:
+                    {
+                        // الإجازات الرسمية داخل نطاق عمله تُحسب أيامًا مدفوعة
+                        holidayUnits = await CountHolidaysInRangeAsync(from, to);
+                        gross = rate * holidayUnits; // أيام العمل يدوية — تبدأ من الإجازات فقط
+                        workedUnits = 0;
+                        break;
+                    }
+                    case enSalaryType.hourly:
+                        workedUnits = 0;
+                        gross = 0;
+                        break;
+                }
+
+                var record = new PayrollRecord
+                {
+                    EmployeeId = emp.EmployeeId,
+                    PeriodFrom = periodFrom,
+                    PeriodTo = periodTo,
+                    SalaryType = emp.SalaryType,
+                    WorkedUnits = workedUnits,
+                    HolidayUnits = holidayUnits,
+                    Rate = rate,
+                    Gross = Math.Round(gross, 2),
+                    Deductions = 0,
+                    Additions = 0,
+                    Net = Math.Round(gross, 2),
+                    Status = enPayrollStatus.pending,
+                    CreatedAt = DateTime.Now
+                };
+
+                _dbContext.PayrollRecords.Add(record);
+                try
+                {
+                    await _dbContext.SaveChangesAsync();
+                    created++;
+                }
+                catch (DbUpdateException)
+                {
+                    // كشف موجود لهذه الفترة (تزامن أو إعادة توليد) — نتجاوز
+                    _dbContext.ChangeTracker.Clear();
+                }
+            }
+
+            if (created == 0)
+                return Result<int>.Fail("كل الموظفين لديهم كشوف لهذه الفترة بالفعل.");
+
+            clsAudit.Log(_dbContext, actorUserId, "GeneratePayrolls",
+                $"توليد {created} كشف رواتب للفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd}");
+            await _dbContext.SaveChangesAsync();
+
+            return Result<int>.Ok(created, $"تم توليد {created} كشف رواتب.");
+        }
+
+        /// <summary>تعديل كشف معلق: وحدات العمل + الخصومات والإضافات — يُعاد حساب الإجمالي والصافي.</summary>
+        public async Task<Result> UpdatePayrollAsync(int payrollId, decimal workedUnits, decimal holidayUnits,
+            decimal deductions, decimal additions, string? notes, int actorUserId)
+        {
+            if (workedUnits < 0 || holidayUnits < 0 || deductions < 0 || additions < 0)
+                return Result.Fail("القيم يجب أن تكون صفراً أو أكثر.");
+
+            var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
+            if (record == null)
+                return Result.Fail("الكشف غير موجود.");
+
+            if (record.Status == enPayrollStatus.paid)
+                return Result.Fail("لا يمكن تعديل كشف مصروف.");
+
+            record.WorkedUnits = workedUnits;
+            record.HolidayUnits = holidayUnits;
+            record.Deductions = deductions;
+            record.Additions = additions;
+            if (notes != null)
+                record.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+
+            Recalc(record);
+            await _dbContext.SaveChangesAsync();
+
+            clsAudit.Log(_dbContext, actorUserId, "UpdatePayroll",
+                $"تعديل كشف راتب #{payrollId} — الصافي: {record.Net:N2}");
+            await _dbContext.SaveChangesAsync();
+
+            return Result.Ok("تم تحديث الكشف.");
+        }
+
+        /// <summary>إعادة حساب الإجمالي والصافي حسب نوع الراتب (الشهري يحترم Proration المحفوظ في WorkedUnits).</summary>
+        private static void Recalc(PayrollRecord r)
+        {
+            decimal gross = r.SalaryType switch
+            {
+                enSalaryType.daily => r.Rate * (r.WorkedUnits + r.HolidayUnits),
+                enSalaryType.hourly => r.Rate * r.WorkedUnits,
+                _ => r.Rate * r.WorkedUnits   // monthly: WorkedUnits = أيام المدة الفعلية (Proration عند التوليد)
+            };
+
+            // إجمالي الفترة الكاملة = PeriodTo-PeriodFrom+1 — نعيد اشتقاقه من الطول الفعلي للفترة
+            if (r.SalaryType == enSalaryType.monthly)
+            {
+                int totalDays = r.PeriodTo.DayNumber - r.PeriodFrom.DayNumber + 1;
+                // WorkedUnits هنا أيام الوجود الفعلي — Gross محفوظ أصلًا من التوليد؛ نعيد بناءه من النسبة
+                if (totalDays > 0 && r.WorkedUnits > 0 && r.WorkedUnits < totalDays)
+                    gross = r.Rate * r.WorkedUnits / totalDays;
+                else if (r.WorkedUnits >= totalDays)
+                    gross = r.Rate; // كامل الفترة
+            }
+
+            r.Gross = Math.Round(gross, 2);
+            decimal net = r.Gross - r.Deductions + r.Additions;
+            r.Net = Math.Round(net < 0 ? 0 : net, 2); // CHECK Net >= 0
+        }
+
+        /// <summary>
+        /// صرف كشف: guarded transition (pending → paid) داخل معاملة —
+        /// ينشئ مصروفاً بفئة 'رواتب' مرتبطاً بالكشف فيظهر تلقائيًا في كل التقارير.
+        /// </summary>
+        public async Task<Result> PayPayrollAsync(int payrollId, int actorUserId)
+        {
+            var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
+            if (record == null)
+                return Result.Fail("الكشف غير موجود.");
+
+            if (record.Status != enPayrollStatus.pending)
+                return Result.Fail("الكشف مصروف بالفعل.");
+
+            if (record.Net <= 0)
+                return Result.Fail("الصافي يجب أن يكون أكبر من صفر قبل الصرف (قيد المصروفات يرفض صفراً).");
+
+            var employee = await _dbContext.Employees.FindAsync(record.EmployeeId);
+            if (employee == null)
+                return Result.Fail("الموظف غير موجود.");
+
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
+            {
+                // انتقال ذري داخل المعاملة: يمنع صرفًا مزدوجًا متوازيًا
+                int claimed = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE PayrollRecords SET Status = 'paid' WHERE PayrollId = {payrollId} AND Status = 'pending'");
+                if (claimed == 0)
+                    return Result.Fail("الكشف مصروف بالفعل أو قيد الصرف الآن.");
+
+                var expense = new Expense
+                {
+                    Description = $"راتب {employee.Name} — {record.PeriodFrom:yyyy-MM-dd} إلى {record.PeriodTo:yyyy-MM-dd}",
+                    Amount = record.Net,
+                    ExpenseDate = DateOnly.FromDateTime(DateTime.Today),
+                    Category = SalaryExpenseCategory,
+                    Notes = $"كشف راتب #{record.PayrollId}",
+                    UserId = actorUserId,
+                    CreatedAt = DateTime.Now
+                };
+                _dbContext.Expenses.Add(expense);
+                await _dbContext.SaveChangesAsync(); // لاستخراج ExpenseId
+
+                record.Status = enPayrollStatus.paid;
+                record.PaidAt = DateTime.Now;
+                record.ExpenseId = expense.ExpenseId;
+
+                clsAudit.Log(_dbContext, actorUserId, "PayPayroll",
+                    $"صرف راتب {employee.Name} — كشف #{payrollId} — الصافي: {record.Net:N2} — مصروف #{expense.ExpenseId}");
+
+                await _dbContext.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return Result.Ok($"تم صرف راتب {employee.Name} بمبلغ {record.Net:N2} وتسجيله في المصروفات.");
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                string details = ex.Message;
+                var inner = ex.InnerException;
+                while (inner != null)
+                {
+                    details += " ← " + inner.Message;
+                    inner = inner.InnerException;
+                }
+                return Result.Fail($"فشل صرف الراتب ({details}).");
+            }
+        }
+
+        /// <summary>عدد أيام الإجازات الرسمية المدفوعة داخل نطاق (نسخة داخلية بدون استدعاء خدمة أخرى).</summary>
+        private async Task<decimal> CountHolidaysInRangeAsync(DateOnly from, DateOnly to)
+        {
+            var holidays = await _dbContext.OfficialHolidays.ToListAsync();
+            decimal total = 0;
+            foreach (var h in holidays)
+            {
+                var start = h.IsAnnual ? new DateOnly(from.Year, h.HolidayDate.Month, h.HolidayDate.Day)
+                                       : h.HolidayDate;
+                for (int i = 0; i < h.DurationDays; i++)
+                {
+                    var day = start.AddDays(i);
+                    if (day >= from && day <= to)
+                        total++;
+                }
+            }
+            return total;
+        }
+    }
+}

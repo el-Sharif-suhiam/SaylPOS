@@ -27,13 +27,14 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(reason))
                 return Result.Fail("السبب مطلوب.");
 
-            var session = await _dbContext.PosSessions.FindAsync(sessionId);
-            if (session == null || session.Status != enPosSessionStatusType.open)
-                return Result.Fail("الجلسة غير موجودة أو مغلقة.");
-
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // فحص الجلسة داخل المعاملة: يمنع قيد حركة على جلسة تُغلق بالتوازي الآن
+                var session = await _dbContext.PosSessions.FindAsync(sessionId);
+                if (session == null || session.Status != enPosSessionStatusType.open)
+                    return Result.Fail("الجلسة غير موجودة أو مغلقة.");
+
                 _dbContext.CashMovements.Add(new CashMovement
                 {
                     SessionId = sessionId,

@@ -76,17 +76,25 @@ namespace Sayl.Core.Services
             if (invoice.PaymentStatus == enPaymentStatus.paid)
                 return Result.Fail("الفاتورة مسددة بالكامل.");
 
-            decimal paidSoFar = await _dbContext.Payments
-                .Where(p => p.InvoiceId == invoice.InvoiceId)
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
-
-            decimal remaining = invoice.NetAmount - paidSoFar;
-            if (request.Amount > remaining)
-                return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة ({remaining}).");
-
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable + إعادة حساب المتبقي داخل المعاملة:
+            // قفل نطاقي على مدفوعات الفاتورة يمنع إدراج دفعتين متوازيتين تتجاوزان المتبقي معاً
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                if (invoice.PaymentStatus == enPaymentStatus.paid)
+                    return Result.Fail("الفاتورة مسددة بالكامل.");
+
+                decimal paidSoFar = await _dbContext.Payments
+                    .Where(p => p.InvoiceId == invoice.InvoiceId)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+                decimal remaining = invoice.NetAmount - paidSoFar;
+                if (remaining <= 0)
+                    return Result.Fail("الفاتورة مسددة بالكامل.");
+
+                if (request.Amount > remaining)
+                    return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة ({remaining:N2}).");
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = invoice.Type == enInvoicesType.purchase || invoice.Type == enInvoicesType.supplier_return
@@ -155,12 +163,14 @@ namespace Sayl.Core.Services
             if (customer == null)
                 return Result.Fail("العميل غير موجود.");
 
-            if ((customer.Balance ?? 0) < request.Amount)
-                return Result.Fail("المبلغ أكبر من رصيد العميل المستحق.");
-
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع تحصيلين متوازيين يتجاوزان الرصيد
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                decimal balance = customer.Balance ?? 0;
+                if (balance < request.Amount)
+                    return Result.Fail($"المبلغ أكبر من رصيد العميل المستحق ({balance:N2}).");
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = enPaymentType.income,
@@ -174,7 +184,8 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.Now
                 });
 
-                customer.Balance -= request.Amount;
+                customer.Balance = balance - request.Amount;
+                if (customer.Balance < 0) customer.Balance = 0;
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -202,12 +213,14 @@ namespace Sayl.Core.Services
             if (supplier == null)
                 return Result.Fail("المورد غير موجود.");
 
-            if ((supplier.Balance ?? 0) < request.Amount)
-                return Result.Fail("المبلغ أكبر من رصيد المورد المستحق.");
-
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع سدادين متوازيين يتجاوزان الرصيد
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                decimal balance = supplier.Balance ?? 0;
+                if (balance < request.Amount)
+                    return Result.Fail($"المبلغ أكبر من رصيد المورد المستحق ({balance:N2}).");
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = enPaymentType.outcome,
@@ -221,7 +234,8 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.Now
                 });
 
-                supplier.Balance -= request.Amount;
+                supplier.Balance = balance - request.Amount;
+                if (supplier.Balance < 0) supplier.Balance = 0;
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();

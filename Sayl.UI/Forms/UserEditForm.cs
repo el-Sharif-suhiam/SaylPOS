@@ -7,7 +7,7 @@ using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.Forms
 {
-    /// <summary>إضافة مستخدم جديد: اسم مستخدم + كلمة مرور + دور.</summary>
+    /// <summary>إضافة مستخدم جديد: اسم مستخدم + كلمة مرور + دور + ربط اختياري بموظف.</summary>
     public class UserEditForm : Form
     {
         private readonly List<DtoRole> _roles;
@@ -15,11 +15,37 @@ namespace Sayl.UI.Forms
         private TextBox _txtUserName = null!;
         private TextBox _txtPassword = null!;
         private ComboBox _cmbRole = null!;
+        private ComboBox _cmbEmployee = null!;
+        private List<Common.DTOs.DtoEmployee> _employees = new();
 
         public UserEditForm(List<DtoRole> roles)
         {
             _roles = roles;
             BuildUi();
+            Load += async (_, _) => await LoadEmployeesAsync();
+        }
+
+        private async Task LoadEmployeesAsync()
+        {
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var employeeService = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
+                // موظفون نشطون فقط (لا يُربط مستقيل بحساب جديد)
+                _employees = await employeeService.GetEmployeesListAsync(includeInactive: false);
+
+                _cmbEmployee.Items.Clear();
+                _cmbEmployee.Items.Add("بدون ربط بموظف");
+                foreach (var e in _employees)
+                    _cmbEmployee.Items.Add(e.Name);
+                _cmbEmployee.SelectedIndex = 0;
+            }
+            catch
+            {
+                _cmbEmployee.Items.Clear();
+                _cmbEmployee.Items.Add("بدون ربط بموظف");
+                _cmbEmployee.SelectedIndex = 0;
+            }
         }
 
         private void BuildUi()
@@ -48,15 +74,19 @@ namespace Sayl.UI.Forms
                 _cmbRole.Items.Add($"{role.Name} ({role.RoleValue})");
             _cmbRole.SelectedIndex = _roles.Count > 0 ? 0 : -1;
 
+            var lblEmployee = new Label { Text = "ربط بموظف (اختياري)", Bounds = new Rectangle(30, 268, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            _cmbEmployee = new ComboBox { Bounds = new Rectangle(30, 292, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+
             var btnOk = AppTheme.MakeButton("إضافة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnOk.Bounds = new Rectangle(30, 268, 220, 50);
+            btnOk.Bounds = new Rectangle(30, 346, 220, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
             var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnCancel.Bounds = new Rectangle(270, 268, 120, 50);
+            btnCancel.Bounds = new Rectangle(270, 346, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[] { lblTitle, lblUser, _txtUserName, lblPass, _txtPassword, lblRole, _cmbRole, btnOk, btnCancel });
+            ClientSize = new Size(420, 410);
+            Controls.AddRange(new Control[] { lblTitle, lblUser, _txtUserName, lblPass, _txtPassword, lblRole, _cmbRole, lblEmployee, _cmbEmployee, btnOk, btnCancel });
             AcceptButton = btnOk;
             CancelButton = btnCancel;
         }
@@ -88,11 +118,16 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            // ربط الموظف: الفهرس 0 = بدون ربط
+            int? employeeId = null;
+            if (_cmbEmployee.SelectedIndex > 0 && _cmbEmployee.SelectedIndex - 1 < _employees.Count)
+                employeeId = _employees[_cmbEmployee.SelectedIndex - 1].EmployeeId;
+
             var request = new NewUserRequest(
                 _txtUserName.Text.Trim(),
                 _txtPassword.Text,
                 _roles[_cmbRole.SelectedIndex].RoleId,
-                EmployeeId: null);
+                EmployeeId: employeeId);
 
             Result result;
             using (var scope = Program.Services.CreateScope())

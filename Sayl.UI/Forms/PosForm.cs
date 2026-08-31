@@ -253,6 +253,39 @@ namespace Sayl.UI.Forms
             ActiveControl = _txtSearch;
         }
 
+        // ───────────────── تنظيف مدخلات الماسح الضوئي ─────────────────
+        /// <summary>
+        /// يزيل ترويسات معرّفات الرموز التي ترسلها قارئات 2D (QR/DataMatrix/GS1)
+        /// مثل ]Q3 و ]C1 و ]d2، إضافة إلى أسطر الإرجاع الزائدة — حتى تطابق
+        /// قيمة الباركود المخزنة في قاعدة البيانات مطابقة تامة.
+        /// </summary>
+        private static string CleanScannerInput(string raw)
+        {
+            string text = (raw ?? "").Trim().TrimEnd('\r', '\n').Trim();
+
+            // ترويسة معرّف الرمز: ']' + حرف معرّف + محرف فك الترميز (AIM symbology identifier)
+            while (text.Length > 3 && text[0] == ']' && char.IsLetter(text[1]) && char.IsLetterOrDigit(text[2]))
+                text = text[3..].Trim();
+
+            return text;
+        }
+
+        /// <summary>
+        /// هل النمط يشبه إدخال ماسح ضوئي (وليس بحث اسم يدوي)؟
+        /// أرقام فقط (باركود EAN) أو SKU حرفي-رقمي متصل (SAYL-0123 / P00123) —
+        /// النص العربي المفصول بمسافات لا يدخل النمط أبدًا فلا تُبتلع كتابة الكاشير.
+        /// </summary>
+        private static bool LooksLikeScannerToken(string text) =>
+            text.Length >= 4 && text.Length <= 30 && !text.Contains(' ')
+            && text.All(c => char.IsAsciiDigit(c) || char.IsAsciiLetter(c) || c == '-' || c == '.');
+
+        /// <summary>تنبيه مسح غير معروف: رسالة حمراء مؤقتة + صوت تحذير، دون أي نافذة حوارية تعيق المسح.</summary>
+        private void ShowScanNotFound(string scanned)
+        {
+            ShowStockWarn($"المنتج غير موجود: {scanned}");
+            System.Media.SystemSounds.Exclamation.Play();
+        }
+
         private void OnSearchTextChanged()
         {
             _searchTimer.Stop();
@@ -268,12 +301,15 @@ namespace Sayl.UI.Forms
 
         private async Task RunLiveSearchAsync()
         {
-            string term = _txtSearch.Text?.Trim() ?? "";
+            string term = CleanScannerInput(_txtSearch.Text);
             if (term.Length == 0)
             {
                 HideSearchPopup();
                 return;
             }
+
+            if (term != (_txtSearch.Text?.Trim() ?? ""))
+                _txtSearch.Text = term; // إظهار النص المنظف (بلا ترويسة الرمز) للكاشير
 
             int seq = ++_searchSeq;
             try
@@ -281,8 +317,9 @@ namespace Sayl.UI.Forms
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
 
-                // باركود مطابق تمامًا = إضافة فورية (سيناريو الماسح الضوئي)
-                if (term.Length >= 6 && term.All(char.IsDigit))
+                // مسار الماسح الضوئي (باركود/QR بدون Enter): إضافة فورية عند المطابقة التامة،
+                // وتنبيه واضح عند عدم معرفة الرمز — لا صمت (كاشير القارئ 2D يعتمد عليه)
+                if (LooksLikeScannerToken(term))
                 {
                     var byBarcode = await productService.GetProductByBarcodeAsync(term);
                     if (seq != _searchSeq) return;
@@ -292,6 +329,11 @@ namespace Sayl.UI.Forms
                         FinishSearchInput();
                         return;
                     }
+
+                    // رمز نمطي-مسح لا يعرف منتجًا: ليس بحث اسم — ننبه و ننهي الإدخال
+                    ShowScanNotFound(term);
+                    FinishSearchInput();
+                    return;
                 }
 
                 var matches = (await productService.GetProductsListAsync(term))
@@ -352,8 +394,12 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            string term = _txtSearch.Text?.Trim() ?? "";
+            string term = CleanScannerInput(_txtSearch.Text);
+            if (term != (_txtSearch.Text?.Trim() ?? ""))
+                _txtSearch.Text = term;
             if (term.Length == 0) return;
+
+            bool scannerLike = LooksLikeScannerToken(term);
 
             try
             {
@@ -364,6 +410,14 @@ namespace Sayl.UI.Forms
                 if (byBarcode.IsSuccess && byBarcode.Data != null)
                 {
                     AddToCart(byBarcode.Data);
+                    FinishSearchInput();
+                    return;
+                }
+
+                // رمز مسح بلا مطابقة: تنبيه وإنهاء — لا نوقع الكاشير في بحث اسم متبقي في الحقل
+                if (scannerLike)
+                {
+                    ShowScanNotFound(term);
                     FinishSearchInput();
                     return;
                 }
@@ -955,6 +1009,7 @@ namespace Sayl.UI.Forms
                 _customerName = picker.SelectedCustomerName;
                 _lblCustomer.Text = _customerName ?? "عميل";
             }
+            _txtSearch.Focus(); // الماسح ينتظر: التركيز يعود لمربع البحث فور إغلاق النافذة
         }
 
         // ───────────────── الدفع / التعليق ─────────────────
@@ -1018,6 +1073,7 @@ namespace Sayl.UI.Forms
             if (!result.IsSuccess)
             {
                 UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشلت عملية البيع." : result.Message);
+                _txtSearch.Focus();
                 return;
             }
 
@@ -1038,6 +1094,7 @@ namespace Sayl.UI.Forms
 
             ClearCart();
             await RefreshStockAsync();
+            _txtSearch.Focus(); // الجلسة التالية: الماسح جاهز فورًا
         }
 
         // ───────────────── طباعة الفاتورة بعد إتمامها ─────────────────
@@ -1049,6 +1106,7 @@ namespace Sayl.UI.Forms
             using var form = new ReturnForm();
             form.ShowDialog(this);
             _ = RefreshStockAsync();
+            _txtSearch.Focus();
         }
 
         private void ShowCashMovement()
@@ -1061,6 +1119,7 @@ namespace Sayl.UI.Forms
 
             using var form = new CashMovementForm(_sessionId.Value);
             form.ShowDialog(this);
+            _txtSearch.Focus();
         }
 
         private async Task CloseSessionFlowAsync()
@@ -1084,6 +1143,7 @@ namespace Sayl.UI.Forms
                 ClearCart();
                 await OpenSessionAsync();
             }
+            _txtSearch.Focus();
         }
 
         private void ShowSuspendedInvoices()
@@ -1091,6 +1151,7 @@ namespace Sayl.UI.Forms
             using var form = new SuspendedInvoicesForm();
             form.ShowDialog(this);
             _ = RefreshStockAsync();
+            _txtSearch.Focus();
         }
 
         private async Task LogoutAsync()

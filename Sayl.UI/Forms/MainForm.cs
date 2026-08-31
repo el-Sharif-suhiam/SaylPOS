@@ -108,6 +108,10 @@ namespace Sayl.UI.Forms
             _sections["المصروفات"] = () => new ExpensesControl();
             _sections["التقارير"] = () => new ReportsControl();
 
+            // الموظفون + رواتبهم: أدمن ومحاسب (إدارة الرواتب للمحاسب فأعلى بقرار المستخدم)
+            if (SessionState.IsAdmin || SessionState.IsAccountant)
+                _sections["الموظفون والرواتب"] = () => new EmployeesControl();
+
             if (SessionState.IsAdmin)
             {
                 _sections["المستخدمون"] = () => new UsersControl();

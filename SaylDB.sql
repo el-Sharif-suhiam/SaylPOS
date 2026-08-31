@@ -112,6 +112,7 @@ CREATE TABLE Employees
     Phone NVARCHAR(20) NULL,
     Email NVARCHAR(150) NULL,
     Salary DECIMAL(10,2) NULL,
+    SalaryType NVARCHAR(10) NOT NULL DEFAULT ('monthly'),   -- hourly / daily / monthly
     HireDate DATE NULL,
     Address NVARCHAR(400) NULL,
     Status NVARCHAR(20) NOT NULL DEFAULT ('active'),
@@ -119,7 +120,8 @@ CREATE TABLE Employees
     Department NVARCHAR(50) NULL,
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
-    CONSTRAINT CK_Employees_Status CHECK (Status IN ('active','on_leave','resigned'))
+    CONSTRAINT CK_Employees_Status CHECK (Status IN ('active','on_leave','resigned')),
+    CONSTRAINT CK_Employees_SalaryType CHECK (SalaryType IN ('hourly','daily','monthly'))
 );
 GO
 -----------------------------------------------------------
@@ -151,6 +153,7 @@ CREATE TABLE Users
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
     CONSTRAINT UQ_Users_Username UNIQUE (Username),
+    CONSTRAINT UQ_Users_EmployeeId UNIQUE (EmployeeId),   -- حساب واحد لكل موظف
     CONSTRAINT FK_Users_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees(EmployeeId),
     CONSTRAINT FK_Users_RoleId FOREIGN KEY (RoleId) REFERENCES Roles(RoleId),
 
@@ -383,6 +386,88 @@ ALTER TABLE Invoices
     ADD CONSTRAINT FK_Invoices_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId);
 GO
 -----------------------------------------------------------
+-- 20) Create Shifts
+--     Shift DEFINITIONS ONLY (expected schedule, not attendance)
+-----------------------------------------------------------
+CREATE TABLE Shifts
+(
+    ShiftId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    Name NVARCHAR(50) NOT NULL,
+    StartTime TIME NOT NULL,
+    EndTime TIME NOT NULL,          -- End < Start = crosses midnight (night shift)
+    Notes NVARCHAR(255) NULL,
+
+    CONSTRAINT UQ_Shifts_Name UNIQUE (Name),
+    CONSTRAINT CK_Shifts_Times CHECK (StartTime <> EndTime)
+);
+GO
+-----------------------------------------------------------
+-- 21) Create EmployeeShifts
+--     Shift assignment per employee per weekday (bitmask: Sun=1..Sat=64)
+-----------------------------------------------------------
+CREATE TABLE EmployeeShifts
+(
+    EmployeeShiftId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    EmployeeId INT NOT NULL,
+    ShiftId INT NOT NULL,
+    DaysOfWeek TINYINT NOT NULL,               -- bitmask 1..127 (bit0=Sunday .. bit6=Saturday)
+    EffectiveFrom DATE NOT NULL,
+    EffectiveTo DATE NULL,                      -- NULL = open-ended
+
+    CONSTRAINT FK_EmployeeShifts_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees(EmployeeId),
+    CONSTRAINT FK_EmployeeShifts_ShiftId FOREIGN KEY (ShiftId) REFERENCES Shifts(ShiftId),
+    CONSTRAINT CK_EmployeeShifts_Days CHECK (DaysOfWeek BETWEEN 1 AND 127),
+    CONSTRAINT UQ_EmployeeShifts_Active UNIQUE (EmployeeId, ShiftId, EffectiveFrom)
+);
+GO
+-----------------------------------------------------------
+-- 22) Create OfficialHolidays
+--     Paid official holidays (affect daily payroll; annual = recurring)
+-----------------------------------------------------------
+CREATE TABLE OfficialHolidays
+(
+    HolidayId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    HolidayDate DATE NOT NULL,
+    DurationDays INT NOT NULL DEFAULT (1),
+    IsAnnual BIT NOT NULL DEFAULT (0),
+
+    CONSTRAINT CK_OfficialHolidays_Duration CHECK (DurationDays >= 1)
+);
+GO
+-----------------------------------------------------------
+-- 23) Create PayrollRecords
+--     Payroll per employee per period; paying creates an Expense (category 'رواتب')
+-----------------------------------------------------------
+CREATE TABLE PayrollRecords
+(
+    PayrollId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    EmployeeId INT NOT NULL,
+    PeriodFrom DATE NOT NULL,
+    PeriodTo DATE NOT NULL,
+    SalaryType NVARCHAR(10) NOT NULL,           -- snapshot of employee type at generation
+    WorkedUnits DECIMAL(10,2) NOT NULL DEFAULT (0),   -- hours (hourly) or days (daily)
+    HolidayUnits DECIMAL(10,2) NOT NULL DEFAULT (0), -- paid holiday days (daily)
+    Rate DECIMAL(10,2) NOT NULL DEFAULT (0),
+    Gross DECIMAL(10,2) NOT NULL DEFAULT (0),
+    Deductions DECIMAL(10,2) NOT NULL DEFAULT (0),
+    Additions DECIMAL(10,2) NOT NULL DEFAULT (0),
+    Net DECIMAL(10,2) NOT NULL DEFAULT (0),
+    Status NVARCHAR(10) NOT NULL DEFAULT ('pending'),  -- pending / paid
+    PaidAt DATETIME2 NULL,
+    ExpenseId INT NULL,                         -- linked expense created on payment
+    Notes NVARCHAR(255) NULL,
+    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+
+    CONSTRAINT FK_PayrollRecords_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees(EmployeeId),
+    CONSTRAINT FK_PayrollRecords_ExpenseId FOREIGN KEY (ExpenseId) REFERENCES Expenses(ExpenseId),
+    CONSTRAINT CK_PayrollRecords_Period CHECK (PeriodTo >= PeriodFrom),
+    CONSTRAINT CK_PayrollRecords_Status CHECK (Status IN ('pending','paid')),
+    CONSTRAINT CK_PayrollRecords_Net CHECK (Net >= 0),
+    CONSTRAINT UQ_PayrollRecords_Employee_Period UNIQUE (EmployeeId, PeriodFrom, PeriodTo) -- idempotent generation
+);
+GO
+-----------------------------------------------------------
 -- 20) Create Indexes for Performance
 -----------------------------------------------------------
 
@@ -401,6 +486,17 @@ CREATE INDEX IX_Suppliers_Category ON Suppliers(Category);
 -- Employees
 CREATE INDEX IX_Employees_Status ON Employees(Status);
 CREATE INDEX IX_Employees_Department ON Employees(Department);
+
+-- EmployeeShifts
+CREATE INDEX IX_EmployeeShifts_EmployeeId ON EmployeeShifts(EmployeeId);
+
+-- OfficialHolidays
+CREATE INDEX IX_OfficialHolidays_Date ON OfficialHolidays(HolidayDate);
+
+-- PayrollRecords
+CREATE INDEX IX_PayrollRecords_EmployeeId ON PayrollRecords(EmployeeId);
+CREATE INDEX IX_PayrollRecords_Status ON PayrollRecords(Status);
+CREATE INDEX IX_PayrollRecords_Period ON PayrollRecords(PeriodFrom, PeriodTo);
 
 -- Users
 CREATE INDEX IX_Users_RoleId ON Users(RoleId);
@@ -451,3 +547,22 @@ CREATE INDEX IX_Expenses_UserId ON Expenses(UserId);
 -- POSSessions
 CREATE INDEX IX_POSSessions_UserId ON POSSessions(UserId);
 CREATE INDEX IX_POSSessions_Status ON POSSessions(Status);
+
+-----------------------------------------------------------
+-- Concurrency guards: one open POS session per user.
+-- Filtered unique index — enforced by the database engine,
+-- protects against double-click / parallel open requests
+-- even when the application check (AnyAsync) is bypassed.
+-----------------------------------------------------------
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+GO
+
+CREATE UNIQUE INDEX UX_POSSessions_OneOpenPerUser
+    ON POSSessions(UserId)
+    WHERE Status = 'open';

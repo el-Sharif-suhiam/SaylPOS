@@ -14,6 +14,10 @@ DELETE FROM Invoices;
 DELETE FROM Inventory;
 DELETE FROM Batches;
 DELETE FROM Products;
+DELETE FROM PayrollRecords;
+DELETE FROM EmployeeShifts;
+DELETE FROM Shifts;
+DELETE FROM OfficialHolidays;
 DELETE FROM Users;
 DELETE FROM Roles;
 DELETE FROM Employees;
@@ -86,13 +90,38 @@ VALUES
 -- 5) Employees
 -- ===============================================
 SET IDENTITY_INSERT Employees ON;
-INSERT INTO Employees (EmployeeId, Name, Phone, Email, Salary, HireDate, Address, Status, Position, Department)
+INSERT INTO Employees (EmployeeId, Name, Phone, Email, Salary, SalaryType, HireDate, Address, Status, Position, Department)
 VALUES
-(1, N'عبدالله السالم', '0501234567', 'a.salem@sayl.com', 4000.00, '2025-01-15', N'الرياض - الملز', 'active', N'كاشير', N'المبيعات'),
-(2, N'فاطمة الزهراني', '0502345678', 'f.zah@sayl.com', 5500.00, '2025-03-01', N'الرياض - النزهة', 'active', N'مديرة فرع', N'الإدارة'),
-(3, N'خالد العتيبي', '0503456789', 'k.o@sayl.com', 3500.00, '2025-06-01', N'الرياض - الشفا', 'on_leave', N'كاشير', N'المبيعات'),
-(4, N'مريم الحربي', '0504567890', 'm.h@sayl.com', 0.00, '2024-09-10', N'الرياض - العقيق', 'resigned', N'متدربة', N'التدريب');
+(1, N'??????? ??????', '0501234567', 'a.salem@sayl.com', 4000.00, 'monthly', '2025-01-15', N'?????? - ?????', 'active', N'?????', N'????????'),
+(2, N'????? ????????', '0502345678', 'f.zah@sayl.com', 180.00, 'daily', '2025-03-01', N'?????? - ??????', 'active', N'????? ???', N'???????'),
+(3, N'???? ???????', '0503456789', 'k.o@sayl.com', 25.00, 'hourly', '2025-06-01', N'?????? - ?????', 'on_leave', N'?????', N'????????'),
+(4, N'???? ??????', '0504567890', 'm.h@sayl.com', 0.00, 'monthly', '2024-09-10', N'?????? - ??????', 'resigned', N'??????', N'???????');
 SET IDENTITY_INSERT Employees OFF;
+
+-- ===============================================
+-- 5b) Shifts + EmployeeShifts + OfficialHolidays
+-- ===============================================
+SET IDENTITY_INSERT Shifts ON;
+INSERT INTO Shifts (ShiftId, Name, StartTime, EndTime, Notes)
+VALUES
+(1, N'??????', '08:00', '16:00', NULL),
+(2, N'??????', '16:00', '24:00', NULL),
+(3, N'?????', '22:00', '06:00', N'???? ??? ????');   -- night shift crosses midnight
+SET IDENTITY_INSERT Shifts OFF;
+
+INSERT INTO EmployeeShifts (EmployeeId, ShiftId, DaysOfWeek, EffectiveFrom, EffectiveTo)
+VALUES
+(1, 1, 95, '2025-01-15', NULL),  -- Sun-Thu (1+2+4+8+16)
+(2, 2, 95, '2025-03-01', NULL),
+(3, 1, 62, '2025-06-01', NULL);   -- Fri-Sat (32+64)
+
+SET IDENTITY_INSERT OfficialHolidays ON;
+INSERT INTO OfficialHolidays (HolidayId, Name, HolidayDate, DurationDays, IsAnnual)
+VALUES
+(1, N'??? ?????', '2026-02-22', 1, 1),
+(2, N'??? ??????', '2026-09-23', 1, 1),
+(3, N'??? ??????', '2026-07-15', 3, 0);
+SET IDENTITY_INSERT OfficialHolidays OFF;
 
 -- ===============================================
 -- 6) Roles

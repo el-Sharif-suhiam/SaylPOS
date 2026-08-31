@@ -98,10 +98,25 @@ namespace Sayl.Core.Services
                             CreatedAt = DateTime.Now
                         };
                         _dbContext.Batches.Add(batch);
+                        // فهرس UQ_Batches_Product_Batch يمنع إنشاء دفعة مكررة عند طلبين متوازيين —
+                        // الالتقاط أدناه يحوله إلى زيادة على الدفعة الموجودة بدل فشل غامض
+                        try
+                        {
+                            await _dbContext.SaveChangesAsync();
+                        }
+                        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Batches_Product_Batch"))
+                        {
+                            _dbContext.ChangeTracker.Clear();
+                            batch = await _dbContext.Batches
+                                .FirstAsync(b => b.ProductId == item.ProductId && b.BatchNumber == item.BatchNumber.Trim());
+                            batch.BatchQuantity += item.Quantity;
+                        }
                     }
                     else
                     {
-                        batch.BatchQuantity += item.Quantity;
+                        // زيادة ذرية على مستوى القاعدة — لا يمكن أن تضيع مع فاتورة شراء متوازية
+                        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {item.Quantity} WHERE BatchId = {batch.BatchId}");
                         if (item.ExpiryDate.HasValue)
                             batch.ExpiryDate = item.ExpiryDate.Value;
                     }
@@ -130,8 +145,9 @@ namespace Sayl.Core.Services
                         _dbContext.Inventories.Add(inventory);
                     }
 
-                    inventory.QuantityAvailable += item.Quantity;
-                    inventory.UpdatedAt = DateTime.Now;
+                    // زيادة ذرية للمخزون — محصّنة من فاتورة/استلام متوازٍ
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = GETDATE() WHERE ProductId = {item.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -150,12 +166,10 @@ namespace Sayl.Core.Services
 
                 await ProcessPaymentAsync(invoice, request);
 
-                var supplier = await _dbContext.Suppliers.FindAsync(request.SupplierId);
-                if (supplier != null)
-                {
-                    decimal paid = request.Payment?.Amount ?? 0;
-                    supplier.Balance += net - paid;
-                }
+                // زيادة ذرية لرصيد المورد — محصّنة من سداد متوازٍ
+                decimal paidAmount = request.Payment?.Amount ?? 0;
+                await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Suppliers SET Balance = Balance + {net - paidAmount} WHERE PartyId = {request.SupplierId}");
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -166,6 +180,18 @@ namespace Sayl.Core.Services
                 await transaction.RollbackAsync();
                 return Result<int>.Fail("فشل إنشاء فاتورة الشراء.");
             }
+        }
+
+        /// <summary>هل الاستثناء نتيجة انتهاك قيد فريد (فهرس/مفتاح فريد)؟ يُستخدم لالتقاط الدفعات المتنافسة.</summary>
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)
+        {
+            for (Exception? e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sql
+                    && sql.Message.Contains(constraintName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private async Task ProcessPaymentAsync(Invoice invoice, DtoPurchaseRequest request)

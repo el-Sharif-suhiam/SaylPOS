@@ -44,6 +44,32 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("العميل غير موجود.");
             }
 
+            // Serializable مع إعادة محاولة تلقائية عند deadlock (1205):
+            // التعارض قابل للاختيار من جديد بأمان، وليس خطأ المستخدم
+            const int maxAttempts = 3;
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    return await ExecuteCheckoutAsync(request, suspend);
+                }
+                catch (DeadlockRetryableException)
+                {
+                    if (attempt >= maxAttempts)
+                        return Result<int>.Fail("ازدحام في العمليات — حاول مرة أخرى بعد لحظات.");
+                    await Task.Delay(50 * attempt); // تراجع قصير قبل المحاولة التالية
+                }
+            }
+        }
+
+        /// <summary>deadlock في SQL Server (رقم الخطأ 1205) — قابل لإعادة المحاولة.</summary>
+        private sealed class DeadlockRetryableException : Exception
+        {
+            public DeadlockRetryableException(Exception inner) : base(inner.Message, inner) { }
+        }
+
+        private async Task<Result<int>> ExecuteCheckoutAsync(DtoCheckoutRequest request, bool suspend)
+        {
             //  بدء المعاملة (Serializable لمنع بيع نفس الكمية من طرفيتين في نفس اللحظة)
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
@@ -88,6 +114,12 @@ namespace Sayl.Core.Services
                 _dbContext.ChangeTracker.Clear();
                 return Result<int>.Fail(ex.Message);
             }
+            catch (Exception ex) when (IsDeadlock(ex))
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                throw new DeadlockRetryableException(ex); // يلتقطه حلق إعادة المحاولة أعلاه
+            }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
@@ -101,6 +133,17 @@ namespace Sayl.Core.Services
                 }
                 return Result<int>.Fail($"فشلت عملية البيع ({ex.GetType().Name}): {details}");
             }
+        }
+
+        /// <summary>هل الاستثناء deadlock (SQL Server error 1205)؟</summary>
+        private static bool IsDeadlock(Exception ex)
+        {
+            for (Exception? e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sql && sql.Number == 1205)
+                    return true;
+            }
+            return false;
         }
 
         private async Task<int> GetUserRoleValueAsync(int userId)
@@ -127,10 +170,17 @@ namespace Sayl.Core.Services
             if (invoice == null)
                 return Result.Fail("الفاتورة المعلقة غير موجودة أو تم إكمالها بالفعل.");
 
+            // المعاملة تحتضن الانتقال الذري: فشل أي خطوة لاحقة يعيد الحالة suspended معها
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
-                // تحويل الحالة
+                // انتقال ذري للحالة داخل المعاملة: أول من يصل يفوز — يمنع خصم المخزون مرتين
+                int claimed = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Invoices SET Status = 'completed' WHERE InvoiceId = {invoiceId} AND Status = 'suspended'");
+                if (claimed == 0)
+                    return Result.Fail("الفاتورة قيد الإكمال من طرف آخر أو تم إغلاقها.");
+
+                // تحويل الحالة (المحلية — الحالة في القاعدة ثبتت بالانتقال الذري أعلاه)
                 invoice.Status = enInvoicesStatus.completed;
 
                 // خصم المخزون (معالجة الدُفعات)
@@ -196,6 +246,12 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // انتقال ذري: يمنع إلغاء فاتورة يجري إكمالها بالتوازي (والعكس)
+                int claimed = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Invoices SET Status = 'cancelled' WHERE InvoiceId = {invoiceId} AND Status = 'suspended'");
+                if (claimed == 0)
+                    return Result.Fail("الفاتورة لم تعد معلقة (أُكملت أو أُلغيت من طرف آخر).");
+
                 invoice.Status = enInvoicesStatus.cancelled;
 
                 // تحرير الحجز

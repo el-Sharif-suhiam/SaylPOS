@@ -53,6 +53,14 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<Shift> Shifts { get; set; }
+
+    public virtual DbSet<EmployeeShift> EmployeeShifts { get; set; }
+
+    public virtual DbSet<OfficialHoliday> OfficialHolidays { get; set; }
+
+    public virtual DbSet<PayrollRecord> PayrollRecords { get; set; }
+
 //    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 //#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
 //        => optionsBuilder.UseSqlServer("Server=.;Database=SaylDB;User Id=sa;Password=sa123456;TrustServerCertificate=True");
@@ -154,9 +162,84 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.Phone).HasMaxLength(20);
             entity.Property(e => e.Position).HasMaxLength(50);
             entity.Property(e => e.Salary).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.SalaryType)
+                .HasMaxLength(10)
+                .HasConversion<string>(); // لا HasDefaultValue — تُسقط العمود من INSERT عند القيم المساوية للـ sentinel
             entity.Property(e => e.Status)
                 .HasMaxLength(20)
                 .HasDefaultValue("active");
+        });
+
+        modelBuilder.Entity<Shift>(entity =>
+        {
+            entity.HasKey(e => e.ShiftId).HasName("PK_Shifts");
+
+            entity.HasIndex(e => e.Name, "UQ_Shifts_Name").IsUnique();
+
+            entity.Property(e => e.Name).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(255);
+        });
+
+        modelBuilder.Entity<EmployeeShift>(entity =>
+        {
+            entity.HasKey(e => e.EmployeeShiftId).HasName("PK_EmployeeShifts");
+
+            entity.HasIndex(e => e.EmployeeId, "IX_EmployeeShifts_EmployeeId");
+
+            entity.HasIndex(e => new { e.EmployeeId, e.ShiftId, e.EffectiveFrom }, "UQ_EmployeeShifts_Active").IsUnique();
+
+            entity.HasOne(d => d.Employee).WithMany(p => p.EmployeeShifts)
+                .HasForeignKey(d => d.EmployeeId)
+                .HasConstraintName("FK_EmployeeShifts_EmployeeId");
+
+            entity.HasOne(d => d.Shift).WithMany(p => p.EmployeeShifts)
+                .HasForeignKey(d => d.ShiftId)
+                .HasConstraintName("FK_EmployeeShifts_ShiftId");
+        });
+
+        modelBuilder.Entity<OfficialHoliday>(entity =>
+        {
+            entity.HasKey(e => e.HolidayId).HasName("PK_OfficialHolidays");
+
+            entity.HasIndex(e => e.HolidayDate, "IX_OfficialHolidays_Date");
+
+            entity.Property(e => e.Name).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<PayrollRecord>(entity =>
+        {
+            entity.HasKey(e => e.PayrollId).HasName("PK_PayrollRecords");
+
+            entity.HasIndex(e => e.EmployeeId, "IX_PayrollRecords_EmployeeId");
+
+            entity.HasIndex(e => e.Status, "IX_PayrollRecords_Status");
+
+            entity.HasIndex(e => new { e.PeriodFrom, e.PeriodTo }, "IX_PayrollRecords_Period");
+
+            entity.HasIndex(e => new { e.EmployeeId, e.PeriodFrom, e.PeriodTo }, "UQ_PayrollRecords_Employee_Period").IsUnique();
+
+            entity.Property(e => e.Additions).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.Deductions).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.Gross).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.HolidayUnits).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.Net).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.Rate).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.SalaryType).HasMaxLength(10).HasConversion<string>();
+            entity.Property(e => e.Status)
+                .HasMaxLength(10)
+                .HasDefaultValue(enPayrollStatus.pending)
+                .HasConversion<string>();
+            entity.Property(e => e.WorkedUnits).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.Notes).HasMaxLength(255);
+
+            entity.HasOne(d => d.Employee).WithMany(p => p.PayrollRecords)
+                .HasForeignKey(d => d.EmployeeId)
+                .HasConstraintName("FK_PayrollRecords_EmployeeId");
+
+            entity.HasOne(d => d.Expense).WithMany()
+                .HasForeignKey(d => d.ExpenseId)
+                .HasConstraintName("FK_PayrollRecords_ExpenseId");
         });
 
         modelBuilder.Entity<Expense>(entity =>

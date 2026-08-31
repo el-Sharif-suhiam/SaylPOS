@@ -60,10 +60,26 @@ namespace Sayl.Core.Services
                         CreatedAt = DateTime.Now
                     };
                     _dbContext.Batches.Add(batch);
+                    // فهرس UQ_Batches_Product_Batch يمنع التكرار المتوازي — نلتقطه ونزيد الدفعة الموجودة
+                    try
+                    {
+                        await _dbContext.SaveChangesAsync();
+                    }
+                    catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Batches_Product_Batch"))
+                    {
+                        _dbContext.ChangeTracker.Clear();
+                        batch = await _dbContext.Batches
+                            .FirstAsync(b => b.ProductId == request.ProductId && b.BatchNumber == request.BatchNumber.Trim());
+                        // زيادة ذرية — محصّنة من استلام متوازٍ
+                        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                    }
                 }
                 else
                 {
-                    batch.BatchQuantity += request.Quantity;
+                    // زيادة ذرية — محصّنة من استلام متوازٍ
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
                     if (request.ExpiryDate.HasValue)
                         batch.ExpiryDate = request.ExpiryDate.Value;
                 }
@@ -80,10 +96,12 @@ namespace Sayl.Core.Services
                         QuantityReserved = 0
                     };
                     _dbContext.Inventories.Add(inventory);
+                    await _dbContext.SaveChangesAsync(); // تثبيت سجل المخزون قبل الزيادة الذرية
                 }
 
-                inventory.QuantityAvailable += request.Quantity;
-                inventory.UpdatedAt = DateTime.Now;
+                // زيادة ذرية للمخزون — محصّنة من فاتورة شراء/استلام متوازٍ
+                await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETDATE() WHERE ProductId = {request.ProductId}");
 
                 _dbContext.StockMovements.Add(new StockMovement
                 {
@@ -107,6 +125,18 @@ namespace Sayl.Core.Services
             }
         }
 
+        /// <summary>هل الاستثناء نتيجة انتهاك قيد فريد؟</summary>
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)
+        {
+            for (Exception? e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sql
+                    && sql.Message.Contains(constraintName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
         // ─────────────────────────────────────────────────
         // بيع مخزون: خصم تلقائي حسب FEFO
         // ─────────────────────────────────────────────────
@@ -122,13 +152,14 @@ namespace Sayl.Core.Services
             if (product.Type != "stock")
                 return Result.Fail("لا يمكن بيع مخزون لمنتج غير مخزني.");
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
                 var inventory = await _dbContext.Inventories.FindAsync(productId);
                 if (inventory == null)
                     return Result.Fail("لا يوجد سجل مخزون لهذا المنتج.");
 
+                // إعادة-فحص داخل المعاملة بعد قفل النطاق — يمنع بيعين متوازيين يتجاوزان المتاح
                 int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                 if (available < quantity)
                     return Result.Fail($"المخزون المتاح غير كافٍ للمنتج {product.Name}.");
@@ -203,7 +234,8 @@ namespace Sayl.Core.Services
             if (product.Type != "stock")
                 return Result.Fail("لا يمكن تسوية مخزون لمنتج غير مخزني.");
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable: التسوية قد تنقص مخزونًا — حماية من بيع/تسوية متوازية تتجاوز المتاح
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
                 var inventory = await _dbContext.Inventories.FindAsync(request.ProductId);
@@ -216,6 +248,7 @@ namespace Sayl.Core.Services
                         QuantityReserved = 0
                     };
                     _dbContext.Inventories.Add(inventory);
+                    await _dbContext.SaveChangesAsync(); // تثبيت السجل قبل الزيادة الذرية/الفحص
                 }
 
                 int? batchId = null;
@@ -238,17 +271,34 @@ namespace Sayl.Core.Services
                                 CreatedAt = DateTime.Now
                             };
                             _dbContext.Batches.Add(batch);
+                            // التقاط الدفعة المتنافسة (فهرس فريد) وتحويلها إلى زيادة
+                            try
+                            {
+                                await _dbContext.SaveChangesAsync();
+                            }
+                            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Batches_Product_Batch"))
+                            {
+                                _dbContext.ChangeTracker.Clear();
+                                inventory = await _dbContext.Inventories.FindAsync(request.ProductId);
+                                batch = await _dbContext.Batches
+                                    .FirstAsync(b => b.ProductId == request.ProductId && b.BatchNumber == request.BatchNumber.Trim());
+                                await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                                    $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                            }
                         }
                         else
                         {
-                            batch.BatchQuantity += request.Quantity;
+                            // زيادة ذرية — محصّنة من تسوية/استلام متوازٍ
+                            await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                                $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
                         }
 
-                        await _dbContext.SaveChangesAsync();
                         batchId = batch.BatchId;
                     }
 
-                    inventory.QuantityAvailable += request.Quantity;
+                    // زيادة ذرية للمخزون
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETDATE(), LastCountedAt = GETDATE() WHERE ProductId = {request.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -263,6 +313,7 @@ namespace Sayl.Core.Services
                 }
                 else
                 {
+                    // إعادة-فحص داخل المعاملة بعد قفل النطاق
                     int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                     if (available < request.Quantity)
                         return Result.Fail($"الكمية المطلوبة أكبر من المخزون المتاح للمنتج {product.Name}.");
@@ -296,8 +347,11 @@ namespace Sayl.Core.Services
                     });
                 }
 
-                inventory.UpdatedAt = DateTime.Now;
-                inventory.LastCountedAt = DateTime.Now;
+                if (!request.IsIncrease)
+                {
+                    inventory.UpdatedAt = DateTime.Now;
+                    inventory.LastCountedAt = DateTime.Now;
+                }
 
                 _dbContext.SystemLogs.Add(new SystemLog
                 {
@@ -333,12 +387,14 @@ namespace Sayl.Core.Services
             if (sourceBatch == null)
                 return Result.Fail("الدفعة المصدر غير موجودة.");
 
-            if (sourceBatch.BatchQuantity < request.Quantity)
-                return Result.Fail("كمية الدفعة المصدر غير كافية.");
-
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable: فحص كمية المصدر وإعادة-فحصها داخل المعاملة —
+            // يمنع نقلين متوازيين يتجاوزان كمية الدفعة المصدر
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                if (sourceBatch.BatchQuantity < request.Quantity)
+                    return Result.Fail("كمية الدفعة المصدر غير كافية.");
+
                 var targetBatch = await _dbContext.Batches
                     .FirstOrDefaultAsync(b => b.ProductId == sourceBatch.ProductId && b.BatchNumber == request.TargetBatchNumber);
 
@@ -353,20 +409,45 @@ namespace Sayl.Core.Services
                         CreatedAt = DateTime.Now
                     };
                     _dbContext.Batches.Add(targetBatch);
+                    // التقاط دفعة هدف مُنشأة بالتوازي (فهرس فريد) وتحويلها إلى زيادة
+                    try
+                    {
+                        await _dbContext.SaveChangesAsync();
+                    }
+                    catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Batches_Product_Batch"))
+                    {
+                        _dbContext.ChangeTracker.Clear();
+                        sourceBatch = await _dbContext.Batches.FindAsync(request.SourceBatchId);
+                        if (sourceBatch == null)
+                            return Result.Fail("الدفعة المصدر غير موجودة.");
+                        if (sourceBatch.BatchQuantity < request.Quantity)
+                            return Result.Fail("كمية الدفعة المصدر غير كافية.");
+                        targetBatch = await _dbContext.Batches
+                            .FirstAsync(b => b.ProductId == sourceBatch.ProductId && b.BatchNumber == request.TargetBatchNumber.Trim());
+                        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
+                    }
                 }
                 else
                 {
                     if (targetBatch.BatchId == sourceBatch.BatchId)
                         return Result.Fail("لا يمكن نقل الكمية إلى نفس الدفعة.");
 
-                    targetBatch.BatchQuantity += request.Quantity;
+                    // زيادة ذرية للدفعة الهدف — محصّنة من استلام/نقل متوازٍ
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
                     if (request.TargetExpiryDate.HasValue)
                         targetBatch.ExpiryDate = request.TargetExpiryDate.Value;
                 }
 
-                sourceBatch.BatchQuantity -= request.Quantity;
-
-                await _dbContext.SaveChangesAsync();
+                // خصم ذري من المصدر بشرط الكمية — لا يمكن أن يتجاوز المتاح حتى مع تزامن كامل
+                int deducted = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Batches SET BatchQuantity = BatchQuantity - {request.Quantity} WHERE BatchId = {sourceBatch.BatchId} AND BatchQuantity >= {request.Quantity}");
+                if (deducted == 0)
+                {
+                    await transaction.RollbackAsync();
+                    return Result.Fail("كمية الدفعة المصدر غير كافية.");
+                }
 
                 _dbContext.StockMovements.Add(new StockMovement
                 {

@@ -135,6 +135,10 @@ namespace Sayl.Core.Services
             if (expense == null)
                 return Result.Fail("المصروف غير موجود.");
 
+            // مصروف الرواتب يُنشأ ويُحذف عبر كشف الراتب فقط — حفاظًا على تناسق الربط
+            if (expense.Category == clsPayrollService.SalaryExpenseCategory)
+                return Result.Fail("مصروف الرواتب يُدار من قسم الرواتب — احذفه بعكس صرف الكشف المرتبط.");
+
             // حذف المصروفات يتطلب صلاحية محاسب فأعلى
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
             if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Accountant))

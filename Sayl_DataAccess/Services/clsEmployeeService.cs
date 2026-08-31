@@ -8,6 +8,8 @@ using Sayl.Core.Models;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Common.Enums;
+
 namespace Sayl.Core.Services
 {
     public class clsEmployeeService
@@ -19,33 +21,76 @@ namespace Sayl.Core.Services
             _dbContext = dbContext;
         }
 
+        private static readonly string[] ValidStatuses = { "active", "on_leave", "resigned" };
 
-        public async Task<List<Employee>> GetEmployeesListAsync()
+        /// <summary>قائمة الموظفين كـ DTOs (بدلاً من كيانات EF) مع بحث اختياري.</summary>
+        public async Task<List<DtoEmployee>> GetEmployeesListAsync(string search = "", bool includeInactive = true)
         {
-            List<Employee> employees = await _dbContext.Employees.ToListAsync();
+            var query = _dbContext.Employees.AsQueryable();
 
-            return employees;
+            if (!includeInactive)
+                query = query.Where(e => e.Status == "active");
+
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(e => e.Name.Contains(search)
+                                       || e.Position.Contains(search)
+                                       || (e.Department != null && e.Department.Contains(search)));
+
+            return await query
+                .OrderBy(e => e.Name)
+                .Select(e => new DtoEmployee
+                {
+                    EmployeeId = e.EmployeeId,
+                    Name = e.Name,
+                    Phone = e.Phone,
+                    Email = e.Email,
+                    Salary = e.Salary,
+                    SalaryType = e.SalaryType,
+                    HireDate = e.HireDate,
+                    Address = e.Address,
+                    Status = e.Status,
+                    Position = e.Position,
+                    Department = e.Department,
+                    CreatedAt = e.CreatedAt
+                })
+                .ToListAsync();
         }
 
-        public async Task<Employee?> GetEmployeeByIdAsync(int id)
+        public async Task<DtoEmployee?> GetEmployeeByIdAsync(int id)
         {
-            Employee? employee = await _dbContext.Employees.FindAsync(id);
+            var e = await _dbContext.Employees.FindAsync(id);
+            if (e == null) return null;
 
-            return employee;
+            return new DtoEmployee
+            {
+                EmployeeId = e.EmployeeId,
+                Name = e.Name,
+                Phone = e.Phone,
+                Email = e.Email,
+                Salary = e.Salary,
+                SalaryType = e.SalaryType,
+                HireDate = e.HireDate,
+                Address = e.Address,
+                Status = e.Status,
+                Position = e.Position,
+                Department = e.Department,
+                CreatedAt = e.CreatedAt
+            };
         }
 
-        public async Task<Result> AddNewEmployeeAsync(DtoEmployee dtoEmployee)
+        public async Task<Result<int>> AddNewEmployeeAsync(DtoEmployee dtoEmployee)
         {
             if (string.IsNullOrWhiteSpace(dtoEmployee.Name))
-                return Result.Fail("الاسم مطلوب.");
+                return Result<int>.Fail("الاسم مطلوب.");
 
             if (string.IsNullOrWhiteSpace(dtoEmployee.Position))
-                return Result.Fail("المسمى الوظيفي مطلوب.");
+                return Result<int>.Fail("المسمى الوظيفي مطلوب.");
 
-            string[] validStatuses = { "active", "on_leave", "resigned" };
-            if (string.IsNullOrWhiteSpace(dtoEmployee.Status) || !validStatuses.Contains(dtoEmployee.Status.ToLower()))
-                return Result.Fail("حالة الموظف غير صالحة.");
+            if (string.IsNullOrWhiteSpace(dtoEmployee.Status) || !ValidStatuses.Contains(dtoEmployee.Status.ToLower()))
+                return Result<int>.Fail("حالة الموظف غير صالحة.");
 
+            if (dtoEmployee.Salary.HasValue && dtoEmployee.Salary.Value < 0)
+                return Result<int>.Fail("الراتب يجب أن يكون صفراً أو أكثر.");
 
             var employee = new Employee
             {
@@ -53,7 +98,8 @@ namespace Sayl.Core.Services
                 Phone = string.IsNullOrWhiteSpace(dtoEmployee.Phone) ? null : dtoEmployee.Phone,
                 Email = string.IsNullOrWhiteSpace(dtoEmployee.Email) ? null : dtoEmployee.Email,
                 Salary = dtoEmployee.Salary,
-                HireDate = dtoEmployee.HireDate.HasValue ? dtoEmployee.HireDate.Value : null,
+                SalaryType = dtoEmployee.SalaryType,
+                HireDate = dtoEmployee.HireDate,
                 Address = string.IsNullOrWhiteSpace(dtoEmployee.Address) ? null : dtoEmployee.Address,
                 Status = dtoEmployee.Status.ToLower(),
                 Position = clsValidation.ValidateString(dtoEmployee.Position, "Position"),
@@ -62,7 +108,7 @@ namespace Sayl.Core.Services
 
             _dbContext.Employees.Add(employee);
             bool saved = (await _dbContext.SaveChangesAsync()) > 0;
-            return saved ? Result<int>.Ok(employee.EmployeeId,"تمت إضافة الموظف بنجاح.") : Result.Fail("فشلت الإضافة.");
+            return saved ? Result<int>.Ok(employee.EmployeeId, "تمت إضافة الموظف بنجاح.") : Result<int>.Fail("فشلت الإضافة.");
         }
 
         public async Task<Result> UpdateEmployeeAsync(DtoEmployee dtoEmployee)
@@ -84,7 +130,13 @@ namespace Sayl.Core.Services
                 employee.Email = clsValidation.ValidateEmail(dtoEmployee.Email);
 
             if (dtoEmployee.Salary.HasValue)
+            {
+                if (dtoEmployee.Salary.Value < 0)
+                    return Result.Fail("الراتب يجب أن يكون صفراً أو أكثر.");
                 employee.Salary = dtoEmployee.Salary.Value;
+            }
+
+            employee.SalaryType = dtoEmployee.SalaryType;
 
             if (dtoEmployee.HireDate.HasValue)
                 employee.HireDate = dtoEmployee.HireDate.Value;
@@ -94,15 +146,13 @@ namespace Sayl.Core.Services
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Status))
             {
-                string[] validStatuses = { "active", "on_leave", "resigned" };
-                if (validStatuses.Contains(dtoEmployee.Status.ToLower()))
-                    employee.Status = dtoEmployee.Status.ToLower();
-                else
+                if (!ValidStatuses.Contains(dtoEmployee.Status.ToLower()))
                     return Result.Fail("حالة الموظف غير صالحة.");
+                employee.Status = dtoEmployee.Status.ToLower();
             }
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Position))
-                employee.Position = dtoEmployee.Position;
+                employee.Position = clsValidation.ValidateString(dtoEmployee.Position, "Position");
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Department))
                 employee.Department = dtoEmployee.Department;
@@ -114,8 +164,7 @@ namespace Sayl.Core.Services
         // تعطيل / تفعيل موظف (يمكن دمجه مع الحذف الناعم)
         public async Task<Result> SetEmployeeStatusAsync(int employeeId, string status)
         {
-            string[] validStatuses = { "active", "on_leave", "resigned" };
-            if (!validStatuses.Contains(status.ToLower()))
+            if (!ValidStatuses.Contains(status.ToLower()))
                 return Result.Fail("حالة غير صالحة.");
 
             Employee? employee = await _dbContext.Employees.FindAsync(employeeId);
@@ -127,5 +176,4 @@ namespace Sayl.Core.Services
             return Result.Ok($"تم تغيير حالة الموظف إلى {status}.");
         }
     }
-    
 }

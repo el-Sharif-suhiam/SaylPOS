@@ -39,6 +39,8 @@ namespace DependencyInjection
             services.AddScoped<clsSettingsService>();
             services.AddScoped<clsCashService>();
             services.AddScoped<clsBackupService>();
+            services.AddScoped<clsShiftService>();
+            services.AddScoped<clsPayrollService>();
             return services;
         }
 

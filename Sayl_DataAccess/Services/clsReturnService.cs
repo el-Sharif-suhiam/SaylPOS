@@ -54,9 +54,23 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
+            // (إعادة فحص الكميات المرتجعة داخل المعاملة بعد أن يقفل النطاق الإدراج المتوازي)
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // إعادة-فحص داخل المعاملة: طلب إرجاع متوازٍ commit بين الفحص الأول وبداية المعاملة
+                alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
+                foreach (var item in request.Items)
+                {
+                    var originalItem = originalInvoice.InvoiceItems
+                        .First(ii => ii.ProductId == item.ProductId);
+
+                    int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
+                    if (returnedSoFar + item.Quantity > originalItem.Quantity)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                }
+
                 decimal total = 0;
                 var returnInvoice = new Invoice
                 {
@@ -160,9 +174,22 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
-            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // إعادة-فحص داخل المعاملة بعد قفل النطاق
+                alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+                foreach (var item in request.Items)
+                {
+                    var originalItem = originalInvoice.InvoiceItems
+                        .First(ii => ii.ProductId == item.ProductId);
+
+                    int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
+                    if (returnedSoFar + item.Quantity > originalItem.Quantity)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                }
+
                 decimal total = 0;
                 var returnInvoice = new Invoice
                 {
