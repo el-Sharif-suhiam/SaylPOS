@@ -112,7 +112,7 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colWorked", "أيام/ساعات عمل");
             _grid.Columns.Add("colHoliday", "إجازات رسمية");
             _grid.Columns.Add("colRate", "المعدل");
-            _grid.Columns.Add("colGross", "الإجمالي");
+            _grid.Columns.Add("colGross", "إجمالي الراتب");
             _grid.Columns.Add("colDed", "خصومات");
             _grid.Columns.Add("colAdd", "إضافات");
             _grid.Columns.Add("colNet", "الصافي");
