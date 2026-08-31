@@ -1,4 +1,4 @@
-﻿/*
+/*
 ===========================================================
 SaylDB
 Full SQL Server Script
@@ -11,8 +11,23 @@ Designed for:
 - Sales and inventory management system
 - Supports customers, suppliers, employees, users and roles
 - Tracks stock movements with batch/lot control
+NOTE: session SET options are configured first because
+filtered unique indexes (concurrency guards) require them,
+and sqlcmd/OLEDB sessions start with QUOTED_IDENTIFIER OFF.
 ===========================================================
 */
+
+-----------------------------------------------------------
+-- 0) Session options (required for filtered indexes)
+-----------------------------------------------------------
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+GO
 
 -----------------------------------------------------------
 -- 1) Create Database
@@ -587,16 +602,8 @@ CREATE INDEX IX_CashMovements_CreatedAt ON CashMovements(CreatedAt);
 -- Filtered unique index — enforced by the database engine,
 -- protects against double-click / parallel open requests
 -- even when the application check (AnyAsync) is bypassed.
+-- (session SET options were applied at the top of this script)
 -----------------------------------------------------------
-SET QUOTED_IDENTIFIER ON;
-SET ANSI_NULLS ON;
-SET ANSI_PADDING ON;
-SET ANSI_WARNINGS ON;
-SET ARITHABORT ON;
-SET CONCAT_NULL_YIELDS_NULL ON;
-SET NUMERIC_ROUNDABORT OFF;
-GO
-
 CREATE UNIQUE INDEX UX_POSSessions_OneOpenPerUser
     ON POSSessions(UserId)
     WHERE Status = 'open';
