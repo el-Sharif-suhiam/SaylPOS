@@ -386,6 +386,35 @@ ALTER TABLE Invoices
     ADD CONSTRAINT FK_Invoices_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId);
 GO
 -----------------------------------------------------------
+-- 19a) Create Settings
+--      App configuration (store info, VAT, receipt, backup)
+-----------------------------------------------------------
+CREATE TABLE Settings
+(
+    SettingKey   NVARCHAR(100)  NOT NULL CONSTRAINT PK_Settings PRIMARY KEY,
+    SettingValue NVARCHAR(MAX)  NULL,
+    UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (GETDATE())
+);
+GO
+-----------------------------------------------------------
+-- 19b) Create CashMovements
+--      Cash in/out during POS sessions
+-----------------------------------------------------------
+CREATE TABLE CashMovements
+(
+    MovementId   INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_CashMovements PRIMARY KEY,
+    SessionId    INT           NULL,
+    MovementType CHAR(1)       NOT NULL CONSTRAINT CK_CashMovements_Type CHECK (MovementType IN ('I','O')),
+    Amount       DECIMAL(10,2) NOT NULL CONSTRAINT DF_CashMovements_Amount DEFAULT (0),
+    Reason       NVARCHAR(255) NULL,
+    UserId       INT           NOT NULL,
+    CreatedAt    DATETIME      NULL CONSTRAINT DF_CashMovements_CreatedAt DEFAULT (GETDATE()),
+
+    CONSTRAINT FK_CashMovements_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId),
+    CONSTRAINT FK_CashMovements_UserId    FOREIGN KEY (UserId)    REFERENCES Users(UserId)
+);
+GO
+-----------------------------------------------------------
 -- 20) Create Shifts
 --     Shift DEFINITIONS ONLY (expected schedule, not attendance)
 -----------------------------------------------------------
@@ -547,6 +576,11 @@ CREATE INDEX IX_Expenses_UserId ON Expenses(UserId);
 -- POSSessions
 CREATE INDEX IX_POSSessions_UserId ON POSSessions(UserId);
 CREATE INDEX IX_POSSessions_Status ON POSSessions(Status);
+
+-- CashMovements
+CREATE INDEX IX_CashMovements_SessionId ON CashMovements(SessionId);
+CREATE INDEX IX_CashMovements_UserId ON CashMovements(UserId);
+CREATE INDEX IX_CashMovements_CreatedAt ON CashMovements(CreatedAt);
 
 -----------------------------------------------------------
 -- Concurrency guards: one open POS session per user.
