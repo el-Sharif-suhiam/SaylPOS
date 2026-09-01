@@ -432,6 +432,103 @@ namespace Sayl.UI.Infrastructure
         }
 
 
+        // ═════════════════════════════════════════════════
+        // مصدّر جدول عام لكل تقارير النظام (PDF) — ترويسة موحدة + RTL
+        // ═════════════════════════════════════════════════
+
+        /// <summary>
+        /// يولّد PDF موحد الهوية لأي تقرير جدولي: اسم المحل + عنوان التقرير + الفترة +
+        /// المستخدم ووقت التوليد، ثم الجدول كاملًا RTL بصفحة A4.
+        /// تُستدعى من قسم التقارير (ExportPdf) — نفس البيانات المعروضة.
+        /// </summary>
+        public static void ExportTableReport(string storeName, string title, string period,
+            string userName, string[] headers, List<string[]> rows, string filePath)
+        {
+            EnsureLicense();
+
+            var document = QuestPDF.Fluent.Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(28);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI").DirectionFromRightToLeft());
+
+                    page.Header().Column(col =>
+                    {
+                        col.Item().Row(r =>
+                        {
+                            r.RelativeItem().AlignRight().Text(storeName).FontSize(16).Bold()
+                                .FontColor(Colors.Blue.Darken3);
+                            r.RelativeItem().AlignLeft().Text($"سيل POS — {DateTime.Now:yyyy-MM-dd HH:mm}")
+                                .FontSize(9).FontColor(Colors.Grey.Darken1);
+                        });
+                        col.Item().AlignRight().Text($"{title}    ({period})")
+                            .FontSize(12).Bold().FontColor(Colors.Grey.Darken3);
+                        if (!string.IsNullOrWhiteSpace(userName))
+                            col.Item().AlignRight().Text($"أنشأه: {userName}").FontSize(8.5f).FontColor(Colors.Grey.Darken2);
+                        col.Item().PaddingTop(2).PaddingBottom(6).LineHorizontal(0.6f).LineColor(Colors.Blue.Darken1);
+                    });
+
+                    page.Content().PaddingTop(6).Column(col =>
+                    {
+                        col.Item().Table(table =>
+                        {
+                            // أعمدة متساوية (العرض يتوزع تلقائيًا) — آخر عمود أوسع قليلًا للنصوص
+                            table.ColumnsDefinition(c =>
+                            {
+                                for (int i = 0; i < headers.Length; i++)
+                                    c.RelativeColumn(i == headers.Length - 1 ? 1.4f : 1f);
+                            });
+
+                            table.Header(h =>
+                            {
+                                foreach (var head in headers)
+                                    h.Cell().Background(Colors.Blue.Darken2).Padding(5)
+                                        .AlignCenter().Text(head).FontSize(9.5f).Bold().FontColor(Colors.White);
+                            });
+
+                            bool stripe = false;
+                            foreach (var row in rows)
+                            {
+                                bool isStriped = stripe;
+                                for (int i = 0; i < headers.Length; i++)
+                                {
+                                    string value = i < row.Length ? row[i] ?? "" : "";
+                                    var cell = table.Cell().Padding(4);
+
+                                    if (isStriped)
+                                        cell.Background(Colors.Grey.Lighten4);
+
+                                    // الأعمدة الرقمية (كلمات أرقام/عملة) بمحاذاة يسار ثابتة
+                                    bool isNumeric = value.Length > 0 &&
+                                        value.All(ch => char.IsDigit(ch) || ".,-−%() ".Contains(ch));
+                                    if (isNumeric && i > 0)
+                                        cell.AlignLeft().Text(value).FontSize(9f);
+                                    else
+                                        cell.AlignRight().Text(value).FontSize(9f);
+                                }
+                                stripe = !stripe;
+                            }
+                        });
+
+                        col.Item().PaddingTop(8).AlignLeft().Text($"عدد السجلات: {rows.Count}")
+                            .FontSize(8.5f).FontColor(Colors.Grey.Darken2);
+                    });
+
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.Span("سيل POS — صفحة ");
+                        t.CurrentPageNumber();
+                        t.Span(" / ");
+                        t.TotalPages();
+                    });
+                });
+            });
+
+            document.GeneratePdf(filePath);
+        }
+
         private static string TranslateType(string type) => type switch
         {
             "sale" => "فاتورة بيع",
