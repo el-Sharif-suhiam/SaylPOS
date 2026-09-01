@@ -136,11 +136,25 @@ namespace Sayl.UI.Forms
             _tabs.TabPages.Add(tabHolidays);
             _tabs.TabPages.Add(tabAssign);
 
-            // شريط سفلي ثابت للإغلاق — الـ Tabs تملأ ما فوقه فقط (لا تداخل مع أي زر)
+            // ══ بنية الجزأين (نمط PeriodicReportForm) ══
+            // TableLayoutPanel جذر واحد: صف علوي مرن للـ Tabs + صف سفلي مطلق (68px)
+            // للإغلاق — الصف المطلق محجوز دائمًا ولا يدخل منطقة التمرير أبدًا.
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(0)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الأعلى: كل شيء
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));    // الأسفل: الإغلاق فقط
+
+            _tabs.Dock = DockStyle.Fill;
+
             var bottomBar = new Panel
             {
-                Dock = DockStyle.Bottom,
-                Height = 68,
+                Dock = DockStyle.Fill,
                 BackColor = AppTheme.CardBg,
                 Padding = new Padding(12, 10, 12, 10)
             };
@@ -154,8 +168,11 @@ namespace Sayl.UI.Forms
 
             bottomBar.Controls.Add(btnClose);
 
-            Controls.Add(_tabs);
-            Controls.Add(bottomBar);
+            root.Controls.Add(_tabs, 0, 0);
+            root.Controls.Add(bottomBar, 0, 1);
+
+            // وحيد في النافذة — الإرساء يوزع الصفوف قبل أي حساب تمرير
+            Controls.Add(root);
         }
 
         private static readonly string[] DayNames = { "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت" };
