@@ -23,8 +23,7 @@ namespace Sayl.UI.Forms
         private DateTimePicker _dtpTo = null!;
         private Button _btnGenerate = null!;
         private Button _btnPaySelected = null!;
-        private Button _btnUnpay = null!;
-        private Button _btnPayAll = null!;
+        private Button _btnRefresh = null!;
         private DataGridView _grid = null!;
         private Label _lblSummary = null!;
 
@@ -46,13 +45,26 @@ namespace Sayl.UI.Forms
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(1100, 700);
             MinimumSize = new Size(900, 560);
-            BackColor = AppTheme.CardBg;
+            BackColor = AppTheme.Bg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            // ── شريط الفترة ──
-            var topBar = new Panel { Dock = DockStyle.Top, Height = 60, BackColor = AppTheme.FieldBg, Padding = new Padding(12, 0, 12, 0) };
+            // ══ الجذر: هامش خارجي + ثلاثة صفوف مطلقة (فترة / جدول مرن / أزرار) ══
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.Bg,
+                Padding = new Padding(12) // هامش عن الحواف — لا شيء ملتصق
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الفترة
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));     // الأزرار
+
+            // ── صف الفترة ──
+            var topBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.FieldBg, Padding = new Padding(10, 8, 10, 8) };
 
             var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 140, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd", RightToLeftLayout = false };
@@ -76,8 +88,8 @@ namespace Sayl.UI.Forms
             topBar.Controls.Add(lblFrom);
             topBar.Controls.Add(_dtpFrom);
 
-            // ── ملخص + أزرار الصرف ──
-            var bottomBar = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = AppTheme.CardBg, Padding = new Padding(12, 8, 12, 8) };
+            // ── صف الأزرار السفلي (مفصول — خارج منطقة التمرير دائمًا) ──
+            var bottomBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 
             _lblSummary = new Label
             {
@@ -90,23 +102,25 @@ namespace Sayl.UI.Forms
 
             _btnPaySelected = AppTheme.MakeButton("صرف المحدد", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 48);
             _btnPaySelected.Dock = DockStyle.Left;
-            _btnPaySelected.Width = 150;
+            _btnPaySelected.Width = 140;
             _btnPaySelected.Click += async (_, _) => await PaySelectedAsync();
 
-            _btnUnpay = AppTheme.MakeButton("عكس صرف المحدد", AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5), height: 48);
-            _btnUnpay.Dock = DockStyle.Left;
-            _btnUnpay.Width = 170;
-            _btnUnpay.Click += async (_, _) => await UnpaySelectedAsync();
+            _btnRefresh = AppTheme.MakeButton("تحديث", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 48);
+            _btnRefresh.Dock = DockStyle.Left;
+            _btnRefresh.Width = 110;
+            _btnRefresh.Click += async (_, _) => await LoadPayrollsAsync();
 
-            _btnPayAll = AppTheme.MakeButton("صرف كل المعلق", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 48);
-            _btnPayAll.Dock = DockStyle.Left;
-            _btnPayAll.Width = 160;
-            _btnPayAll.Click += async (_, _) => await PayAllAsync();
+            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+                foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
+            btnClose.Dock = DockStyle.Left;
+            btnClose.Width = 120;
+            btnClose.DialogResult = DialogResult.Cancel;
+            btnClose.Click += (_, _) => Close();
 
             bottomBar.Controls.Add(_lblSummary);
             bottomBar.Controls.Add(_btnPaySelected);
-            bottomBar.Controls.Add(_btnUnpay);
-            bottomBar.Controls.Add(_btnPayAll);
+            bottomBar.Controls.Add(_btnRefresh);
+            bottomBar.Controls.Add(btnClose);
 
             // ── الجدول ──
             _grid = new DataGridView { Dock = DockStyle.Fill };
@@ -124,40 +138,48 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colAdd", "إضافات");
             _grid.Columns.Add("colNet", "الصافي");
             _grid.Columns.Add("colStatus", "الحالة");
-            _grid.Columns["colEmp"].FillWeight = 20;
+            var colUnpay = new DataGridViewButtonColumn
+            {
+                Name = "colUnpay",
+                HeaderText = "",
+                Text = "عكس",
+                UseColumnTextForButtonValue = true,
+                FlatStyle = FlatStyle.Flat,
+                FillWeight = 7
+            };
+            colUnpay.DefaultCellStyle.ForeColor = AppTheme.Warning;
+            colUnpay.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            _grid.Columns.Add(colUnpay);
+
+            _grid.Columns["colEmp"].FillWeight = 18;
             _grid.Columns["colEmp"].ReadOnly = true;
-            _grid.Columns["colType"].FillWeight = 9;
+            _grid.Columns["colType"].FillWeight = 8;
             _grid.Columns["colType"].ReadOnly = true;
-            _grid.Columns["colWorked"].FillWeight = 12;
-            _grid.Columns["colHoliday"].FillWeight = 11;
-            _grid.Columns["colRate"].FillWeight = 10;
+            _grid.Columns["colWorked"].FillWeight = 11;
+            _grid.Columns["colHoliday"].FillWeight = 10;
+            _grid.Columns["colRate"].FillWeight = 9;
             _grid.Columns["colRate"].ReadOnly = true;
-            _grid.Columns["colGross"].FillWeight = 11;
+            _grid.Columns["colGross"].FillWeight = 10;
             _grid.Columns["colGross"].ReadOnly = true;
-            _grid.Columns["colDed"].FillWeight = 10;
-            _grid.Columns["colAdd"].FillWeight = 10;
-            _grid.Columns["colNet"].FillWeight = 12;
+            _grid.Columns["colDed"].FillWeight = 9;
+            _grid.Columns["colAdd"].FillWeight = 9;
+            _grid.Columns["colNet"].FillWeight = 10;
             _grid.Columns["colNet"].ReadOnly = true;
-            _grid.Columns["colStatus"].FillWeight = 10;
+            _grid.Columns["colStatus"].FillWeight = 9;
             _grid.Columns["colStatus"].ReadOnly = true;
 
             foreach (string col in new[] { "colWorked", "colHoliday", "colDed", "colAdd" })
                 _grid.Columns[col].DefaultCellStyle.BackColor = AppTheme.FieldBg;
 
             _grid.CellEndEdit += async (_, args) => await CellEditedAsync(args);
+            _grid.CellClick += async (_, args) => await UnpayCellClickAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };
 
-            Controls.Add(_grid);
-            Controls.Add(bottomBar);
-            Controls.Add(topBar);
+            root.Controls.Add(topBar, 0, 0);
+            root.Controls.Add(_grid, 0, 1);
+            root.Controls.Add(bottomBar, 0, 2);
 
-            // زر إغلاق أعلى (النافذة بلا حدود)
-            var btnClose = AppTheme.MakeCircleButton("×", 44,
-                back: AppTheme.BorderColor, hoverBack: AppTheme.Danger,
-                fore: AppTheme.TextPrimary, parentBack: AppTheme.CardBg, fontSize: 15f);
-            btnClose.Bounds = new Rectangle(12, 10, 44, 44);
-            btnClose.Click += (_, _) => Close();
-            topBar.Controls.Add(btnClose);
+            Controls.Add(root); // وحيد — الصفوف المطلقة لا تدخل التمرير أبدًا
         }
 
         // ───────────────── التحميل ─────────────────
@@ -186,6 +208,7 @@ namespace Sayl.UI.Forms
             _grid.Rows.Clear();
             foreach (var p in _payrolls)
             {
+                bool paid = p.Status == enPayrollStatus.paid;
                 int row = _grid.Rows.Add(p.EmployeeName,
                     EmployeesControl.TranslateSalaryType(p.SalaryType),
                     p.WorkedUnits.ToString("0.##"),
@@ -195,10 +218,11 @@ namespace Sayl.UI.Forms
                     p.Deductions.ToString("0.##"),
                     p.Additions.ToString("0.##"),
                     UiHelpers.Money(p.Net),
-                    p.Status == enPayrollStatus.paid ? "مصروف" : "معلق");
+                    paid ? "مصروف" : "معلق",
+                    paid ? "عكس" : "");   // زر العكس لكل صف — يظهر للمصروف فقط
                 _grid.Rows[row].Tag = p;
 
-                if (p.Status == enPayrollStatus.paid)
+                if (paid)
                 {
                     _grid.Rows[row].Cells["colStatus"].Style.ForeColor = AppTheme.Success;
                     foreach (DataGridViewCell cell in _grid.Rows[row].Cells)
@@ -213,6 +237,42 @@ namespace Sayl.UI.Forms
             decimal pendingTotal = _payrolls.Where(p => p.Status == enPayrollStatus.pending).Sum(p => p.Net);
             decimal paidTotal = _payrolls.Where(p => p.Status == enPayrollStatus.paid).Sum(p => p.Net);
             _lblSummary.Text = $"المعلق: {UiHelpers.Money(pendingTotal)}    المصروف: {UiHelpers.Money(paidTotal)}";
+        }
+
+        // ───────────────── عكس صرف الصف (زر لكل سطر — نمط الشفتات) ─────────────────
+        private async Task UnpayCellClickAsync(DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colUnpay"].Index)
+                return;
+
+            if (args.RowIndex >= _payrolls.Count)
+                return;
+
+            var record = _payrolls[args.RowIndex];
+            if (record.Status != enPayrollStatus.paid)
+                return; // المعلق لا يظهر زر عكس أصلًا
+
+            if (!ConfirmationDialog.Show(this, "عكس صرف راتب",
+                    $"سيتم إرجاع كشف {record.EmployeeName} إلى معلق وحذف مصروفه ({UiHelpers.Money(record.Net)}).\nاستخدم هذا لتصحيح صرف خاطئ فقط.", dangerStyle: true))
+                return;
+
+            try
+            {
+                Common.Results.Result result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var payrollService = scope.ServiceProvider.GetRequiredService<clsPayrollService>();
+                    result = await payrollService.UnpayPayrollAsync(record.PayrollId,
+                        SessionState.CurrentUser?.UserId ?? 0);
+                }
+
+                UiHelpers.ShowResult(this, result);
+                await LoadPayrollsAsync();
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر عكس الصرف.");
+            }
         }
 
         // ───────────────── توليد ─────────────────
@@ -329,81 +389,6 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ───────────────── عكس صرف (خطأ بشري) ─────────────────
-        private async Task UnpaySelectedAsync()
-        {
-            int idx = _grid.CurrentRow?.Index ?? -1;
-            if (idx < 0 || idx >= _payrolls.Count)
-            {
-                UiHelpers.ShowError(this, "اختر كشفًا مصروفًا من الجدول.");
-                return;
-            }
-
-            var record = _payrolls[idx];
-            if (record.Status != enPayrollStatus.paid)
-            {
-                UiHelpers.ShowInfo(this, "الكشف المحدد ليس مصروفًا.");
-                return;
-            }
-
-            if (!ConfirmationDialog.Show(this, "عكس صرف راتب",
-                    $"سيتم إرجاع كشف {record.EmployeeName} إلى معلق وحذف مصروفه ({UiHelpers.Money(record.Net)}).\nاستخدم هذا لتصحيح صرف خاطئ فقط.", dangerStyle: true))
-                return;
-
-            try
-            {
-                Common.Results.Result result;
-                using (var scope = Program.Services.CreateScope())
-                {
-                    var payrollService = scope.ServiceProvider.GetRequiredService<clsPayrollService>();
-                    result = await payrollService.UnpayPayrollAsync(record.PayrollId,
-                        SessionState.CurrentUser?.UserId ?? 0);
-                }
-
-                UiHelpers.ShowResult(this, result);
-                await LoadPayrollsAsync();
-            }
-            catch
-            {
-                UiHelpers.ShowError(this, "تعذر عكس الصرف.");
-            }
-        }
-
-        private async Task PayAllAsync()
-        {
-            var pending = _payrolls.Where(p => p.Status == enPayrollStatus.pending).ToList();
-            if (pending.Count == 0)
-            {
-                UiHelpers.ShowInfo(this, "لا توجد كشوف معلقة.");
-                return;
-            }
-
-            decimal total = pending.Sum(p => p.Net);
-            if (!ConfirmationDialog.Show(this, "صرف الكل",
-                    $"سيتم صرف {pending.Count} كشفًا بإجمالي {UiHelpers.Money(total)} كمصروفات رواتب.", dangerStyle: false))
-                return;
-
-            try
-            {
-                int paid = 0;
-                using (var scope = Program.Services.CreateScope())
-                {
-                    var payrollService = scope.ServiceProvider.GetRequiredService<clsPayrollService>();
-                    foreach (var p in pending)
-                    {
-                        var r = await payrollService.PayPayrollAsync(p.PayrollId,
-                            SessionState.CurrentUser?.UserId ?? 0);
-                        if (r.IsSuccess) paid++;
-                    }
-                }
-
-                UiHelpers.ShowInfo(this, $"تم صرف {paid} من {pending.Count} كشفًا.");
-                await LoadPayrollsAsync();
-            }
-            catch
-            {
-                UiHelpers.ShowError(this, "تعذر الصرف.");
-            }
-        }
+        // ───────────────── عكس الصرف أصبح زر «عكس» لكل صف مصروف (UnpayCellClickAsync) ─────────────────
     }
 }
