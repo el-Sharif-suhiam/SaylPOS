@@ -1,4 +1,5 @@
 using Common.DTOs;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Controls;
@@ -22,6 +23,19 @@ namespace Sayl.UI.UserControls
                 var service = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
                 _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "");
 
+                // اسم الحساب المرتبط لكل موظف (خريطة واحدة — لا استعلام لكل صف)
+                var userByEmp = new Dictionary<int, string>();
+                using (var scope2 = Program.Services.CreateScope())
+                {
+                    var db = scope2.ServiceProvider.GetRequiredService<Sayl.Core.Data.SaylDbContext>();
+                    var links = await db.Users
+                        .Where(u => u.EmployeeId != null)
+                        .Select(u => new { u.EmployeeId, u.Username })
+                        .ToListAsync();
+                    foreach (var l in links)
+                        userByEmp[l.EmployeeId!.Value] = l.Username;
+                }
+
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", "الاسم");
                 Grid.Columns.Add("colPosition", "المسمى");
@@ -30,20 +44,21 @@ namespace Sayl.UI.UserControls
                 Grid.Columns.Add("colSalary", "المعدل");
                 Grid.Columns.Add("colStatus", "الحالة");
                 Grid.Columns.Add("colAccount", "حساب مرتبط");
-                Grid.Columns["colName"].FillWeight = 22;
-                Grid.Columns["colPosition"].FillWeight = 16;
-                Grid.Columns["colDept"].FillWeight = 14;
-                Grid.Columns["colType"].FillWeight = 12;
-                Grid.Columns["colSalary"].FillWeight = 12;
-                Grid.Columns["colStatus"].FillWeight = 12;
-                Grid.Columns["colAccount"].FillWeight = 12;
+                Grid.Columns["colName"].FillWeight = 20;
+                Grid.Columns["colPosition"].FillWeight = 14;
+                Grid.Columns["colDept"].FillWeight = 12;
+                Grid.Columns["colType"].FillWeight = 11;
+                Grid.Columns["colSalary"].FillWeight = 11;
+                Grid.Columns["colStatus"].FillWeight = 11;
+                Grid.Columns["colAccount"].FillWeight = 13;
 
                 Grid.Rows.Clear();
                 foreach (var e in _employees)
                 {
                     int row = Grid.Rows.Add(e.Name, e.Position, e.Department ?? "-",
                         TranslateSalaryType(e.SalaryType), UiHelpers.Money(e.Salary ?? 0),
-                        TranslateStatus(e.Status), "-");
+                        TranslateStatus(e.Status),
+                        userByEmp.TryGetValue(e.EmployeeId, out var uname) ? uname : "-");
                     if (e.Status == "resigned")
                         Grid.Rows[row].Cells["colStatus"].Style.ForeColor = AppTheme.Danger;
                 }

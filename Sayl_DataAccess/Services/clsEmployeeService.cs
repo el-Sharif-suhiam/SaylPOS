@@ -47,6 +47,7 @@ namespace Sayl.Core.Services
                     Salary = e.Salary,
                     SalaryType = e.SalaryType,
                     HireDate = e.HireDate,
+                    ResignDate = e.ResignDate,
                     Address = e.Address,
                     Status = e.Status,
                     Position = e.Position,
@@ -70,6 +71,7 @@ namespace Sayl.Core.Services
                 Salary = e.Salary,
                 SalaryType = e.SalaryType,
                 HireDate = e.HireDate,
+                ResignDate = e.ResignDate,
                 Address = e.Address,
                 Status = e.Status,
                 Position = e.Position,
@@ -100,6 +102,7 @@ namespace Sayl.Core.Services
                 Salary = dtoEmployee.Salary,
                 SalaryType = dtoEmployee.SalaryType,
                 HireDate = dtoEmployee.HireDate,
+                ResignDate = dtoEmployee.ResignDate,
                 Address = string.IsNullOrWhiteSpace(dtoEmployee.Address) ? null : dtoEmployee.Address,
                 Status = dtoEmployee.Status.ToLower(),
                 Position = clsValidation.ValidateString(dtoEmployee.Position, "Position"),
@@ -146,9 +149,26 @@ namespace Sayl.Core.Services
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Status))
             {
-                if (!ValidStatuses.Contains(dtoEmployee.Status.ToLower()))
+                string newStatus = dtoEmployee.Status.ToLower();
+                if (!ValidStatuses.Contains(newStatus))
                     return Result.Fail("حالة الموظف غير صالحة.");
-                employee.Status = dtoEmployee.Status.ToLower();
+
+                // تاريخ الاستقالة يُشتق من الحالة: «مستقيل» يسجّل اليوم (أو التاريخ المحدد)،
+                // والعودة لنشط/إجازة تمسحه — Proration يقطع عنده في الرواتب الشهرية
+                if (newStatus == "resigned")
+                {
+                    employee.Status = newStatus;
+                    employee.ResignDate ??= dtoEmployee.ResignDate ?? DateOnly.FromDateTime(DateTime.Today);
+                }
+                else
+                {
+                    employee.Status = newStatus;
+                    employee.ResignDate = null;
+                }
+            }
+            else if (dtoEmployee.ResignDate.HasValue)
+            {
+                employee.ResignDate = dtoEmployee.ResignDate.Value;
             }
 
             if (!string.IsNullOrWhiteSpace(dtoEmployee.Position))

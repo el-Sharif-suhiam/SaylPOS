@@ -21,6 +21,9 @@ public partial class Employee
 
     public DateOnly? HireDate { get; set; }
 
+    /// <summary>تاريخ الاستقالة — يقطع Proration عند حساب الرواتب الشهرية للفترات الممتدة بعده.</summary>
+    public DateOnly? ResignDate { get; set; }
+
     public string? Address { get; set; }
 
     public string Status { get; set; } = null!;

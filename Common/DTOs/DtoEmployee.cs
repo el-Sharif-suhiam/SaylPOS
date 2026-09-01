@@ -22,6 +22,8 @@ namespace Common.DTOs
 
             public DateOnly? HireDate { get; set; }
 
+            public DateOnly? ResignDate { get; set; }
+
             public string? Address { get; set; }
 
             public string Status { get; set; } = null!;

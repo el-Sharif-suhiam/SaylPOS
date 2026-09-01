@@ -23,6 +23,7 @@ namespace Sayl.UI.Forms
         private DateTimePicker _dtpTo = null!;
         private Button _btnGenerate = null!;
         private Button _btnPaySelected = null!;
+        private Button _btnUnpay = null!;
         private Button _btnPayAll = null!;
         private DataGridView _grid = null!;
         private Label _lblSummary = null!;
@@ -92,6 +93,11 @@ namespace Sayl.UI.Forms
             _btnPaySelected.Width = 150;
             _btnPaySelected.Click += async (_, _) => await PaySelectedAsync();
 
+            _btnUnpay = AppTheme.MakeButton("عكس صرف المحدد", AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5), height: 48);
+            _btnUnpay.Dock = DockStyle.Left;
+            _btnUnpay.Width = 170;
+            _btnUnpay.Click += async (_, _) => await UnpaySelectedAsync();
+
             _btnPayAll = AppTheme.MakeButton("صرف كل المعلق", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 48);
             _btnPayAll.Dock = DockStyle.Left;
             _btnPayAll.Width = 160;
@@ -99,6 +105,7 @@ namespace Sayl.UI.Forms
 
             bottomBar.Controls.Add(_lblSummary);
             bottomBar.Controls.Add(_btnPaySelected);
+            bottomBar.Controls.Add(_btnUnpay);
             bottomBar.Controls.Add(_btnPayAll);
 
             // ── الجدول ──
@@ -319,6 +326,46 @@ namespace Sayl.UI.Forms
             catch
             {
                 UiHelpers.ShowError(this, "تعذر الصرف.");
+            }
+        }
+
+        // ───────────────── عكس صرف (خطأ بشري) ─────────────────
+        private async Task UnpaySelectedAsync()
+        {
+            int idx = _grid.CurrentRow?.Index ?? -1;
+            if (idx < 0 || idx >= _payrolls.Count)
+            {
+                UiHelpers.ShowError(this, "اختر كشفًا مصروفًا من الجدول.");
+                return;
+            }
+
+            var record = _payrolls[idx];
+            if (record.Status != enPayrollStatus.paid)
+            {
+                UiHelpers.ShowInfo(this, "الكشف المحدد ليس مصروفًا.");
+                return;
+            }
+
+            if (!ConfirmationDialog.Show(this, "عكس صرف راتب",
+                    $"سيتم إرجاع كشف {record.EmployeeName} إلى معلق وحذف مصروفه ({UiHelpers.Money(record.Net)}).\nاستخدم هذا لتصحيح صرف خاطئ فقط.", dangerStyle: true))
+                return;
+
+            try
+            {
+                Common.Results.Result result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var payrollService = scope.ServiceProvider.GetRequiredService<clsPayrollService>();
+                    result = await payrollService.UnpayPayrollAsync(record.PayrollId,
+                        SessionState.CurrentUser?.UserId ?? 0);
+                }
+
+                UiHelpers.ShowResult(this, result);
+                await LoadPayrollsAsync();
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر عكس الصرف.");
             }
         }
 

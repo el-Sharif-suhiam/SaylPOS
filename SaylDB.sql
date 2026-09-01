@@ -129,6 +129,7 @@ CREATE TABLE Employees
     Salary DECIMAL(10,2) NULL,
     SalaryType NVARCHAR(10) NOT NULL DEFAULT ('monthly'),   -- hourly / daily / monthly
     HireDate DATE NULL,
+    ResignDate DATE NULL,                                   -- resignation cutoff for monthly proration
     Address NVARCHAR(400) NULL,
     Status NVARCHAR(20) NOT NULL DEFAULT ('active'),
     Position NVARCHAR(50) NOT NULL,

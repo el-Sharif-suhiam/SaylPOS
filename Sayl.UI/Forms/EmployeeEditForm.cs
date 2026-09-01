@@ -21,6 +21,8 @@ namespace Sayl.UI.Forms
         private TextBox _txtPosition = null!;
         private TextBox _txtDepartment = null!;
         private DateTimePicker _dtpHireDate = null!;
+        private DateTimePicker _dtpResignDate = null!;
+        private Label _lblResign = null!;
         private ComboBox _cmbStatus = null!;
         private TextBox _txtAddress = null!;
         private Button _btnSave = null!;
@@ -122,6 +124,34 @@ namespace Sayl.UI.Forms
             _cmbStatus.SelectedIndex = 0;
             y += 64;
 
+            // تاريخ الاستقالة — يظهر فقط عند «مستقيل» (يقطع حساب الراتب الشهري عنده)
+            var lblResign = new Label
+            {
+                Text = "تاريخ الاستقالة",
+                Bounds = new Rectangle(300, y, 230, 22),
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = AppTheme.TextMuted
+            };
+            _dtpResignDate = new DateTimePicker
+            {
+                Bounds = new Rectangle(390, y + 24, 140, 34),
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "yyyy-MM-dd",
+                RightToLeftLayout = false,
+                Visible = false
+            };
+            lblResign.Visible = false;
+            _lblResign = lblResign;
+            _cmbStatus.SelectedIndexChanged += (_, _) =>
+            {
+                bool resigned = _cmbStatus.SelectedIndex == 2;
+                lblResign.Visible = resigned;
+                _dtpResignDate.Visible = resigned;
+                if (resigned && _existing?.ResignDate == null)
+                    _dtpResignDate.Value = DateTime.Today; // افتراضي: اليوم — قابل للتعديل
+            };
+            y += 8; // الحقل مخفي عادة — لا يستهلك الصف الكامل
+
             _txtAddress = MakeField("العنوان", ref y, out _);
 
             _btnSave = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
@@ -207,6 +237,11 @@ namespace Sayl.UI.Forms
                 "resigned" => 2,
                 _ => 0
             };
+            if (_existing.ResignDate.HasValue)
+            {
+                _dtpResignDate.Value = _existing.ResignDate.Value.ToDateTime(TimeOnly.MinValue);
+                // إظهار تاريخ الاستقالة إن كانت الحالة مستقيلًا (SelectedIndexChanged يظهره تلقائيًا)
+            }
             _txtAddress.Text = _existing.Address ?? "";
             UpdateSalaryLabel();
         }
@@ -231,6 +266,13 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            string status = _cmbStatus.SelectedIndex switch
+            {
+                1 => "on_leave",
+                2 => "resigned",
+                _ => "active"
+            };
+
             var dto = new DtoEmployee
             {
                 EmployeeId = _existing?.EmployeeId ?? 0,
@@ -245,13 +287,9 @@ namespace Sayl.UI.Forms
                     _ => enSalaryType.monthly
                 },
                 HireDate = DateOnly.FromDateTime(_dtpHireDate.Value),
+                ResignDate = status == "resigned" ? DateOnly.FromDateTime(_dtpResignDate.Value) : null,
                 Address = string.IsNullOrWhiteSpace(_txtAddress.Text) ? null : _txtAddress.Text.Trim(),
-                Status = _cmbStatus.SelectedIndex switch
-                {
-                    1 => "on_leave",
-                    2 => "resigned",
-                    _ => "active"
-                },
+                Status = status,
                 Position = _txtPosition.Text.Trim(),
                 Department = string.IsNullOrWhiteSpace(_txtDepartment.Text) ? null : _txtDepartment.Text.Trim()
             };

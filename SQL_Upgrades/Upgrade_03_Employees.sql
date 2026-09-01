@@ -34,6 +34,16 @@ BEGIN
 END
 GO
 
+-----------------------------------------------------------
+-- 1b) Employees.ResignDate (monthly proration cutoff)
+-----------------------------------------------------------
+IF COL_LENGTH('dbo.Employees', 'ResignDate') IS NULL
+BEGIN
+    ALTER TABLE dbo.Employees
+        ADD ResignDate DATE NULL;
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_Employees_SalaryType')
 BEGIN
     ALTER TABLE dbo.Employees

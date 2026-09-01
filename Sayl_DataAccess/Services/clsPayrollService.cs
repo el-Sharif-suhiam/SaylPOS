@@ -79,7 +79,9 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
 
             var employees = await _dbContext.Employees
-                .Where(e => e.Status != "resigned")
+                // المستقيل قبل الفترة لا كشف له (تُرشّحه حالة to < from أدناه) —
+                // أما من استقال داخل الفترة فله استحقاق أيام عمله حتى تاريخ استقالته
+                .Where(e => e.Status != "resigned" || e.ResignDate == null || e.ResignDate >= periodFrom)
                 .ToListAsync();
 
             if (employees.Count == 0)
@@ -90,13 +92,15 @@ namespace Sayl.Core.Services
             int created = 0;
             foreach (var emp in employees)
             {
-                // نطاق عمل الموظف داخل الفترة (Proration)
+                // نطاق عمل الموظف داخل الفترة (Proration): من HireDate إلى ResignDate أو نهاية الفترة
                 var from = periodFrom;
                 var to = periodTo;
                 if (emp.HireDate.HasValue && emp.HireDate.Value > from)
                     from = emp.HireDate.Value;
+                if (emp.ResignDate.HasValue && emp.ResignDate.Value < to)
+                    to = emp.ResignDate.Value;
                 if (to < from)
-                    continue; // لم يُعيَّن بعد داخل هذه الفترة
+                    continue; // لم يُعيَّن بعد أو استقال قبل الفترة
 
                 decimal rate = emp.Salary ?? 0;
                 decimal workedUnits = 0, holidayUnits = 0, gross = 0;
@@ -116,8 +120,15 @@ namespace Sayl.Core.Services
                     {
                         // الإجازات الرسمية داخل نطاق عمله تُحسب أيامًا مدفوعة
                         holidayUnits = await CountHolidaysInRangeAsync(from, to);
-                        gross = rate * holidayUnits; // أيام العمل يدوية — تبدأ من الإجازات فقط
-                        workedUnits = 0;
+
+                        // اقتراح أيام العمل: كل أيام النطاق عدا الجمعة والسبت (عطلة أسبوعية افتراضية)
+                        // — المحاسب يرى قيمة منطقية يعدّلها (غياب/استئذان) بدل البدء من صفر
+                        workedUnits = CountWorkdaysExcludeWeekend(from, to);
+
+                        // الإجازة الرسمية الواقعة في يوم عطلة أسبوعية لا تُحتسب مرتين
+                        workedUnits = Math.Max(0, workedUnits - holidayUnits);
+
+                        gross = rate * (workedUnits + holidayUnits);
                         break;
                     }
                     case enSalaryType.hourly:
@@ -211,7 +222,7 @@ namespace Sayl.Core.Services
             if (r.SalaryType == enSalaryType.monthly)
             {
                 int totalDays = r.PeriodTo.DayNumber - r.PeriodFrom.DayNumber + 1;
-                // WorkedUnits هنا أيام الوجود الفعلي — Gross محفوظ أصلًا من التوليد؛ نعيد بناءه من النسبة
+                // WorkedUnits هنا أيام الوجود الفعلي (HireDate..ResignDate داخل الفترة)
                 if (totalDays > 0 && r.WorkedUnits > 0 && r.WorkedUnits < totalDays)
                     gross = r.Rate * r.WorkedUnits / totalDays;
                 else if (r.WorkedUnits >= totalDays)
@@ -256,7 +267,9 @@ namespace Sayl.Core.Services
                 {
                     Description = $"راتب {employee.Name} — {record.PeriodFrom:yyyy-MM-dd} إلى {record.PeriodTo:yyyy-MM-dd}",
                     Amount = record.Net,
-                    ExpenseDate = DateOnly.FromDateTime(DateTime.Today),
+                    // نسَب المصروف لآخر يوم في فترة الاستحقاق — كل تقرير شهري يحمل رواتبه الصحيحة،
+                    // لا شهر الصرف الفعلي (صرف رواتب يوليو في 31 أغسطس يظل يُحسب على يوليو)
+                    ExpenseDate = record.PeriodTo,
                     Category = SalaryExpenseCategory,
                     Notes = $"كشف راتب #{record.PayrollId}",
                     UserId = actorUserId,
@@ -289,6 +302,67 @@ namespace Sayl.Core.Services
                 }
                 return Result.Fail($"فشل صرف الراتب ({details}).");
             }
+        }
+
+        /// <summary>
+        /// عكس صرف كشف (خطأ بشري): guarded عكسي (paid → pending) داخل معاملة —
+        /// يرد الكشف معلقًا ويحذف المصروف المرتبط به فيرجع الربح الشهري لحالته.
+        /// </summary>
+        public async Task<Result> UnpayPayrollAsync(int payrollId, int actorUserId)
+        {
+            var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
+            if (record == null)
+                return Result.Fail("الكشف غير موجود.");
+
+            if (record.Status != enPayrollStatus.paid)
+                return Result.Fail("الكشف ليس مصروفًا.");
+
+            if (record.ExpenseId == null)
+                return Result.Fail("لا يوجد مصروف مرتبط بالكشف — استرجع الأمر يدويًا مع المحاسب.");
+
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
+            {
+                // انتقال ذري عكسي داخل المعاملة: يمنع عكسًا وصرفًا متوازيين على نفس الكشف
+                int claimed = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE PayrollRecords SET Status = 'pending' WHERE PayrollId = {payrollId} AND Status = 'paid'");
+                if (claimed == 0)
+                    return Result.Fail("الكشف قيد المعالجة من طرف آخر.");
+
+                var expense = await _dbContext.Expenses.FindAsync(record.ExpenseId.Value);
+                if (expense != null)
+                    _dbContext.Expenses.Remove(expense);
+
+                record.Status = enPayrollStatus.pending;
+                record.PaidAt = null;
+                record.ExpenseId = null;
+
+                clsAudit.Log(_dbContext, actorUserId, "UnpayPayroll",
+                    $"عكس صرف كشف راتب #{payrollId} — إرجاع {record.Net:N2} لمعلق وحذف مصروفه");
+
+                await _dbContext.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return Result.Ok("تم عكس الصرف — الكشف معلق من جديد ومصروفه حُذف.");
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                return Result.Fail("فشل عكس الصرف.");
+            }
+        }
+
+        /// <summary>عدد أيام النطاق عدا الجمعة والسبت (اقتراح أيام العمل لليومي — قابل للتعديل يدويًا).</summary>
+        private static decimal CountWorkdaysExcludeWeekend(DateOnly from, DateOnly to)
+        {
+            decimal count = 0;
+            for (var day = from; day <= to; day = day.AddDays(1))
+            {
+                var dow = day.DayOfWeek;
+                if (dow != DayOfWeek.Friday && dow != DayOfWeek.Saturday)
+                    count++;
+            }
+            return count;
         }
 
         /// <summary>عدد أيام الإجازات الرسمية المدفوعة داخل نطاق (نسخة داخلية بدون استدعاء خدمة أخرى).</summary>
