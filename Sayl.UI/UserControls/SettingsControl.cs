@@ -1,6 +1,7 @@
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Forms;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.UserControls
@@ -71,6 +72,20 @@ namespace Sayl.UI.UserControls
             var btnRestore = AppTheme.MakeButton("استعادة نسخة احتياطية", AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5));
             btnRestore.Bounds = new Rectangle(320, y + 232, 200, 44);
             btnRestore.Click += async (_, _) => await RestoreNowAsync();
+
+            // إغلاق السنة المالية — أدمن حصراً (يظهر للمدير فقط)
+            if (SessionState.IsAdmin)
+            {
+                var btnFiscal = AppTheme.MakeButton("إغلاق السنة المالية", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
+                btnFiscal.Bounds = new Rectangle(540, y + 232, 200, 44);
+                btnFiscal.Click += (_, _) =>
+                {
+                    using var form = new FiscalYearCloseForm();
+                    if (form.ShowDialog(this) == DialogResult.OK)
+                        _lblStatus.Text = "";
+                };
+                body.Controls.Add(btnFiscal);
+            }
 
             _lblStatus = new Label { Text = "", Bounds = new Rectangle(540, y + 240, 420, 26), ForeColor = AppTheme.Success };
 

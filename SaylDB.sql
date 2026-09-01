@@ -484,7 +484,6 @@ GO
 -- 23) Create PayrollRecords
 --     Payroll per employee per period; paying creates an Expense (category 'رواتب')
 -----------------------------------------------------------
-CREATE TABLE PayrollRecords
 (
     PayrollId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     EmployeeId INT NOT NULL,
@@ -510,6 +509,26 @@ CREATE TABLE PayrollRecords
     CONSTRAINT CK_PayrollRecords_Status CHECK (Status IN ('pending','paid')),
     CONSTRAINT CK_PayrollRecords_Net CHECK (Net >= 0),
     CONSTRAINT UQ_PayrollRecords_Employee_Period UNIQUE (EmployeeId, PeriodFrom, PeriodTo) -- idempotent generation
+);
+GO
+-----------------------------------------------------------
+-- 24) Create StockCounts
+--     Physical inventory count lines: book snapshot vs counted, posted via stock adjustment
+-----------------------------------------------------------
+CREATE TABLE StockCounts
+(
+    CountId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    CountSessionId INT NOT NULL,              -- one physical count session (same value for all lines)
+    ProductId INT NOT NULL,
+    ProductName NVARCHAR(100) NOT NULL,      -- snapshot of product name at count time
+    BookQuantity INT NOT NULL,               -- system quantity snapshot at session start
+    CountedQuantity INT NULL,                -- actual counted (null = not counted yet)
+    UnitCost DECIMAL(10,2) NOT NULL DEFAULT (0),
+    IsPosted BIT NOT NULL DEFAULT (0),       -- difference applied to inventory?
+    CountedBy INT NOT NULL,
+    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+
+    CONSTRAINT FK_StockCounts_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
 );
 GO
 -----------------------------------------------------------
@@ -542,6 +561,10 @@ CREATE INDEX IX_OfficialHolidays_Date ON OfficialHolidays(HolidayDate);
 CREATE INDEX IX_PayrollRecords_EmployeeId ON PayrollRecords(EmployeeId);
 CREATE INDEX IX_PayrollRecords_Status ON PayrollRecords(Status);
 CREATE INDEX IX_PayrollRecords_Period ON PayrollRecords(PeriodFrom, PeriodTo);
+
+-- StockCounts
+CREATE INDEX IX_StockCounts_SessionId ON StockCounts(CountSessionId);
+CREATE INDEX IX_StockCounts_ProductId ON StockCounts(ProductId);
 
 -- Users
 CREATE INDEX IX_Users_RoleId ON Users(RoleId);

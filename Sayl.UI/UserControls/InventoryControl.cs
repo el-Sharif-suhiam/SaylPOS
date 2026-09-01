@@ -73,6 +73,20 @@ namespace Sayl.UI.UserControls
 
             AddToolbarButton("تسوية مخزون", AppTheme.Warning, Color.FromArgb(180, 83, 9), (_, _) => AdjustStock(), 150);
             AddToolbarGap();
+
+            // الجرد الفعلي: أدمن ومحاسب — ركن الإغلاق السنوي
+            if (SessionState.IsAdmin || SessionState.IsAccountant)
+            {
+                AddToolbarButton("جرد فعلي", AppTheme.Primary, AppTheme.PrimaryDark,
+                    (_, _) =>
+                    {
+                        using var form = new StockCountForm();
+                        if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                            _ = LoadDataAsync();
+                    }, 120);
+                AddToolbarGap();
+            }
+
             AddToolbarButton("تحديث", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
             AddToolbarGap();
         }

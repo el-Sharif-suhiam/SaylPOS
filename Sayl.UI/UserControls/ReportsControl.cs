@@ -39,6 +39,7 @@ namespace Sayl.UI.UserControls
         private const int ReportAgeing = 7;
         private const int ReportCashFlow = 8;
         private const int ReportPayrolls = 9;
+        private const int ReportLastCount = 10;
 
         public ReportsControl()
         {
@@ -65,7 +66,8 @@ namespace Sayl.UI.UserControls
                 "أفضل العملاء",
                 "أعمار الديون",
                 "حركة الصندوق",
-                "الرواتب"
+                "الرواتب",
+                "آخر جرد فعلي"
             });
             _cmbReportType.SelectedIndex = 0;
             // إصلاح العلة القديمة: تغيير النوع يعيد تشغيل التقرير فورًا (كان يخفي الحقول فقط)
@@ -297,6 +299,26 @@ namespace Sayl.UI.UserControls
                                 p.Deductions.ToString("0.##"),
                                 p.Additions.ToString("0.##"),
                                 UiHelpers.Money(p.Net));
+                        break;
+                    }
+                    case ReportLastCount:
+                    {
+                        var countService = scope.ServiceProvider.GetRequiredService<clsStockCountService>();
+                        var lines = await countService.GetLastPostedSessionAsync();
+                        _currentTitle = "آخر جرد فعلي (مرحّل)";
+                        AddColumns(("المنتج", 32), ("الدفتري", 12), ("المعدود", 12), ("الفرق", 12), ("تكلفة الفرق", 16), ("الحالة", 16));
+                        if (lines.Count == 0)
+                        {
+                            AddRow("لا يوجد جرد مرحّل بعد", "", "", "", "", "");
+                        }
+                        else
+                        {
+                            foreach (var l in lines)
+                                AddRow(l.ProductName, l.BookQuantity.ToString(), l.CountedQuantity?.ToString() ?? "-",
+                                    l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
+                                    l.DifferenceCost.ToString("N2"),
+                                    l.Difference is > 0 ? "فائض" : l.Difference is < 0 ? "عجز" : "مطابق");
+                        }
                         break;
                     }
                 }

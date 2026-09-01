@@ -61,6 +61,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<PayrollRecord> PayrollRecords { get; set; }
 
+    public virtual DbSet<StockCount> StockCounts { get; set; }
+
 //    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 //#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
 //        => optionsBuilder.UseSqlServer("Server=.;Database=SaylDB;User Id=sa;Password=sa123456;TrustServerCertificate=True");
@@ -240,6 +242,23 @@ public partial class SaylDbContext : DbContext
             entity.HasOne(d => d.Expense).WithMany()
                 .HasForeignKey(d => d.ExpenseId)
                 .HasConstraintName("FK_PayrollRecords_ExpenseId");
+        });
+
+        modelBuilder.Entity<StockCount>(entity =>
+        {
+            entity.HasKey(e => e.CountId).HasName("PK_StockCounts");
+
+            entity.HasIndex(e => e.CountSessionId, "IX_StockCounts_SessionId");
+
+            entity.HasIndex(e => e.ProductId, "IX_StockCounts_ProductId");
+
+            entity.Property(e => e.ProductName).HasMaxLength(100);
+            entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.Product).WithMany()
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("FK_StockCounts_ProductId");
         });
 
         modelBuilder.Entity<Expense>(entity =>

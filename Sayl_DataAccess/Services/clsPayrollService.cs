@@ -16,10 +16,12 @@ namespace Sayl.Core.Services
     public class clsPayrollService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsFiscalYearService _fiscalYear;
 
-        public clsPayrollService(SaylDbContext dbContext)
+        public clsPayrollService(SaylDbContext dbContext, clsFiscalYearService fiscalYear)
         {
             _dbContext = dbContext;
+            _fiscalYear = fiscalYear;
         }
 
         public const string SalaryExpenseCategory = "رواتب";
@@ -190,6 +192,10 @@ namespace Sayl.Core.Services
 
             if (record.Status == enPayrollStatus.paid)
                 return Result.Fail("لا يمكن تعديل كشف مصروف.");
+
+            // حماية السنة المالية: كشوف ما قبل السنة الحالية مؤرشفة — لا تعديل
+            if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(record.PeriodFrom))
+                return Result.Fail("كشف من سنة مالية مغلقة — لا يمكن تعديله (مؤرشف).");
 
             record.WorkedUnits = workedUnits;
             record.HolidayUnits = holidayUnits;

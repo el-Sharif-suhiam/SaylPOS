@@ -62,4 +62,55 @@ namespace Common.DTOs.ViewModel
         public decimal NetMovement => CashSales - CashReturns + CustomerPayments - SupplierPayments
                                       + CashIn - CashOut - ExpensesPaid - SalariesPaid;
     }
+
+    /// <summary>سطر جرد فعلي لمنتج واحد داخل جلسة جرد.</summary>
+    public class StockCountVM
+    {
+        public int CountId { get; set; }
+        public int CountSessionId { get; set; }
+        public int ProductId { get; set; }
+        public string ProductName { get; set; } = null!;
+        public int BookQuantity { get; set; }
+        /// <summary>null = لم يُعد بعد.</summary>
+        public int? CountedQuantity { get; set; }
+        public decimal UnitCost { get; set; }
+        public bool IsPosted { get; set; }
+        public int? Difference => CountedQuantity - BookQuantity;
+        public decimal DifferenceCost => (Difference ?? 0) * UnitCost;
+    }
+
+    /// <summary>ملخص جلسة الجرد المفتوحة.</summary>
+    public class StockCountSummaryVM
+    {
+        public int TotalLines { get; set; }
+        public int CountedLines { get; set; }
+        public int UncountedLines { get; set; }
+        public int MatchedLines { get; set; }
+        public int SurplusLines { get; set; }
+        public int ShortageLines { get; set; }
+        /// <summary>مجموع الفروق المطلقة بالكميات.</summary>
+        public int AbsolutDiff { get; set; }
+        /// <summary>صافي الفروق (+فائض/−عجز).</summary>
+        public int NetDiff { get; set; }
+        /// <summary>التكلفة المالية لصافي الفروق (سالب = عجز).</summary>
+        public decimal CostOfDifferences { get; set; }
+    }
+
+    /// <summary>نتيجة فحوصات جاهزية إغلاق السنة المالية.</summary>
+    public class FiscalCloseCheckVM
+    {
+        public DateOnly FiscalYearStart { get; set; }
+        /// <summary>أخطاء مانعة — لا إغلاق مع وجود أي منها.</summary>
+        public List<string> Errors { get; set; } = new();
+        /// <summary>تحذيرات لا تمنع (ديون محمولة، آجل جزئي...).</summary>
+        public List<string> Warnings { get; set; } = new();
+        public bool CanClose { get; set; }
+        public int OpenSessions { get; set; }
+        public int OldSuspendedInvoices { get; set; }
+        public int PendingPayrolls { get; set; }
+        public bool OpenStockCount { get; set; }
+        /// <summary>ديون ما قبل السنة المحمولة للسنة الجديدة.</summary>
+        public decimal OldDebtCarried { get; set; }
+        public int UnpaidThisYear { get; set; }
+    }
 }
