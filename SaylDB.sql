@@ -484,7 +484,7 @@ GO
 -- 23) Create PayrollRecords
 --     Payroll per employee per period; paying creates an Expense (category 'رواتب')
 -----------------------------------------------------------
-(
+CREATE TABLE PayrollRecords(
     PayrollId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     EmployeeId INT NOT NULL,
     PeriodFrom DATE NOT NULL,
