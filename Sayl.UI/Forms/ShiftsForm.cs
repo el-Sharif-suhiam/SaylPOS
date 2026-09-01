@@ -136,7 +136,17 @@ namespace Sayl.UI.Forms
             _tabs.TabPages.Add(tabHolidays);
             _tabs.TabPages.Add(tabAssign);
 
+            // زر إغلاق أعلى النافذة (بلا حدود — لا يوجد ✕ نظامي)
+            var btnClose = AppTheme.MakeCircleButton("×", 44,
+                back: AppTheme.BorderColor, hoverBack: AppTheme.Danger,
+                fore: AppTheme.TextPrimary, parentBack: AppTheme.CardBg, fontSize: 15f);
+            btnClose.Bounds = new Rectangle(12, 10, 44, 44);
+            btnClose.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            btnClose.Click += (_, _) => Close();
+
             Controls.Add(_tabs);
+            Controls.Add(btnClose);
+            btnClose.BringToFront();
         }
 
         private static readonly string[] DayNames = { "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت" };

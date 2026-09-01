@@ -19,10 +19,17 @@ namespace Sayl.Core.Services
             _dbContext = dbContext;
         }
 
-        public async Task<List<Supplier>> GetSupplierListAsync(string search = "")
+        public async Task<List<Supplier>> GetSupplierListAsync(string search = "", bool includeInactive = false)
         {
+            var query = _dbContext.Suppliers.Include(c => c.Party)
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
 
-            var query = _dbContext.Suppliers.Include(c => c.Party).Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+            // الافتراضي: الموردون النشطون فقط — العرض الكامل عند الطلب من الواجهة
+            if (!includeInactive)
+                query = query.Where(c => c.Party.IsActive);
+
+            query = query.OrderBy(c => c.Party.Name);
+
             List<Supplier> suppliers = await query.ToListAsync();
 
             return suppliers;

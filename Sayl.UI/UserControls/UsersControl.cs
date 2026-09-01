@@ -18,6 +18,9 @@ namespace Sayl.UI.UserControls
 
         protected override string Title => "المستخدمون";
 
+        // مفتاح «عرض المعطّلين» — الافتراضي: الحسابات النشطة فقط
+        protected override bool SupportsShowDeleted => true;
+
         protected override async Task LoadDataAsync()
         {
             try
@@ -26,7 +29,7 @@ namespace Sayl.UI.UserControls
                 var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
 
-                _users = await usersService.GetUsersAsync();
+                _users = await usersService.GetUsersAsync(includeInactive: ShowInactive);
                 _roles = await roleService.GetRolesListAsync();
 
                 Grid.Columns.Clear();

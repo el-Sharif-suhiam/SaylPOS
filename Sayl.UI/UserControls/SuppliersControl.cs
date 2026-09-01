@@ -15,13 +15,16 @@ namespace Sayl.UI.UserControls
 
         protected override string Title => "الموردون";
 
+        // مفتاح «عرض المعطّلين» — الافتراضي: الموردون النشطون فقط
+        protected override bool SupportsShowDeleted => true;
+
         protected override async Task LoadDataAsync()
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var supplierService = scope.ServiceProvider.GetRequiredService<clsSupplierService>();
-                _suppliers = await supplierService.GetSupplierListAsync(TxtSearch.Text?.Trim() ?? "");
+                _suppliers = await supplierService.GetSupplierListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", "الاسم");

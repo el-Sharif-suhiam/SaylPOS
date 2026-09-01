@@ -35,9 +35,16 @@ namespace Sayl.Core.Services
             return null;
         }
 
-        public async Task<List<UserVM>> GetUsersAsync()
+        public async Task<List<UserVM>> GetUsersAsync(bool includeInactive = false)
         {
-            return await _dbContext.Users
+            var query = _dbContext.Users.AsQueryable();
+
+            // الافتراضي: الحسابات النشطة فقط — soft-delete لديهم هو IsActive
+            if (!includeInactive)
+                query = query.Where(u => u.IsActive);
+
+            return await query
+                .OrderBy(u => u.Username)
                 .Select(u => new UserVM
                 {
                     UserId = u.UserId,

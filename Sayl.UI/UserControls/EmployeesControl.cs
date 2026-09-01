@@ -15,13 +15,16 @@ namespace Sayl.UI.UserControls
 
         protected override string Title => "الموظفون";
 
+        // مفتاح «عرض المعطّلين» — الافتراضي: النشطون وفي إجازة (بلا مستقيلين)
+        protected override bool SupportsShowDeleted => true;
+
         protected override async Task LoadDataAsync()
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
-                _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "");
+                _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
                 // اسم الحساب المرتبط لكل موظف (خريطة واحدة — لا استعلام لكل صف)
                 var userByEmp = new Dictionary<int, string>();

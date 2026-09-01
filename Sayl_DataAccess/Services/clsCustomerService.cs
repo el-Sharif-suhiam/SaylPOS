@@ -51,10 +51,17 @@ namespace Sayl.Core.Services
             party.Phone2 = dto.Phone2;
             party.Name = dto.Name;
         }
-        public async Task<List<Customer>> GetCustomersListAsync(string search = "")
+        public async Task<List<Customer>> GetCustomersListAsync(string search = "", bool includeInactive = false)
         {
+            var query = _dbContext.Customers.Include(c => c.Party)
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
 
-            var query = _dbContext.Customers.Include(c => c.Party).Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+            // الافتراضي: العملاء النشطون فقط — العرض الكامل عند الطلب من الواجهة
+            if (!includeInactive)
+                query = query.Where(c => c.Party.IsActive);
+
+            query = query.OrderBy(c => c.Party.Name);
+
             List<Customer> customers = await query.ToListAsync();
 
             return customers;

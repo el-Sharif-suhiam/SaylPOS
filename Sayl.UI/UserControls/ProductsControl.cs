@@ -15,13 +15,16 @@ namespace Sayl.UI.UserControls
 
         protected override string Title => "المنتجات";
 
+        // مفتاح «عرض المعطّلين» في شريط الأدوات — الافتراضي: المنتجات النشطة فقط
+        protected override bool SupportsShowDeleted => true;
+
         protected override async Task LoadDataAsync()
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-                _products = await productService.GetProductsListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: true);
+                _products = await productService.GetProductsListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", "الاسم");

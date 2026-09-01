@@ -80,7 +80,7 @@ namespace Sayl.UI.Forms
 
             Text = $"تعيين شفت — {employeeName}";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(480, 420);
+            ClientSize = new Size(500, 480);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -106,21 +106,32 @@ namespace Sayl.UI.Forms
             };
 
             string[] days = { "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت" };
+
+            // Checkboxes بحجم ممتاز لشاشة اللمس: 160×52 — نقرة إصبع مريحة بلا مبالغة
+            var daysPanel = new Panel
+            {
+                Bounds = new Rectangle(30, 124, 420, 176),
+                BackColor = AppTheme.FieldBg
+            };
             for (int i = 0; i < days.Length; i++)
             {
                 var chk = new CheckBox
                 {
                     Text = days[i],
-                    Bounds = new Rectangle(30 + (i % 4) * 110, 126 + (i / 4) * 40, 105, 34),
+                    Bounds = new Rectangle(10 + (i % 3) * 135, 10 + (i / 3) * 56, 130, 48),
+                    Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                     ForeColor = AppTheme.TextPrimary,
-                    Checked = i < 5 // افتراضي: الأحد-الخميس
+                    Checked = i < 5, // افتراضي: الأحد-الخميس
+                    FlatStyle = FlatStyle.Standard
                 };
+                chk.CheckedChanged += (_, _) => chk.ForeColor = chk.Checked ? AppTheme.PrimaryDark : AppTheme.TextPrimary;
                 _dayChecks.Add(chk);
-                Controls.Add(chk);
+                daysPanel.Controls.Add(chk);
             }
+            Controls.Add(daysPanel);
 
             var btnOk = AppTheme.MakeButton("تعيين", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnOk.Bounds = new Rectangle(260, 320, 190, 48);
+            btnOk.Bounds = new Rectangle(280, 320, 190, 48);
             btnOk.Click += async (_, _) => await SaveAsync();
 
             var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg,

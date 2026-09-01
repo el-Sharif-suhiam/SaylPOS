@@ -12,6 +12,12 @@ namespace Sayl.UI.UserControls
         protected TextBox TxtSearch = null!;
         protected readonly Panel _toolbar = new();
 
+        /// <summary>الأقسام التي تدعم soft-delete: مفتاح «عرض المعطّلين» يظهر في شريط الأدوات.</summary>
+        protected virtual bool SupportsShowDeleted => false;
+
+        /// <summary>الافتراضي: تُعرض السجلات النشطة فقط — المفتاح يظهر المعطّلين/المحذوفين.</summary>
+        protected bool ShowInactive { get; private set; }
+
         protected abstract string Title { get; }
         protected virtual bool HasSearch => true;
 
@@ -28,6 +34,8 @@ namespace Sayl.UI.UserControls
             {
                 BuildUi();
                 BuildToolbar();
+                if (SupportsShowDeleted)
+                    BuildShowDeletedToggle();
             }
             _ = LoadDataAsync();
         }
@@ -58,6 +66,38 @@ namespace Sayl.UI.UserControls
             var spacer = new Panel { Dock = DockStyle.Left, Width = width, BackColor = Color.Transparent };
             _toolbar.Controls.Add(spacer);
             spacer.BringToFront();
+        }
+
+        /// <summary>
+        /// مفتاح «عرض المعطّلين» — حجم ممتاز للمس (44px)، بحالة مرئية واضحة:
+        /// افتراضيًا مطفأ (النشطون فقط). عند تفعيله تتحدث القائمة فورًا.
+        /// يظهر فقط في الأقسام التي تدعم soft-delete (SupportsShowDeleted).
+        /// </summary>
+        private void BuildShowDeletedToggle()
+        {
+            var chk = new CheckBox
+            {
+                Text = "عرض المعطّلين",
+                Dock = DockStyle.Left,
+                Width = 150,
+                Height = 44,
+                TextAlign = ContentAlignment.MiddleRight,
+                Checked = false,
+                FlatStyle = FlatStyle.Standard,
+                ForeColor = AppTheme.TextPrimary,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Margin = new Padding(6, 6, 6, 6)
+            };
+
+            chk.CheckedChanged += (_, _) =>
+            {
+                ShowInactive = chk.Checked;
+                chk.ForeColor = chk.Checked ? AppTheme.Warning : AppTheme.TextPrimary;
+                _ = LoadDataAsync();
+            };
+
+            _toolbar.Controls.Add(chk);
+            chk.BringToFront();
         }
 
         private void BuildUi()

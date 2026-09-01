@@ -15,13 +15,16 @@ namespace Sayl.UI.UserControls
 
         protected override string Title => "العملاء";
 
+        // مفتاح «عرض المعطّلين» — الافتراضي: العملاء النشطون فقط
+        protected override bool SupportsShowDeleted => true;
+
         protected override async Task LoadDataAsync()
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var customerService = scope.ServiceProvider.GetRequiredService<clsCustomerService>();
-                _customers = await customerService.GetCustomersListAsync(TxtSearch.Text?.Trim() ?? "");
+                _customers = await customerService.GetCustomersListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", "الاسم");
