@@ -136,17 +136,26 @@ namespace Sayl.UI.Forms
             _tabs.TabPages.Add(tabHolidays);
             _tabs.TabPages.Add(tabAssign);
 
-            // زر إغلاق أعلى النافذة (بلا حدود — لا يوجد ✕ نظامي)
-            var btnClose = AppTheme.MakeCircleButton("×", 44,
-                back: AppTheme.BorderColor, hoverBack: AppTheme.Danger,
-                fore: AppTheme.TextPrimary, parentBack: AppTheme.CardBg, fontSize: 15f);
-            btnClose.Bounds = new Rectangle(12, 10, 44, 44);
-            btnClose.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            // شريط سفلي ثابت للإغلاق — الـ Tabs تملأ ما فوقه فقط (لا تداخل مع أي زر)
+            var bottomBar = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 68,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(12, 10, 12, 10)
+            };
+
+            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+                foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            btnClose.Dock = DockStyle.Left;
+            btnClose.Width = 140;
+            btnClose.DialogResult = DialogResult.Cancel;
             btnClose.Click += (_, _) => Close();
 
+            bottomBar.Controls.Add(btnClose);
+
             Controls.Add(_tabs);
-            Controls.Add(btnClose);
-            btnClose.BringToFront();
+            Controls.Add(bottomBar);
         }
 
         private static readonly string[] DayNames = { "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت" };
