@@ -21,6 +21,7 @@ namespace Sayl.Core.Services
         public const string KeyStorePhone = "StorePhone";
         public const string KeyVatNumber = "VatNumber";
         public const string KeyReceiptFooter = "ReceiptFooter";
+        public const string KeyWelcomeMessage = "WelcomeMessage";   // رسالة شاشة الزبون الثانية
         public const string KeyTaxPercent = "TaxPercent";
         public const string KeyBackupFolder = "BackupFolder";
         public const string KeyAutoPrintReceipt = "AutoPrintReceipt";

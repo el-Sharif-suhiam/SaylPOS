@@ -13,6 +13,7 @@ namespace Sayl.UI.UserControls
         private TextBox _txtStorePhone = null!;
         private TextBox _txtVat = null!;
         private TextBox _txtFooter = null!;
+        private TextBox _txtWelcome = null!;
         private TextBox _txtTax = null!;
         private TextBox _txtBackupFolder = null!;
         private ComboBox _cmbPrinter = null!;
@@ -40,6 +41,7 @@ namespace Sayl.UI.UserControls
             _txtStorePhone = AddField(body, "هاتف المتجر", 40, ref y, full: true);
             _txtVat = AddField(body, "الرقم الضريبي", 40, ref y, full: true);
             _txtFooter = AddField(body, "رسالة أسفل الإيصال", 40, ref y, full: true);
+            _txtWelcome = AddField(body, "رسالة شاشة الزبون (الشاشة الثانية)", 40, ref y, full: true);
 
             var lblTax = new Label { Text = "نسبة الضريبة %", Bounds = new Rectangle(40, y, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtTax = new TextBox { Bounds = new Rectangle(320, y - 2, 120, 34), TextAlign = HorizontalAlignment.Center };
@@ -119,6 +121,7 @@ namespace Sayl.UI.UserControls
                 _txtStorePhone.Text = await settings.GetAsync(clsSettingsService.KeyStorePhone);
                 _txtVat.Text = await settings.GetAsync(clsSettingsService.KeyVatNumber);
                 _txtFooter.Text = await settings.GetAsync(clsSettingsService.KeyReceiptFooter);
+                _txtWelcome.Text = await settings.GetAsync(clsSettingsService.KeyWelcomeMessage, "شكرًا لزيارتكم");
                 decimal tax = await settings.GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
                 _txtTax.Text = tax > 0 ? tax.ToString("0.##") : "";
                 _txtBackupFolder.Text = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
@@ -151,6 +154,7 @@ namespace Sayl.UI.UserControls
                 await settings.SetAsync(clsSettingsService.KeyStorePhone, _txtStorePhone.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyVatNumber, _txtVat.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyReceiptFooter, _txtFooter.Text?.Trim() ?? "");
+                await settings.SetAsync(clsSettingsService.KeyWelcomeMessage, _txtWelcome.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyTaxPercent, tax.ToString("0.##"));
                 await settings.SetAsync(clsSettingsService.KeyBackupFolder, _txtBackupFolder.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyAutoPrintReceipt, _chkAutoPrint.Checked.ToString());

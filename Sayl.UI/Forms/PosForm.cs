@@ -68,7 +68,73 @@ namespace Sayl.UI.Forms
             {
                 await OpenSessionAsync();
                 await RefreshStockAsync();
+                OpenCustomerDisplay(); // 📖 شاشة الزبون الثانية (إن وُجدت شاشة ثانية)
             };
+            FormClosing += (_, _) => CloseCustomerDisplay();
+        }
+
+        // ═══════════════════════════════════════════════
+        // 📖 شاشة الزبون الثانية (Customer Display) — دورة حياتها هنا:
+        //
+        //  1. OpenCustomerDisplay (عند فتح POS):
+        //     TryCreate يفحص Screen.AllScreens — شاشة واحدة = لا شيء يفتح
+        //     (صمت تام بلا أخطاء). شاشة ثانية = النافذة تفتح عليها بحدودها.
+        //
+        //  2. التغذية الحية:
+        //     كل RefreshCart (إضافة/حذف/كمية/تعليق/مسح) يمر بـ
+        //     NotifyCustomerDisplay فيصل الجديد للزبون لحظيًا.
+        //
+        //  3. ClearCustomerDisplay:
+        //     بعد إتمام البيع نعيد شاشة الزبون للترحيب (لحظة الشكر
+        //     ثم شاشة نظيفة للزبون التالي).
+        //
+        //  4. CloseCustomerDisplay (عند إغلاق POS): الشاشة تموت مع أمها.
+        //
+        //  أي فشل بالشاشة الثانية لا يمس البيع — try/catch حول كل لمسة.
+        // ═══════════════════════════════════════════════
+        private CustomerDisplayForm? _customerDisplay;
+
+        private void OpenCustomerDisplay()
+        {
+            try
+            {
+                _customerDisplay = CustomerDisplayForm.TryCreate();
+                _customerDisplay?.Show(this); // Show لا ShowDialog — عرض مستمر بالخلفية
+            }
+            catch
+            {
+                _customerDisplay = null; // فشل فتح الشاشة الثانية لا يعطل البيع أبدًا
+            }
+        }
+
+        /// <summary>إيصال لقطة السلة الحالية لشاشة الزبون (يستدعى من RefreshCart).</summary>
+        private void NotifyCustomerDisplay(bool checkoutRequested = false)
+        {
+            if (_customerDisplay == null || _customerDisplay.IsDisposed) return;
+            try
+            {
+                _customerDisplay.UpdateCart(
+                    _cart.Select(i => (i.ProductName, i.Quantity, i.Price)).ToList(),
+                    DiscountAmountForDisplay,
+                    TaxAmountForDisplay,
+                    NetTotal,
+                    checkoutRequested);
+            }
+            catch
+            {
+                // عرض الزبون تحسين — أي خلل فيه يُهمل بصمت
+            }
+        }
+
+        private void CloseCustomerDisplay()
+        {
+            try
+            {
+                _customerDisplay?.Close();
+                _customerDisplay?.Dispose();
+            }
+            catch { /* هدوء */ }
+            _customerDisplay = null;
         }
 
         // ═══════════════════════════════════════════════
@@ -1027,6 +1093,10 @@ namespace Sayl.UI.Forms
             _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Accent;
 
             RefreshTotals();
+
+            // 📖 شاشة الزبون: كل تغيير بالسلة يصل للعرض الثاني لحظيًا
+            // (الترحيب يختبئ فور أول بند — داخل CustomerDisplayForm)
+            NotifyCustomerDisplay();
         }
 
         private decimal Subtotal => _cart.Sum(i => i.Total);
@@ -1034,6 +1104,20 @@ namespace Sayl.UI.Forms
         private decimal DiscountPercent => ParsePercent(_txtDiscount.Text);
 
         private decimal TaxPercent => ParsePercent(_txtTax.Text);
+
+        // 📖 قيم العرض لشاشة الزبون: الخصم/الضريبة بالعملة (لا بالنسبة)
+        // — الزبون يفهم «−12.50» ولا يفهم «خصم 5%».
+        private decimal DiscountAmountForDisplay =>
+            Math.Round(Subtotal * DiscountPercent / 100m, 2);
+
+        private decimal TaxAmountForDisplay
+        {
+            get
+            {
+                decimal afterDiscount = Subtotal - Subtotal * DiscountPercent / 100m;
+                return Math.Round(afterDiscount * TaxPercent / 100m, 2);
+            }
+        }
 
         private static decimal ParsePercent(string? text) =>
             decimal.TryParse(text?.Trim(), out var v) && v > 0 ? Math.Min(v, 100m) : 0m;
@@ -1097,9 +1181,17 @@ namespace Sayl.UI.Forms
                 if (!confirmSale)
                     return;
 
+                // 📖 شاشة الزبون: لحظة بدء الدفع تظهر «يرجى تجهيز المبلغ»
+                // تحت الإجمالي — سطر صامت ثابت بلا وميض (الزبون يستعد للدفع)
+                NotifyCustomerDisplay(checkoutRequested: true);
+
                 using var payForm = new PaymentForm(NetTotal, hasCustomer: _customerId.HasValue);
                 if (payForm.ShowDialog(this) != DialogResult.OK || payForm.PaymentsList.Count == 0)
+                {
+                    // أُلغي الدفع — شاشة الزبون تعود للعرض العادي
+                    NotifyCustomerDisplay(checkoutRequested: false);
                     return;
+                }
                 payments = payForm.PaymentsList;
             }
             else
