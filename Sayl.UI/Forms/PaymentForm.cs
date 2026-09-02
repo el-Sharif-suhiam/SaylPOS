@@ -27,6 +27,26 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء بالكود — نمط «الصفوف الديناميكية» (فريد في النظام):
+        //
+        // معظم النوافذ إحصائية (Bounds ثابتة) — هذه النافذة مختلفة:
+        // منطقة الدفعات _rowsPanel تستقبل صفوفًا تُنشأ وتُحذف وقت التشغيل.
+        //
+        // البنية (إحداثيات يدوية — راجع EmployeeEditForm للأساسيات):
+        //   [العنوان] [المبلغ المطلوب — رقم ضخم وسط بطاقة]
+        //   [لوحة الصفوف: FlowLayoutPanel عمودي + AutoScroll]  ← القلب
+        //   [زر + إضافة دفعة] [سطر الباقي/النقص الحي] [تحذير الدَّين]
+        //   [تأكيد] [إلغاء]
+        //
+        // لماذا FlowDirection=TopDown؟ كل صف جديد يُضاف أسفل سابقه،
+        // ولو زادت عن ارتفاع اللوحة يظهر شريط تمرير تلقائي (AutoScroll)
+        // — لا حساب مواضع يدوي إطلاقًا.
+        //
+        // الصف الواحد (AddPaymentRow) لوحة صغيرة: [× حذف] [مبلغ] [طريقة]
+        // ومصيرها محفوظ في قائمة _rows (متوازية للواجهة) — الحذف يشيل
+        // من الاثنتين معًا. النتيجة النهائية تُقرأ من _rows في Confirm.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "الدفع";
@@ -46,6 +66,8 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextPrimary
             };
 
+            // ── المبلغ المطلوب: أكبر رقم بالنافذة — قرار المستخدم ──
+            // بطاقة FieldBg (16pt Primary) — المطلوب هو المرجع البصري.
             var lblTotalCaption = new Label
             {
                 Text = "المطلوب",
@@ -72,6 +94,10 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextMuted
             };
 
+            // ── لوحة الصفوف الديناميكية — قلب النافذة ──
+            // Bounds ثابتة (30, 154, 400, 170) لكن محتواها متغير:
+            // TopDown: العمودية، WrapContents=false: لا التفاف أفقي،
+            // AutoScroll=true: شريط تمرير عند تجاوز 170px.
             _rowsPanel = new FlowLayoutPanel
             {
                 Bounds = new Rectangle(30, 154, 400, 170),
@@ -85,8 +111,11 @@ namespace Sayl.UI.Forms
             var btnAddRow = AppTheme.MakeButton("+ إضافة دفعة أخرى (تقسيم)", AppTheme.SidebarBg,
                 hoverColor: AppTheme.SidebarHover, height: 40);
             btnAddRow.Bounds = new Rectangle(30, 330, 400, 40);
+            // (null, 0): صف جديد فارخ بلا طريقة افتراضية — المستخدم يختار
             btnAddRow.Click += (_, _) => AddPaymentRow(null, 0);
 
+            // ── سطر الحساب الحي: يظهر الباقي للعميل أو النقص بالأحمر ──
+            // يتحدث مع كل TextChanged في أي صف (انظر AddPaymentRow).
             _lblChange = new Label
             {
                 Text = "",
@@ -95,6 +124,8 @@ namespace Sayl.UI.Forms
                 Font = AppTheme.FontHeading
             };
 
+            // تحذير الدَّين: يظهر فقط عند النقص — Visible=false افتراضيًا
+            // (نمط «عنصر يظهر شرطيًا» — لا حذف/إنشاء، مجرد تبديل ظهور).
             _lblCreditWarning = new Label
             {
                 Text = "المبلغ أقل من المطلوب: سيُسجَّل الباقي دينًا على العميل.",
@@ -111,7 +142,7 @@ namespace Sayl.UI.Forms
             var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 444, 140, 52);
-            btnCancel.DialogResult = DialogResult.Cancel;
+            btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
 
             Controls.AddRange(new Control[]
             {
@@ -119,13 +150,19 @@ namespace Sayl.UI.Forms
                 btnAddRow, _lblChange, _lblCreditWarning, _btnOk, btnCancel
             });
 
-            AcceptButton = _btnOk;
+            AcceptButton = _btnOk;      // Enter في أي مكان = تأكيد
             CancelButton = btnCancel;
 
-            // الصف الأول: كامل المبلغ نقدي
+            // الصف الأول يُولد جاهزًا: كامل المبلغ نقدي — أسرع طريق للكاشير
             AddPaymentRow("cash", _netTotal);
         }
 
+        // 📖 AddPaymentRow: مصنع صف دفعة ديناميكي — يبني لوحة 376×44 داخلها:
+        //   [× حذف يسار] [مربع المبلغ وسط] [قائمة الطريقة يمين]
+        // (Lefts: 38 / 84 / 242 داخل اللوحة — عربية RTL منطقية).
+        // يربط TextChanged بالتحديث الحي، يسجل الصف في _rows و _rowsPanel،
+        // وزر الحذف يشيل من الاثنتين (مع منع حذف الصف الأخير — دفعة واحدة
+        // على الأقل دائمًا). أخيرًا يركز المربع ويحدد النص للكتابة فوقه.
         private void AddPaymentRow(string? method, decimal amount)
         {
             var row = new Panel { Width = 376, Height = 44, Margin = new Padding(2, 3, 2, 3) };
@@ -189,6 +226,8 @@ namespace Sayl.UI.Forms
             txt.SelectAll();
         }
 
+        // PaidTotal: مجموع كل المربعات المفهومة — TryParse يحمي من نص
+        // غير رقمي (يحسبه صفرًا) — أسهل من منع الكتابة أصلًا.
         private decimal PaidTotal => _rows.Sum(r =>
             decimal.TryParse(r.amount.Text?.Trim(), out var v) && v > 0 ? v : 0m);
 

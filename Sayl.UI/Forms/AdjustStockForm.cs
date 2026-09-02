@@ -28,6 +28,18 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadProductsAsync();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء بالكود — «الإحداثيات اليدوية» (راجع EmployeeEditForm):
+        //
+        // نموذج تسوية عمودي بسيط، لكن بثلاث نقاط تعليمية:
+        // 1) زرا RadioButton حصريان (زيادة/نقصان) — WinForms يجعل أي زرين
+        //    خيار بنفس الأب مجموعة واحدة: تحديد أحدهما يلغي الآخر تلقائيًا.
+        //    القراءة عند الحفظ: _rbIncrease.Checked ? 1 : -1.
+        // 2) «رقم الدفعة (للزيادة فقط)»: التعليق داخل التسمية نفسها —
+        //    حقل يظهر دائمًا لكن معناه مشروط بعملية أخرى (تفسير مستخدم).
+        // 3) _preselectedProductId: المنتج يُحدد مسبقًا من المستدعي (قائمة
+        //    المخزون تفتح التسوية على منتج بعينه) — FindIndex يطابق.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "تسوية مخزون";
@@ -40,18 +52,23 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label { Text = "تسوية مخزون يدوية", Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
+            // قائمة المنتجات تُعبأ لاحقًا في LoadProductsAsync (نمط شائع:
+            // البناء بلا بيانات، التحميل عند Load — لا تجميد لشاشة الافتتاح)
             var lblProduct = new Label { Text = "المنتج *", Bounds = new Rectangle(30, 60, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbProduct = new ComboBox { Bounds = new Rectangle(30, 84, 400, 40), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
 
             var lblQty = new Label { Text = "الكمية *", Bounds = new Rectangle(30, 134, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtQty = new TextBox { Bounds = new Rectangle(30, 158, 400, 40), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center };
 
+            // زرا الخيار: زيادة يمين (230..430) ونقصان يسار (30..230) —
+            // Checked=true على الزيادة = الافتراضي. لا مقبض Click — قراءة لاحقًا.
             _rbIncrease = new RadioButton { Text = "زيادة (إضافة)", Bounds = new Rectangle(230, 208, 200, 28), Checked = true, ForeColor = AppTheme.TextPrimary };
             _rbDecrease = new RadioButton { Text = "نقصان (خصم)", Bounds = new Rectangle(30, 208, 200, 28), ForeColor = AppTheme.TextPrimary };
 
             var lblBatch = new Label { Text = "رقم الدفعة (للزيادة فقط، اختياري)", Bounds = new Rectangle(30, 244, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtBatch = new TextBox { Bounds = new Rectangle(30, 268, 400, 40), Font = AppTheme.FontBody };
 
+            // السبب Multiline 60px — التسوية عملية رقابية تستوثق (لماذا؟)
             var lblReason = new Label { Text = "السبب *", Bounds = new Rectangle(30, 318, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtReason = new TextBox { Bounds = new Rectangle(30, 342, 400, 60), Multiline = true, Font = AppTheme.FontBody };
 
@@ -61,7 +78,7 @@ namespace Sayl.UI.Forms
 
             var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 420, 140, 50);
-            btnCancel.DialogResult = DialogResult.Cancel;
+            btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
 
             Controls.AddRange(new Control[]
             {

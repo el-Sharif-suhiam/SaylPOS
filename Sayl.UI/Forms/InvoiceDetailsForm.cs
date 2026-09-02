@@ -25,6 +25,21 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadInvoiceAsync();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — «الجذر المجزّأ» بسبعة صفوف وجدولان متقاسمان
+        // (الأساسيات في PayrollForm). الخصوصية هنا — «قسمة النسب»:
+        //
+        //   صف2 (Percent 46) جدول البنود ← الأكبر (بنود الفاتورة عادة كثيرة)
+        //   صف4 (Percent 24) جدول المدفوعات ← الأصغر (دفعات قليلة)
+        //
+        // الصفان المرنان «يتقاسمان» الباقي بنسبة 46:24 — أي تقليص النافذة
+        // ينقص الجدولين معًا بنفس النسبة (الأثقل يفقد أكثر مطلقًا)، بينما
+        // العناوين/الإجماليات/الأزرار صفوف مطلقة ثابتة.
+        // 💡 لو أردت جدولًا يثبت والآخر يمتص: أعطه Absolute والثاني Percent 100.
+        //
+        // نمط «عنوان قسم» متكرر: Label 30px («البنود»/«المدفوعات») فوق كل
+        // جدول — فاصل بصري بلا خطوط.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "تفاصيل الفاتورة";
@@ -112,21 +127,29 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(8, 0, 8, 0)
             };
 
-            var btnPrint = AppTheme.MakeButton("طباعة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnPrint = AppTheme.MakeButton("طباعة حرارية 80مم", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnPrint.Dock = DockStyle.Fill;
             btnPrint.Margin = new Padding(0, 0, 4, 0);
-            btnPrint.Click += async (_, _) => await PrintPdfAsync();
+            btnPrint.Click += async (_, _) => await PrintPdfAsync(InvoicePrintFormat.ThermalReceipt);
+
+            // الفاتورة الرسمية A4 — للتقارير المفصلة والاحتياجات الرسمية (توقيعات، دفعات، دفعات)
+            var btnPrintA4 = AppTheme.MakeButton("فاتورة A4 احترافية", AppTheme.Accent, hoverColor: AppTheme.AccentDark);
+            btnPrintA4.Dock = DockStyle.Fill;
+            btnPrintA4.Margin = new Padding(4, 0, 4, 0);
+            btnPrintA4.Click += async (_, _) => await PrintPdfAsync(InvoicePrintFormat.A4Detailed);
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Dock = DockStyle.Fill;
             btnClose.Margin = new Padding(4, 0, 0, 0);
             btnClose.DialogResult = DialogResult.Cancel;
 
-            var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
-            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
             buttons.Controls.Add(btnPrint, 0, 0);
-            buttons.Controls.Add(btnClose, 1, 0);
+            buttons.Controls.Add(btnPrintA4, 1, 0);
+            buttons.Controls.Add(btnClose, 2, 0);
 
             root.Controls.Add(_lblHeader, 0, 0);
             root.Controls.Add(lblItems, 0, 1);
@@ -182,13 +205,14 @@ namespace Sayl.UI.Forms
             }
         }
 
-        /// <summary>طباعة الفاتورة: PDF 80mm في مستندات المستخدم ثم فتح نافذة الطباعة الجاهزة.</summary>
-        private async Task PrintPdfAsync()
+        /// <summary>طباعة الفاتورة بالصيغة المطلوبة: حرارية 80mm (الافتراضية للكاشير)
+        /// أو A4 احترافية مفصلة (الرسمية) — ثم فتح النسخة الجاهزة.</summary>
+        private async Task PrintPdfAsync(InvoicePrintFormat format)
         {
             if (_invoice == null)
                 return;
 
-            await InvoicePrintHelper.PrintAsync(_invoice.InvoiceId, this);
+            await InvoicePrintHelper.PrintAsync(_invoice.InvoiceId, this, format);
         }
 
         internal static string TranslateType(string type) => type switch

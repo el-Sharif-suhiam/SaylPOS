@@ -32,19 +32,44 @@ namespace Sayl.UI.UserControls
             Load += async (_, _) => await RefreshDataAsync();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «لوحة معلومات متداخلة» (أعقد بنية TLP بالنظام):
+        //
+        //   main (عمودان 62/38):
+        //   ┌──────────────────────────────┬────────────────────┐
+        //   │ بطاقات KPI (Flow, 150px)      │ الأكثر مبيعًا (42%) │
+        //   │ [شريط الفترة 46px]            │                    │
+        //   │ [المخطط البياني (مرن)]        │ المخزون المنخفض(58%)│
+        //   └──────────────────────────────┴────────────────────┘
+        //
+        // أربع أفكار تستحق التأمل (كلها قابلة للنسخ):
+        // 1) بطاقات KPI داخل FlowLayoutPanel WrapContents=true — تلتف
+        //    للصف التالي تلقائيًا حسب عرض النافذة (استجابية مجانية!)
+        //    — البطاقات تُبنى برمجيًا في LoadSummaryAsync لا هنا.
+        // 2) المخطط LiveCharts (CartesianChart) عنصر WinForms عادي:
+        //    Dock=Fill وسط الصف المرن — بياناته تُحقن من RefreshTrendAsync.
+        // 3) عمود RTL: main بعمودين — «left» المتغير (البطاقات+المخطط)
+        //    أُضيف للعمود 0 فيظهر يمينًا، و«right» (القائمتان) عمود 1 يسارًا.
+        // 4) كل «بطاقة» (topPanel/lowPanel) = Panel + عنوان Top + محتوى
+        //    Fill — نمط «بطاقة بعنوان» يتكرر في كل لوحات النظام.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
+            // ── الجذر: عمودان — 62% للرئيسي (KPI+مخطط)، 38% للقوائم ──
             var main = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(4) };
             main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
             main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
-            // ── العمود الأيمن: المؤشرات + المخطط ──
+            // ── العمود الأيمن (يظهر يمينًا مع RTL): المؤشرات + المخطط ──
+            // ثلاثة صفوف: بطاقات 150 / شريط فترة 46 / مخطط مرن.
             var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
             left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
             left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
+            // FlowPanel يلف البطاقات: WrapContents=true التفاف حر حسب العرض —
+            // شاشة عريضة = صف واحد طويل، ضيقة = صفان. بلا أي كود استجابة.
             _cardsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -53,6 +78,8 @@ namespace Sayl.UI.UserControls
                 Padding = new Padding(0)
             };
 
+            // شريط الفترة: تسمية يمين + قائمة يسارها (Dock=Right داخل RTL —
+            // أول Add أقصى اليمين). تغيير الفترة يعيد المخطط فقط (لا الكل).
             var periodBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Bg, Padding = new Padding(4, 8, 4, 4) };
             var lblPeriod = new Label
             {
@@ -76,6 +103,9 @@ namespace Sayl.UI.UserControls
             periodBar.Controls.Add(_cmbPeriod);
             periodBar.Controls.Add(lblPeriod);
 
+            // المخطط: عنصر LiveCharts بذات قواعد أي عنصر — Dock=Fill
+            // داخل الصف المرن. BackColor فقط هنا؛ السلاسل والألوان
+            // والنصوص تُضبط في RefreshTrendAsync.
             _chart = new CartesianChart
             {
                 Dock = DockStyle.Fill,
@@ -86,7 +116,9 @@ namespace Sayl.UI.UserControls
             left.Controls.Add(periodBar);
             left.Controls.Add(_chart);
 
-            // ── العمود الأيسر: الأكثر مبيعًا + المخزون المنخفض ──
+            // ── العمود الأيسر: بطاقتا قوائم (42% / 58%) ──
+            // كل بطاقة: Panel CardBg بعنوان Dock=Top ومحتوى Dock=Fill —
+            // ⚠️ المحتوى يُضاف أولًا (يُرسّى أخيرًا) ثم العنوان Top.
             var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
             right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             right.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
@@ -118,7 +150,7 @@ namespace Sayl.UI.UserControls
                 Dock = DockStyle.Top,
                 Height = 30,
                 Font = AppTheme.FontHeading,
-                ForeColor = AppTheme.Danger
+                ForeColor = AppTheme.Danger // أحمر: تنبيه طلب شراء
             };
             _gridLowStock = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridLowStock);
@@ -134,6 +166,7 @@ namespace Sayl.UI.UserControls
             right.Controls.Add(topPanel);
             right.Controls.Add(lowPanel);
 
+            // RTL: العمود 0 يظهر يمينًا — لذا «left» (المخطط) في 0، «right» في 1
             main.Controls.Add(left, 0, 0);
             main.Controls.Add(right, 1, 0);
             Controls.Add(main);
@@ -227,6 +260,11 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 RenderChart: تحقن بيانات LiveCharts في العنصر الذي بناه BuildUi —
+        // Series = طبقات الرسم (أعمدة رمادية لعدد الفواتير + خط أزرق للمبيعات)،
+        // XAxes/YAxes = المحاور (labels نصية والمحور Y يرقم تلقائيًا)،
+        // SKColor = لون SkiaSharp — LiveCharts يرسم بـ Skia لا بـ GDI+.
+        // LegendPosition.Bottom: مفتاح الألوان أسفل المخطط (لا يزاحم الرسم).
         private void RenderChart(List<SalesTrendPointVM> points)
         {
             var labels = points.Select(p =>
@@ -273,6 +311,15 @@ namespace Sayl.UI.UserControls
             _chart.LegendTextPaint = new SolidColorPaint(new SKColor(107, 114, 128));
         }
 
+        // 📖 MakeCard: بطاقة KPI (205×130) — تُبنى برمجيًا وقت تحميل البيانات
+        // (راجع LoadSummaryAsync) لا وقت بناء الواجهة. تركيبها:
+        //   [شريط لون علوي 6px]  ← لون البطاقة يحدد حالتها (أخضر/أحمر/تحذيري)
+        //   [القيمة — 16pt غامق]
+        //   [العنوان — 9.5pt رمادي]
+        // ⚠️ ترتيب الإضافة: Fill أولًا ثم Bottom ثم Top — الإرساء بالعكس
+        //    (راجع LoginForm/§ passPanel). ApplyRoundedRegion يقص زواياها.
+        // Margin (0,0,12,12): هو «مسافة» البطاقة داخل FlowPanel —
+        //    FlowLayout يحترم Margin في التوزيع، لذا التباعد هنا لا Padding.
         private static Panel MakeCard(string title, string value, Color color)
         {
             var card = new Panel

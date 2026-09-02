@@ -17,6 +17,11 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // 📖 نافذة حوارية دقيقة — «الإحداثيات اليدوية» (راجع EmployeeEditForm).
+        // لا شيء يستحق شرحًا معماريًا هنا؛ لاحظ فقط:
+        //  • btnCancel نصه «فتح بدون نقد افتتاحي» مع DialogResult=Cancel —
+        //    لأن المستدعي يقرأ OpeningAmount (صفر افتراضيًا) مهما كان الزر.
+        //  • SelectAll: يحدد «0» عند الفتح — الكتابة تستبدله فورًا.
         private void BuildUi()
         {
             Text = "فتح جلسة بيع";

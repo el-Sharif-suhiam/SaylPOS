@@ -49,6 +49,19 @@ namespace Sayl.UI.Forms
         public static SupplierPaymentForm ForSupplierBalance(int partyId, string partyName, decimal balance)
             => new(null, partyId, partyName, balance);
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء بالكود — «الإحداثيات اليدوية + Anchor»
+        // (الأساسيات في EmployeeEditForm). نقطتان جديدتان هنا:
+        //
+        // 1) نمط «مصنعان ثابتان»: ForInvoice / ForSupplierBalance — بدل
+        //    منشئ غامض بمعاملات nullable، كل حالة لها اسم واضح. القاعدة:
+        //    منشئ خاص + دوال إنشاء مسمّاة = كود يقرأ نفسه.
+        //
+        // 2) Anchor — أول ظهور له: النافذة قابلة للتحجيم، فالعناصر
+        //    «ترتس» للحواف: Top|Left|Right يعني يتمدد أفقيًا مع النافذة،
+        //    وBottom|Left|Right للزر يبقيه ملتصقًا بالقاع. (أي عنصر بلا
+        //    Anchor = Top|Left افتراضيًا — يبقى جامدًا مكانه).
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             var lblTitle = new Label

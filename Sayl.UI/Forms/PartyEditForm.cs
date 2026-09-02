@@ -26,6 +26,12 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // 📖 «الإحداثيات اليدوية» — شرح موسع في EmployeeEditForm. نقاط الشاشة:
+        //  • نفس نافذة لعميل ومورد: _partyType ('C'/'S') يغيّر العنوان فقط —
+        //    البنية واحدة والحقول واحدة (كل الأطراف أسماء وجوالات وعناوين).
+        //  • صف مزدوج واحد: الجوالان (يمين 30..225 / يسار 235..430).
+        //  • MakeField هنا بنسخة ثالثة (x و y معاملان صريحان) — نفس فكرة
+        //    ProductEditForm: أبسط من مؤشر y المتقدم في EmployeeEditForm.
         private void BuildUi()
         {
             string kind = _partyType == 'C' ? "عميل" : "مورد";

@@ -20,6 +20,9 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // 📖 «الإحداثيات اليدوية» — أصغر نموذج حواري (راجع EmployeeEditForm).
+        // RoleValue رقم واحد يفصل الأدوار (100 مدير / 75 محاسب / 50 كاشير)
+        // — التسمية تشرح ذلك داخل النافذة نفسها (لمن يفتحها من المستخدمين).
         private void BuildUi()
         {
             Text = _existing == null ? "إضافة دور" : "تعديل دور";

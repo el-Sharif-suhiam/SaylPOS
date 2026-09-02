@@ -24,6 +24,16 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadProductsAsync("");
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء بالكود (لغير الملم بواجهات WinForms):
+        // أسلوب «الإحداثيات اليدوية» — راجع EmployeeEditForm لشرح الأساسيات
+        // (Bounds = يسار، أعلى، عرض، ارتفاع — وكيف تعدّل بأمان).
+        //
+        // البنية عمودية بسيطة: بحث → قائمة منتجات → (دفعة | كمية) →
+        // انتهاء شرطي → (استلام | إغلاق).
+        // «صف مزدوج» في الوسط: دفعة يمين (30..270) وكمية يسار (290..530)
+        // — انظر التعليق عند الحقلين.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "استلام مخزون";
@@ -43,6 +53,8 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextPrimary
             };
 
+            // ── البحث: مربع يمين + زر يسار (كل عنصر بإحداثياته) ──
+            // PlaceholderText: النص الرمادي الإرشادي داخل المربع الفارغ.
             _txtSearch = new TextBox
             {
                 Bounds = new Rectangle(30, 58, 380, 40),
@@ -62,6 +74,9 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextMuted
             };
 
+            // ── قائمة المنتجات: ListBox بلا Dock — Bounds ثابتة 500×170 ──
+            // IntegralHeight=false: لا يقفز الارتفاع ليلائم صفوف كاملة.
+            // نقر مزدوج على منتج = قفزة ذكية لمربع الكمية (توفير نقرة).
             _lstProducts = new ListBox
             {
                 Bounds = new Rectangle(30, 130, 500, 170),
@@ -71,6 +86,10 @@ namespace Sayl.UI.Forms
             };
             _lstProducts.DoubleClick += (_, _) => { if (_lstProducts.SelectedIndex >= 0) _txtQty.Focus(); };
 
+            // ── صف مزدوج: الدفعة يمينًا والكمية يسارًا ──
+            // نفس أسلوب EmployeeEditForm: تسميتان فوق مربعين في صف واحد —
+            // يمين: Left=30 عرض 240 / يسار: Left=290 عرض 240 (فاصل 20).
+            // علامة * = إلزامي — يتكرر التحقق منهما في ReceiveAsync.
             var lblBatch = new Label
             {
                 Text = "رقم الدفعة *",
@@ -97,9 +116,13 @@ namespace Sayl.UI.Forms
             {
                 Bounds = new Rectangle(290, 336, 240, 40),
                 Font = AppTheme.FontBody,
-                TextAlign = HorizontalAlignment.Center
+                TextAlign = HorizontalAlignment.Center // الرقم وسط — أسرع قراءة
             };
 
+            // ── الانتهاء الشرطي: المفتاح يفعّل منتقي التاريخ ──
+            // نمط «إدخال يُفتح بمفتاح»: _dtpExpiry معطّل (Enabled=false)
+            // حتى يعلّم المستخدم المفتاح — CheckedChanged يقلب Enabled.
+            // لا نحذف/نخفي العنصر — تعطيله يبصر المستخدم بوجوده.
             _chkHasExpiry = new CheckBox
             {
                 Text = "له تاريخ انتهاء",
@@ -116,6 +139,8 @@ namespace Sayl.UI.Forms
             };
             _chkHasExpiry.CheckedChanged += (_, _) => _dtpExpiry.Enabled = _chkHasExpiry.Checked;
 
+            // ── صف الأزرار: استلام (يمين) + إغلاق (يسار) ──
+            // Height=52: أكبر من حد اللمس 48 — زر العمل الأساسي يبرز.
             var btnReceive = AppTheme.MakeButton("استلام", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
             btnReceive.Bounds = new Rectangle(30, 452, 240, 52);
             btnReceive.Click += async (_, _) => await ReceiveAsync();
@@ -123,7 +148,7 @@ namespace Sayl.UI.Forms
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Bounds = new Rectangle(290, 452, 240, 52);
-            btnClose.DialogResult = DialogResult.Cancel;
+            btnClose.DialogResult = DialogResult.Cancel; // Esc = إغلاق
 
             Controls.AddRange(new Control[]
             {
@@ -132,6 +157,9 @@ namespace Sayl.UI.Forms
                 btnReceive, btnClose
             });
 
+            CancelButton = btnClose;
+            // AcceptButton=البحث (لا الاستلام!): Enter داخل مربع البحث ينفذ
+            // البحث — الاستلام عبر النقر فقط منعًا لضغطة Enter عرضة.
             CancelButton = btnClose;
             AcceptButton = btnSearch;
         }

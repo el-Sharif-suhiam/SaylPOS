@@ -8,6 +8,23 @@ namespace Sayl.UI.Controls
     /// </summary>
     internal static class ConfirmationDialog
     {
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 ConfirmationDialog.Show — «نافذة من نمط واحد تنشأ وتُرمى»:
+        // لا حقول حقن ولا كلاس مستقر — كل استدعاء يبني DialogForm جديدة
+        // من الصفر ويستقبل نتيجتها ثم يرميها (using يضمن التخلص).
+        //
+        // وصفة بنائها (كل الأنماط المهمة في 90 سطرًا):
+        //  • TLP ثلاثة صفوف مطلقة/مرنة (عنوان 40 / رسالة مرنة / أزرار 52)
+        //    — «الجذر المجزّأ» مصغّرًا.
+        //  • أزرار FlowPanel RightToLeft: أول Add (تأكيد) أقصى اليمين —
+        //    الزر الرئيسي دومًا أولًا بالكود.
+        //  • DialogResult مباشرة على الزرين (بلا Click handlers!) —
+        //    إغلاق النافذة وإرجاع النتيجة بخاصية واحدة (نمط نافذة حوارية
+        //    أساسي في WinForms يستحق الحفظ).
+        //  • dangerStyle يقلب لون العنوان وزر التأكيد (أحمر/أزرق) — نفس
+        //    الشكل يصلح للتأكيد المخيف والآمن.
+        //  • AcceptButton/CancelButton: Enter=تأكيد وEsc=إلغاء مجانًا.
+        // ═══════════════════════════════════════════════════════════════
         public static bool Show(IWin32Window? owner, string title, string message, bool dangerStyle = true)
         {
             using var dlg = new DialogForm

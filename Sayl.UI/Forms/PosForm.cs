@@ -604,6 +604,13 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── منطقة السلة (المنتصف) ─────────────────
+        // 📖 BuildCartArea: بطاقة السلة = شريط عنوان Top + جدول Fill.
+        // ⚠️ header.Paint: نمط «خط يدوي» — نرسم خطًا سفليًا فاصلًا بـ GDI+
+        //    لأن Panel بلا إطار لا يملك خاصية «خط سفلي» — Paint يُستدعى
+        //    كل إعادة رسم، فالخط يعاد رسمه صحيحًا دائمًا (لا يتوارى).
+        // ترتيب الإرساء داخل الشريط (RTL): العنوان أقصى اليمين (Right
+        // أولًا)، شارة البنود يساره، وتحذير المخزون Fill في الوسط.
+        // داخل الحاوية: الجدول Fill أولًا ثم الشريط Top (ترتيب معكوس).
         private void BuildCartArea()
         {
             var container = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Bg, Padding = new Padding(16, 12, 16, 12) };
@@ -656,6 +663,18 @@ namespace Sayl.UI.Forms
             Controls.Add(container);
         }
 
+        // 📖 StyleCartGrid: جدول السلة — أثقل جدول تخصيصًا في النظام.
+        // الفكرة: «أزرار داخل خلايا» — ثلاثة أعمدة أزرار (− كمية + حذف)
+        // بينها عمود كمية قابل للتحرير مباشرة.
+        //  • أزرار الأعمدة: DataGridViewButtonColumn — النقر يلتقط في
+        //    GridCart_CellClick بمقارنة اسم العمود (وليس برقمه — لو
+        //    أعدت ترتيب الأعمدة يبقى الالتقاط صحيحًا).
+        //  • colQty وحده ReadOnly=false + خلفية FieldBg — «دعوة بصرية»
+        //    للكتابة فوقه (بقية الجدول عرض فقط).
+        //  • أرقام أكبر (12-14pt) من StyleGrid القياسي: شاشة كاشير
+        //    تُقرأ من مسافة ذراع واقفًا — قاعدة «حجم الخط = مسافة القارئ».
+        //  • CellValidating: حارس إدخال — أي نص غير رقمي في الكمية
+        //    يُرفض قبل وصوله للبيانات (e.Cancel = ارجع للخلية).
         private void StyleCartGrid()
         {
             UiHelpers.StyleGrid(_gridCart);
@@ -784,6 +803,20 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── لوحة الأوامر (يمين) ─────────────────
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 BuildActionPanel: عمود يمين شاشة الكاشير — «مصنع الصفوف» AddRow.
+        //
+        // البنية: TLP عمود واحد + AutoScroll، كل مقطع «صف» يُضاف بـ AddRow
+        // (الدالة تضيف RowStyle بالارتفاع المطلوب وترسي العنصر Top):
+        //   1. بطاقة العميل (68)      4. زر الدفع الكبير 78px — F2
+        //   2. بطاقة الإجماليات (132)  5. تعليق/مسح — صف ثنائي MakeTwoColumns
+        //   3. الصافي (62) Accent      6. عنوان + شبكة عمليات 2×2
+        //   ... ثم صف Percent يمتص الفائض (قاعدة TLP الذهبية).
+        //
+        // 💡 لإضافة مقطع: var x = ...; AddRow(layout, x, ارتفاعه);
+        //    الأرقام في AddRow = ارتفاعات مطلقة بالبكسل — عدّل بحرية.
+        // بطاقات MakeCard: حدود دائرية مرسومة يدويًا (Paint) — انظر الدالة.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildActionPanel()
         {
             var panel = new Panel { Dock = DockStyle.Right, Width = 388, BackColor = AppTheme.Bg, Padding = new Padding(4, 12, 12, 12) };
@@ -952,6 +985,9 @@ namespace Sayl.UI.Forms
             Controls.Add(panel);
         }
 
+        // 📖 MakeCard: بطاقة بيضاء بحد دائري — الحد يُرسم يدويًا في Paint:
+        // Panel العادي بلا BorderRadius، فنرسم مسارًا مدورًا (CreateRoundedPath)
+        // بقلم BorderColor. Paint يعاد مع كل رسم فالحد يتبع حجم البطاقة.
         private static Panel MakeCard(int height)
         {
             var card = new Panel { Dock = DockStyle.Top, Height = height, BackColor = AppTheme.CardBg, Padding = new Padding(8) };
@@ -965,6 +1001,9 @@ namespace Sayl.UI.Forms
             return card;
         }
 
+        // 📖 MakeTwoColumns: صف ثنائي 50/50 — عنصران يمين (عمود 0 في RTL)
+        // ويسار (عمود 1). Margin بينهما 4px هو الفاصل البصري.
+        // يُستعمل حيث الزران كثيرا يرتبطان (تعليق+مسح، مرتجع+قبض...).
         private static Control MakeTwoColumns(Control right, Control left)
         {
             var two = new TableLayoutPanel { Dock = DockStyle.Top, Height = right.Height, ColumnCount = 2, BackColor = AppTheme.Bg, Margin = new Padding(0) };
@@ -979,6 +1018,11 @@ namespace Sayl.UI.Forms
             return two;
         }
 
+        // 📖 AddRow: «مصنع الصفوف» — يضيف عنصرًا كصف جديد في TLP عمودي:
+        //  • Absolute: العنصر Dock=Top بارتفاع محدد (كل مقاطع اللوحة).
+        //  • Percent: العنصر Dock=Fill بارتفاع 0 — يكبر ليأكل الفائض
+        //    (الصف الفاصل الأخير — بلاه تتمدد كل الصفوف وتتشوه النسب).
+        // Margin سفلي 10 = المسافة الرأسية بين كل مقطعين (تباعد مجاني).
         private static void AddRow(TableLayoutPanel layout, Control control, int height, SizeType sizeType = SizeType.Absolute)
         {
             control.Margin = new Padding(0, 0, 0, 10);

@@ -37,6 +37,15 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
+            // ═══ «الجذر المجزّأ» (PayrollForm للأساسيات) + خصوصيتان: ═══
+            // 1) رأس مركّب: TLP ثلاثة أعمدة داخل صف الرأس —
+            //    عمود0 (170 عنوان) | عمود1 (مرن بحث) | عمود2 (110 زر).
+            //    في RTL ينعكس: العنوان أقصى اليمين، البحث يتمدد وسطًا،
+            //    الزر أقصى اليسار — نمط «رأس ثلاثي» لحواريات الاختيار.
+            // 2) عمود أزرار داخل الجدول (DataGridViewButtonColumn):
+            //    زر «اختيار» لكل صف — النقر يلتقط في Grid_CellClick
+            //    (مقارنة باسم العمود لا برقمه) — نمط مستخدم أيضًا في
+            //    PayrollForm (colUnpay) وInvoicesControl (colView/colPay).
             // تخطيط متجاوب: شريط علوي (عنوان + بحث) ثم شبكة تتمدد ثم أزرار سفلية
             var root = new TableLayoutPanel
             {

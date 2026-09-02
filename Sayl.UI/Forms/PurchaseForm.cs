@@ -60,11 +60,28 @@ namespace Sayl.UI.Forms
             };
         }
 
-        // ── بناء الواجهة ──
-
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «الجذر المجزّأ» بأربعة صفوف (راجع PayrollForm):
+        //
+        //   ┌──────────────────────────────────────┐
+        //   │ صف0 (Absolute 60): الترويسة + زر ×   │
+        //   ├──────────────────┬───────────────────┤
+        //   │ صف1 (Absolute 170): المورد | المنتجات │ ← عمودان 50/50
+        //   ├──────────────────┴───────────────────┤
+        //   │ صف2 (Percent 100): جدول البنود        │ ← يتمدد مع النافذة
+        //   ├──────────────────┬───────────────────┤
+        //   │ صف3 (Absolute 290): دفع | إجماليات    │ ← عمودان 55/45
+        //   └──────────────────┴───────────────────┘
+        //
+        // أبرز ما هنا — نمط «ماستر-ديتيل» المصغّر:
+        // أعلى: قائمتا بحث (مورد يمينًا، منتج يسارًا) — تختار منهما،
+        // وسط: جدول البنود يتراكم، أسفل: المبالغ تتحدث حيًا (RecalcTotals).
+        //
+        // ⚠️ علامة * في «المورد *» و«رقم الدفعة *» = إلزامي (لا حفظ بدونه).
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            // ── الحاوية الرئيسية ──
+            // ── الحاوية الرئيسية: عمود واحد + 4 صفوف (المقاسات فوق) ──
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -78,7 +95,10 @@ namespace Sayl.UI.Forms
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));    // الجدول (يتمدد)
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 290));   // الإجماليات والأزرار
 
-            // ── الترويسة ──
+            // ── الترويسة: عنوان وسط + زر × دائري أعلى اليسار ──
+            // الزر الدائري فوق Label بـ Dock=Fill — Bounds يدوي داخل اللوحة.
+            // Anchor=Top|Left: يبقى بالزاوية عند تغيير حجم النافذة (نافذة
+            // قابلة للتحجيم هنا — Anchor يحافظ على موقع الزر النسبي).
             var header = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             var lblTitle = new Label
             {
@@ -97,7 +117,10 @@ namespace Sayl.UI.Forms
             header.Controls.Add(lblTitle);
             header.Controls.Add(btnCloseTop);
 
-            // ── منطقة الموردين والمنتجات ──
+            // ── منطقة الاختيار: عمودان 50/50 — جدول داخلي داخل صف الجذر ──
+            // مع RightToLeft.Yes: العمود 0 يظهر يمينًا — لذلك نضع المورد
+            // (الأساس في الشراء) في العمود 1... انظر Controls.Add أسفل:
+            // المورد أُضيف للعمود 1 (يظهر يمينًا)، المنتجات للعمود 0 (يسارًا).
             var selectionPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -108,9 +131,13 @@ namespace Sayl.UI.Forms
             selectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             selectionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
-            // المورد (يمين)
+            // المورد (يمين): تسمية + صف بحث أفقي + قائمة تملأ الباقي
             var supplierPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
             var lblSupplier = MakeCaption("المورد *", new Rectangle(0, 0, 200, 22));
+            // FlowLayoutPanel بـ FlowDirection=RightToLeft: صف أفقي يرتص
+            // من اليمين — أول Controls.Add يظهر أقصى اليمين.
+            // WrapContents=false: لا التفاف للسطر التالي مهما ضاقت المساحة.
+            // Height=40: ارتفاع الصف ثابت (زر البحث 32 + هوامش).
             var supplierSearchRow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -118,6 +145,7 @@ namespace Sayl.UI.Forms
                 WrapContents = false,
                 Height = 40
             };
+            // Enter داخل مربع البحث = زر البحث (SuppressKeyPress يمنع «بيب»)
             _txtSupplierSearch = new TextBox { Width = 180, Height = 30 };
             _txtSupplierSearch.PlaceholderText = "بحث...";
             _txtSupplierSearch.KeyDown += async (_, args) =>
@@ -132,9 +160,12 @@ namespace Sayl.UI.Forms
                 foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 32);
             btnSupplierSearch.Width = 80;
             btnSupplierSearch.Click += async (_, _) => await LoadSuppliersAsync(_txtSupplierSearch.Text.Trim());
+            // الترتيب داخل Flow (RTL): أول Add أقصى اليمين — الزر يمين المربع
             supplierSearchRow.Controls.Add(btnSupplierSearch);
             supplierSearchRow.Controls.Add(_txtSupplierSearch);
 
+            // ListBox: قائمة الموردين — Dock=Fill تملأ ما تبقى تحت صف البحث.
+            // IntegralHeight=false: لا «يقفز» الارتفاع لعرض صفوف كاملة فقط.
             _lstSuppliers = new ListBox
             {
                 Dock = DockStyle.Fill,
@@ -142,11 +173,15 @@ namespace Sayl.UI.Forms
                 BorderStyle = BorderStyle.FixedSingle,
                 IntegralHeight = false
             };
+            // ⚠️ ترتيب الإرساء داخل supplierPanel (آخر Add يُرسّى أولًا):
+            // 1) القائمة Fill أولًا — ترسو أخيرة وتملأ الباقي،
+            // 2) صف البحث Top — يأخذ حافته قبلها،
+            // 3) التسمية Bounds يدوية فلا تشارك بالتراصف.
             supplierPanel.Controls.Add(_lstSuppliers);
             supplierPanel.Controls.Add(supplierSearchRow);
             supplierPanel.Controls.Add(lblSupplier);
 
-            // المنتجات (يسار)
+            // المنتجات (يسار): نفس بنية المورد تمامًا + كمية وزر إضافة
             var productPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
             var lblProduct = MakeCaption("المنتج المخزني (بحث بالاسم أو الباركود)", new Rectangle(0, 0, 200, 22));
             var productSearchRow = new FlowLayoutPanel
@@ -171,6 +206,7 @@ namespace Sayl.UI.Forms
             btnProductSearch.Width = 80;
             btnProductSearch.Click += async (_, _) => await LoadProductsAsync(_txtProductSearch.Text.Trim());
 
+            // زر الإضافة معطّل حتى يُختار منتج (SelectedIndexChanged يشغّله)
             _btnAddProduct = AppTheme.MakeButton("إضافة للفاتورة", AppTheme.Accent,
                 hoverColor: AppTheme.AccentDark, height: 32);
             _btnAddProduct.Width = 130;
@@ -182,9 +218,11 @@ namespace Sayl.UI.Forms
                 Text = "الكمية:",
                 AutoSize = true,
                 ForeColor = AppTheme.TextMuted,
-                Margin = new Padding(4, 6, 2, 0)
+                Margin = new Padding(4, 6, 2, 0) // هامش صغير يحاذي الارتفاع داخل صف 40
             };
 
+            // NumericUpDown بدل TextBox للكمية: أسهم + حد أدنى/أقصى مدمج —
+            // Minimum=1 يمنع الصفر والسالب بلا تحقق يدوي.
             _nudQty = new NumericUpDown
             {
                 Minimum = 1,
@@ -196,6 +234,7 @@ namespace Sayl.UI.Forms
                 Margin = new Padding(2, 2, 4, 0)
             };
 
+            // ترتيب صف منتجات البحث (RTL): بحث ← المربع ← الكمية ← الرقم ← إضافة
             productSearchRow.Controls.Add(btnProductSearch);
             productSearchRow.Controls.Add(_txtProductSearch);
             productSearchRow.Controls.Add(lblQty);
@@ -209,7 +248,9 @@ namespace Sayl.UI.Forms
                 BorderStyle = BorderStyle.FixedSingle,
                 IntegralHeight = false
             };
+            // نقر مزدوج على منتج = إضافته (اختصار الماسح الذكي للمستخدم)
             _lstProducts.DoubleClick += (_, _) => AddSelectedItem();
+            // تفعيل زر الإضافة فقط عند تحديد صالح — حرسة واجهة قبل الحفظ
             _lstProducts.SelectedIndexChanged += (_, _) =>
                 _btnAddProduct.Enabled = _lstProducts.SelectedIndex >= 0
                                       && _lstProducts.SelectedIndex < _products.Count;
@@ -218,10 +259,15 @@ namespace Sayl.UI.Forms
             productPanel.Controls.Add(productSearchRow);
             productPanel.Controls.Add(lblProduct);
 
+            // الجذر مقلوب بسبب RTL: العمود 1 = يمين (المورد)، العمود 0 = يسار
             selectionPanel.Controls.Add(supplierPanel, 1, 0);
             selectionPanel.Controls.Add(productPanel, 0, 0);
 
-            // ── جدول البنود ──
+            // ── جدول البنود: المرن — يتراكم فيه ما أُضيف من القائمتين ──
+            // Margin أفقي 24: يباعد الجدول عن حواف النافذة ويحاذي منطقة الاختيار.
+            // ReadOnly=false هنا فقط (خلاف StyleGrid الافتراضي): الدفعة/الكمية/
+            // التكلفة/الانتهاء تُحرَّر داخل الجدول مباشرة — أما colProduct
+            // وcolTotal وcolDelete فأعمدة عرض فقط (ReadOnly=true لكل منها تحت).
             _grid = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -250,7 +296,11 @@ namespace Sayl.UI.Forms
             _grid.Columns["colTotal"].FillWeight = 12;
             _grid.Columns["colDelete"].ReadOnly = true;
             _grid.Columns["colDelete"].FillWeight = 9;
+            // CellEndEdit: بعد انتهاء تحرير أي خلية تُعاد الحسابات — إجمالي
+            // السطر وكل الملخصات أسفل النافذة يتحدثان فورًا.
             _grid.CellEndEdit += (_, _) => RefreshRowTotals();
+            // CellClick مع فلترة عمود: نقر «حذف» فقط يحذف السطر —
+            // args.ColumnIndex نقارن بفهرس العمود الاسمي لا برقم ثابت.
             _grid.CellClick += (_, args) =>
             {
                 if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colDelete"].Index) return;
@@ -259,7 +309,7 @@ namespace Sayl.UI.Forms
                 RecalcTotals();
             };
 
-            // ── منطقة الإجماليات والدفع والأزرار ──
+            // ── الصف السفلي: عمودان — دفع (يمين) | إجماليات (يسار) ──
             var bottomPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -270,7 +320,7 @@ namespace Sayl.UI.Forms
             bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
             bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
 
-            // الجهة اليمنى: الخصم والضريبة والمدفوع
+            // الجهة اليمنى: 4 صفوف × عمودان (تسمية | إدخال) — خصم/ضريبة/مدفوع/طريقة
             var paymentPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -289,6 +339,7 @@ namespace Sayl.UI.Forms
                 Text = "0",
                 Margin = new Padding(6)
             };
+            // TextChanged = إعادة حساب حية: كل تعديل خصم يحدّث الصافي فورًا
             _txtDiscount.TextChanged += (_, _) => RecalcTotals();
 
             var lblTax = MakeCaption("الضريبة %", new Rectangle(0, 0, 100, 22));
@@ -322,6 +373,7 @@ namespace Sayl.UI.Forms
             _cmbMethod.Items.AddRange(new object[] { "نقدي", "بطاقة" });
             _cmbMethod.SelectedIndex = 0;
 
+            // عمود TLP بـ RTL: العمود 0 يمين (التسميات) والعمود 1 يسار (الإدخال)
             paymentPanel.Controls.Add(lblDiscount, 0, 0);
             paymentPanel.Controls.Add(_txtDiscount, 1, 0);
             paymentPanel.Controls.Add(lblTax, 0, 1);
@@ -331,13 +383,15 @@ namespace Sayl.UI.Forms
             paymentPanel.Controls.Add(lblMethod, 0, 3);
             paymentPanel.Controls.Add(_cmbMethod, 1, 3);
 
-            // الجهة اليسرى: الإجماليات والملاحظات
+            // الجهة اليسرى: الإجماليات (تتحدث حيًا) + ملاحظات + صف أزرار
             var totalsPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 Padding = new Padding(6)
             };
+            // ثلاثة Labels بـ Dock=Top داخل عمود واحد: تتراصف فوق بعضها
+            // بترتيب الإضافة (المجموع ثم الصافي الأبرز ثم المتبقي).
             _lblSubtotal = new Label
             {
                 Text = "المجموع: 0.00",
@@ -349,7 +403,7 @@ namespace Sayl.UI.Forms
             {
                 Text = "الصافي: 0.00",
                 Dock = DockStyle.Top,
-                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12.5F, FontStyle.Bold), // الأبرز — رقم القرار
                 ForeColor = AppTheme.PrimaryDark,
                 TextAlign = ContentAlignment.MiddleLeft
             };
@@ -364,10 +418,12 @@ namespace Sayl.UI.Forms
             var lblNotes = MakeCaption("ملاحظات", new Rectangle(0, 0, 100, 22));
             _txtNotes = new TextBox
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Fill,     // يملأ المساحة بين التسمية وصف الأزرار
                 Multiline = true
             };
 
+            // صف الأزرار: FlowPanel بـ Dock=Bottom — يُرسّى أولًا (آخر Add)
+            // فيحجز قاع العمود، والملاحظات Fill فوقه.
             var btnRow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom,
@@ -384,11 +440,16 @@ namespace Sayl.UI.Forms
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Width = 160;
             btnClose.Height = 50;
+            // DialogResult=Cancel: Esc يغلق — رغم أن زر × أعلى موجود أيضًا
             btnClose.DialogResult = DialogResult.Cancel;
 
+            // RTL Flow: أول Add (حفظ) أقصى اليمين
             btnRow.Controls.Add(_btnSave);
             btnRow.Controls.Add(btnClose);
 
+            // ⚠️ عمود TLP بتراصف رأسي: التسمية/الأزرار بـ Top/Bottom تُرسّى
+            // حسب ترتيب الإضافة المعكوس — Dock=Fill (الملاحظات) يُضاف قبلها
+            // هنا كي يبقى آخر من يرسو بعد حجز Top/Bottom.
             totalsPanel.Controls.Add(_lblSubtotal);
             totalsPanel.Controls.Add(_lblNet);
             totalsPanel.Controls.Add(_lblRemaining);
@@ -396,10 +457,11 @@ namespace Sayl.UI.Forms
             totalsPanel.Controls.Add(_txtNotes);
             totalsPanel.Controls.Add(btnRow);
 
+            // bottomPanel بـ RTL: العمود 1 (الدفع) يمين، العمود 0 (الإجماليات) يسار
             bottomPanel.Controls.Add(paymentPanel, 1, 0);
             bottomPanel.Controls.Add(totalsPanel, 0, 0);
 
-            // أضف كل الصفوف إلى الجذر
+            // ── تجميع صفوف الجذر — الترتيب يطابق RowStyles أعلاه ──
             root.Controls.Add(header, 0, 0);
             root.Controls.Add(selectionPanel, 0, 1);
             root.Controls.Add(_grid, 0, 2);
@@ -408,6 +470,8 @@ namespace Sayl.UI.Forms
             Controls.Add(root);
             CancelButton = btnClose;
         }
+        // 📖 MakeCaption: تسمية رمادية موحدة (نص، Bounds، محاذاة يمين) —
+        // Bounds هنا تُتجاهل داخل TLP (TLP يوزع بنفسه) — بقيت للتوافق.
         private static Label MakeCaption(string text, Rectangle bounds)
         {
             return new Label

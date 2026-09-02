@@ -23,6 +23,11 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // 📖 «الإحداثيات اليدوية» — شرح موسع في EmployeeEditForm. نقاط الشاشة:
+        //  • صف مزدوج: المبلغ (يمين 30..215) والتاريخ منتقي (يسار 225..410).
+        //  • الفئة ComboBox بخيارات عربية ثابتة — تحفظ نصًا مباشرة (لا ترجمة).
+        //  • Value عند التعديل: تحويل DateOnly → DateTime عبر ToDateTime،
+        //    والافتراضي DateTime.Today — نفس فكرة حقن القيم في كل النوافذ.
         private void BuildUi()
         {
             Text = _existing == null ? "إضافة مصروف" : "تعديل مصروف";
