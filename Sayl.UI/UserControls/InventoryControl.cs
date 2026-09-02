@@ -57,6 +57,10 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
+        // خصوصية هنا: عنصر مخصص (CheckBox «المنخفض فقط») يُضاف يدويًا
+        // بنفس حيلة الأزرار: Controls.Add ثم BringToFront — فيظهر أقصى
+        // اليمين قبل الأزرار. أي عنصر مخصص بشريط الأدوات يسلك هذا الطريق.
         protected override void BuildToolbar()
         {
             _chkLowOnly = new CheckBox

@@ -27,6 +27,26 @@ namespace Sayl.UI.UserControls
             BackColor = AppTheme.Bg;
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 نمط «القسم الجاهز» — أساس كل أقسام العرض/الإدارة بالنظام:
+        //
+        // أي UserControl يرث هذه الفئة يحصل مجانًا على: شريط أدوات
+        // (عنوان يمين + بحث يساره) + جدول DataGrid يملأ الباقي + بحث
+        // Enter + مفتاح «المعطلون» اختياريًا. الابن يفعل ثلاثة أشياء فقط:
+        //   1. Title => "اسم القسم"
+        //   2. override BuildToolbar() + AddToolbarButton(...)
+        //   3. override LoadDataAsync() — يعبّئ Grid
+        //
+        // ⚙️ آلية البناء «المؤجل»: كل شيء يُبنى في OnLoad لا المنشئ —
+        // لأن الابن يضبط Title/أزراره في المنشئ قبل أن يبني الأساس.
+        // (Controls.Count == 0 حارس يمنع البناء المزدوج عند إعادة التحميل.)
+        //
+        // 🎯 الحيلة الأهم — AddToolbarButton و Dock=Left + BringToFront:
+        //  الأزرار تُرسى يسارًا لكن «آخر Add» يُرسّى أولًا... بدل عكس
+        //  ترتيب الأسطر يدويًا في كل قسم، نجعل BringToFront يقلب الترتيب
+        //  بعد كل إضافة: النتيجة = أول AddToolbarButton بالكود يظهر
+        //  أقصى اليمين بصريًا (أقرب للعنوان) — الكود يقرأ كترتيب بشري.
+        // ═══════════════════════════════════════════════════════════════
         protected sealed override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
@@ -48,7 +68,12 @@ namespace Sayl.UI.UserControls
         protected abstract Task LoadDataAsync();
 
         protected virtual void OnSearch() => _ = LoadDataAsync();
+        // ^ «_ =» discard: استدعاء async بلا انتظار (fire-and-forget) —
+        // يمنع تحذير المترجم دون async void (التي تبتلع الاستثناءات).
 
+        // 📖 AddToolbarButton: زر شريط أدوات قسم — Height=42 (لمس مريح)،
+        // Dock=Left + BringToFront (انظر الحيلة أعلى الفصل). Width معامل:
+        // 130 الافتراضي يكفي أزرارًا قصيرة؛ مرر 150+ لنص أطول.
         protected void AddToolbarButton(string text, Color back, Color hover, EventHandler onClick, int width = 130)
         {
             var btn = AppTheme.MakeButton(text, back, hoverColor: hover, height: 42);
@@ -61,6 +86,8 @@ namespace Sayl.UI.UserControls
             btn.BringToFront();
         }
 
+        // 📖 AddToolbarGap: فاصل فارغ (Panel شفاف بعرض 8) — نفس حيلة
+        // BringToFront: يظهر مسافة بين مجموعة أزرار ومجموعة تالية.
         protected void AddToolbarGap(int width = 8)
         {
             var spacer = new Panel { Dock = DockStyle.Left, Width = width, BackColor = Color.Transparent };
@@ -100,6 +127,11 @@ namespace Sayl.UI.UserControls
             chk.BringToFront();
         }
 
+        // ═══ الأساس المشترك: شريط أدوات Top (66px) + جدول Fill ═══
+        // الشريط: بحث Dock=Right عرض 320 ثم عنوان Dock=Right يمينه —
+        // (RTL: أول Add = أقصى اليمين، فالإضافة بالعكس: البحث أولا.)
+        // الجدول: Grid بـ Dock=Fill يُضاف قبل الشريط (يرسو آخرًا) —
+        // فالشريط يأخذ Top والجدول يملأ تحته.
         private void BuildUi()
         {
             _toolbar.Dock = DockStyle.Top;

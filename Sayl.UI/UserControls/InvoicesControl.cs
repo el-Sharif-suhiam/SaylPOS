@@ -121,6 +121,15 @@ namespace Sayl.UI.UserControls
             _ => status
         };
 
+        // 📖 BuildToolbar لهذا القسم يفعل شيئين (الوصفة الأساسية في
+        // SectionListControl أعلى الملف):
+        //  1. Grid.CellClick — «موزع نقرات الأعمدة»: مقارنة عمود النقر
+        //     باسم العمود الاسمي (colView/colPay) ثم تنفيذ فعل الصف.
+        //     هذا هو نمط «أزرار داخل الجدول» المعياري بالنظام (انظر
+        //     CustomerPickerForm.Grid_CellClick وPayrollForm colUnpay).
+        //  2. أزرار الشريط عبر AddToolbarButton — أول Add = أقصى اليمين.
+        // عمود سداد الشراء: يظهر نص «سداد» في الخلية فقط للفواتير
+        // المستحقة (سطر الجدول يحدد) — عمود واحد يخدم حالتين.
         protected override void BuildToolbar()
         {
             Grid.CellClick += async (_, args) =>

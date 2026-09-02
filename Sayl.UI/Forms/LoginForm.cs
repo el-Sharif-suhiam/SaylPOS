@@ -51,11 +51,33 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadUsersAsync();
         }
 
-        // ─────────────────────────────────────────────────
-        // بناء الواجهة
-        // ─────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «شاشة بلا إطار + بطاقة» (نافذة تسجيل الدخول):
+        //
+        // البنية (كلها بإحداثيات يدوية — Bounds بالبكسل):
+        //   ┌──────────────────────────────────┐
+        //   │ الشعار والاسم (وسط، داكن)          │ ← فوق البطاقة
+        //   │ ┌────────────────────────────┐   │
+        //   │ │ البطاقة البيضاء (480×342)     │   │ ← الحقول وزر الدخول هنا
+        //   │ └────────────────────────────┘   │
+        //   │ حالة الاتصال + حقوق (وسط، أسفل)  │
+        //   └──────────────────────────────────┘
+        //   زرا «؟» و«×» الدائريان: زوايا النافذة (أعلى يمين وأعلى يسار).
+        //
+        // لماذا DialogForm + CornerRadius=26؟ نافذة بلا شريط عنوان
+        // (FormBorderStyle=None من الأساس) — لذلك نحتاج:
+        //  • زر إغلاق يدوي (btnClose) — لا يوجد زر × نظامي.
+        //  • السحب يدوي — اقرأ StartDrag أسفل الملف.
+        //
+        // قاعدة الألوان: الخلفية SidebarBg (كحلي داكن) والبطاقة CardBg
+        // (أبيض) — كل لون من AppTheme، لا أرقام يدوية.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
+            // ── قواعد النافذة ──
+            // KeyPreview=true: النافذة ترى المفاتيح قبل العناصر —
+            // يسمح لـ AcceptButton/Escape بالعمل قبل تركيز أي عنصر.
+            // CornerRadius=26: زوايا النافذة الدائرية (خاصية DialogForm).
             Text = "تسجيل الدخول — سيل";
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(520, 660);
@@ -66,9 +88,12 @@ namespace Sayl.UI.Forms
             CornerRadius = 26;
             Icon = Brand.AppIcon;
 
+            // السحب: أي ضغطة يسار على الخلفية تنقل النافذة (نافذة بلا شريط عنوان)
             MouseDown += StartDrag;
 
-            // شعار الهوية: موجة + سهم + ميزان
+            // ── الشعار (رسم متجهي — موجة + سهم + ميزان) ──
+            // الوسط الأفقي: (عرض النافذة 560 الفعلي − 84) ÷ 2 — لاحظ أن
+            // Bounds تستخدم إحداثيات منطقة العميل RTL.
             var logo = Brand.MakeLogo(84, AppTheme.SidebarBg);
             logo.Bounds = new Rectangle((560 - 84) / 2, 22, 84, 84);
 
@@ -78,7 +103,7 @@ namespace Sayl.UI.Forms
                 Bounds = new Rectangle(0, 105, 560, 38),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
-                BackColor = Color.Transparent,
+                BackColor = Color.Transparent,   // شفاف — يظهر لون النافذة خلفه
                 Font = new Font("Segoe UI", 17F, FontStyle.Bold)
             };
 
@@ -91,18 +116,26 @@ namespace Sayl.UI.Forms
                 BackColor = Color.Transparent
             };
 
+            // العناصر الثلاثة أعلاه تعترض نقرات الماوس — نعيد توجيهها للسحب
+            // حتى لا «تقتل» منطقة السحب (النافذة تتحرك من أي مكان فارغ).
             logo.MouseDown += StartDrag;
             lblBrand.MouseDown += StartDrag;
             lblTagline.MouseDown += StartDrag;
 
+            // ── البطاقة البيضاء: حاوية الحقول ──
+            // Bounds(40, 198, 480, 342): من اليسار 40، من الأعلى 198.
+            // ApplyRoundedRegion: يقصّ زوايا اللوحة دائريًا (18px) — Region
+            // حقيقي لا مجرد رسم، فالخلفية الداكنة تظهر من الزوايا.
             var card = new Panel
             {
                 Bounds = new Rectangle(40, 198, 480, 342),
                 BackColor = AppTheme.CardBg
             };
             AppTheme.ApplyRoundedRegion(card, 18);
-            card.MouseDown += StartDrag;
+            card.MouseDown += StartDrag; // سحب من البطاقة أيضًا (بلا حقول)
 
+            // ── داخل البطاقة: العنوان ثم حقلان (مستخدم/كلمة مرور) ثم زر ──
+            // كل الإحداثيات هنا نسبية للبطاقة (24 = هامش داخلي)، لا للنافذة.
             var lblCardTitle = new Label
             {
                 Text = "تسجيل الدخول",
@@ -121,6 +154,9 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextMuted
             };
 
+            // قائمة المستخدمين: DropDownList = اختيار فقط (لا كتابة حرة).
+            // الاحتياط هنا أن Items تُعبأ لاحقًا في LoadUsersAsync —
+            // عند البناء تكون فارغة، وهذا طبيعي.
             _cmbUsers = new ComboBox
             {
                 Bounds = new Rectangle(24, 92, 432, 44),
@@ -138,6 +174,14 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextMuted
             };
 
+            // ── حقل كلمة المرور: لوحة مزدوجة (مربع + زر إظهار) ──
+            // لماذا لوحة؟ TextBox لا يستطيع احتواء زر بداخله — نضع
+            // passPanel (خلفية موحدة FieldBg) ونرسو بداخلها:
+            //   _txtPassword بـ Dock=Fill يأخذ المساحة كلها،
+            //   _btnTogglePassword بـ Dock=Left يلتصق يساره.
+            // ⚠️ قاعدة الإرساء: Fill يُضاف أولًا (يُرسّى أخيرًا) — والزر
+            //    يأخذ حافته قبلًا فيظهر بجانب المربع لا فوقه.
+            // UseSystemPasswordChar=true: النقاط • بدل الحروف.
             var passPanel = new Panel
             {
                 Bounds = new Rectangle(24, 174, 432, 44),
@@ -164,6 +208,7 @@ namespace Sayl.UI.Forms
                 Cursor = Cursors.Hand
             };
             _btnTogglePassword.FlatAppearance.BorderSize = 0;
+            // تبديل الإظهار: نقطة نقر واحدة تعكس الحالة وتغير نص الزر
             _btnTogglePassword.Click += (_, _) =>
             {
                 bool hidden = _txtPassword.UseSystemPasswordChar;
@@ -171,12 +216,16 @@ namespace Sayl.UI.Forms
                 _btnTogglePassword.Text = hidden ? "إخفاء" : "إظهار";
             };
 
+            // الترتيب مهم: المربع أولًا (Fill) ثم الزر (Left) —
+            // آخر المضاف يُرسّى أولًا فيأخذ الزر حافته اليسرى أولًا.
             passPanel.Controls.Add(_txtPassword);
             passPanel.Controls.Add(_btnTogglePassword);
 
+            // ── زر الدخول: Height=54 كبير قصدًا (زر أساسي) ──
             _btnLogin = AppTheme.MakeButton("دخول", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnLogin.Bounds = new Rectangle(24, 240, 432, 54);
 
+            // ── رسالة الخطأ: مخفية افتراضيًا (Visible=false) — تظهر عند فشل الدخول ──
             _lblError = new Label
             {
                 Text = "",
@@ -186,6 +235,7 @@ namespace Sayl.UI.Forms
                 Visible = false
             };
 
+            // تجميع البطاقة — الترتيب هنا غير مهم (كلها Bounds يدوية)
             card.Controls.Add(lblCardTitle);
             card.Controls.Add(lblUserCaption);
             card.Controls.Add(_cmbUsers);
@@ -194,6 +244,9 @@ namespace Sayl.UI.Forms
             card.Controls.Add(_btnLogin);
             card.Controls.Add(_lblError);
 
+            // ── الزرا الدائريان (MakeCircleButton): بلا إطار نظامي نحتاج أزرار زوايا ──
+            // «؟» أعلى اليمين (16,16) و«×» أعلى اليسار (العرض−60).
+            // GetRequiredService<AboutForm>: AboutForm مسجّل كخدمة (يفتح مرة واحدة).
             var btnAbout = AppTheme.MakeCircleButton("؟", 44,
                 back: AppTheme.SidebarHover, hoverBack: AppTheme.PrimaryDark,
                 fore: AppTheme.TextOnDark, parentBack: AppTheme.SidebarBg, fontSize: 16f);
@@ -204,9 +257,14 @@ namespace Sayl.UI.Forms
             var btnClose = AppTheme.MakeCircleButton("×", 44,
                 back: AppTheme.SidebarHover, hoverBack: AppTheme.Danger,
                 fore: AppTheme.TextOnDark, parentBack: AppTheme.SidebarBg, fontSize: 15f);
+            // ClientSize.Width - 60: يحسب اليسار ديناميكيًا — لو غيّرت عرض
+            // النافذة يبقى الزر ملتصقًا بالزاوية بلا تعديل يدوي.
             btnClose.Bounds = new Rectangle(ClientSize.Width - 60, 16, 44, 44);
             btnClose.Click += (_, _) => Close();
 
+            // ── أسفل النافذة: حالة الاتصال ثم سطر الحقوق ──
+            // _lblConnectionStatus يبدأ بـ «جارٍ التحقق...» ويُحدَّث من
+            // LoadUsersAsync (أخضر عند النجاح/أحمر عند الفشل).
             _lblConnectionStatus = new Label
             {
                 Text = "جارٍ التحقق من الاتصال بقاعدة البيانات...",
@@ -223,6 +281,9 @@ namespace Sayl.UI.Forms
                 ForeColor = Color.FromArgb(107, 114, 128)
             };
 
+            // ── تجميع النافذة ──
+            // كلها Bounds — الترتيب لا يؤثر على المواضع، لكنه يؤثر على
+            // ترتيب الـ Tab (المضاف أولًا يتقدم بالتنقل) — عناصر فوق أولًا.
             Controls.Add(logo);
             Controls.Add(lblBrand);
             Controls.Add(lblTagline);
@@ -232,6 +293,8 @@ namespace Sayl.UI.Forms
             Controls.Add(_lblConnectionStatus);
             Controls.Add(lblFooter);
 
+            // AcceptButton: Enter في أي مكان = زر الدخول.
+            // CancelButton: Escape = زر الإغلاق. أضفهما لكل نموذج.
             AcceptButton = _btnLogin;
             CancelButton = btnClose;
 
@@ -369,6 +432,11 @@ namespace Sayl.UI.Forms
             _lblConnectionStatus.ForeColor = connected ? AppTheme.Success : AppTheme.Danger;
         }
 
+        // 📖 StartDrag: سحب النافذة من أي نقطة (البديل عن شريط عنوان المفقود).
+        // النافذة FormBorderStyle=None فلا يوجد شريط عنوان يسحبها —
+        // نستدعي رسالة ويندوز WM_NCLBUTTONDOWN مع HTCAPTION «كأن النقر
+        // وقع على شريط العنوان» — ويندوز يتولى السحب كاملًا مجانًا.
+        // نربط هذا على: النافذة نفسها + كل Label/Panel (انظر BuildUi).
         private void StartDrag(object? sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)

@@ -16,6 +16,7 @@ namespace Sayl.UI.Forms
         private DataGridView _grid = null!;
         private Button _btnResume = null!;
         private Button _btnCancelInvoice = null!;
+        private Label _lblCount = null!;
 
         private List<Common.DTOs.ViewModel.InvoiceVM> _invoices = new();
 
@@ -28,50 +29,135 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadInvoicesAsync();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «الجذر المجزّأ» (راجع PayrollForm للشرح الكامل):
+        //
+        //   ┌──────────────────────────────────────┐
+        //   │ صف0 (Absolute 52): العنوان + العداد    │
+        //   ├──────────────────────────────────────┤
+        //   │ صف1 (Percent 100): جدول الفواتير       │ ← يتمدد مع النافذة
+        //   ├──────────────────────────────────────┤
+        //   │ صف2 (Absolute 64): استكمال|إلغاء|إغلاق│ ← لا يُقص أبدًا
+        //   └──────────────────────────────────────┘
+        //
+        // (كانت الإحداثيات الثابتة تترك فراغًا تحت الجدول عند تحجيم
+        //  النافذة — نفس علة الشاشات القديمة المعالجة.)
+        //
+        // نقطة تعليمية — ربط الجدول بالبيانات:
+        // _invoices (قائمة) و _grid.Rows (صفوف) متوازيتان بالفهرس —
+        // الصف المحدد CurrentRow.Index يفهرس القائمة مباشرة. الحماية:
+        // كل زر يتحقق أولًا CurrentRow != null وفهرسه < عدد القائمة.
+        //
+        // نمط «تغيير خارجي»: الخاصية Changed تخبر المستدعي (POS) أن
+        // شيئًا حصل فيعيد تحميل سلة السحب — أفضل من رفع الأحداث هنا.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "الفواتير المعلقة";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(640, 560);
+            ClientSize = new Size(760, 560);
+            MinimumSize = new Size(560, 420);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
+            // ══ الجذر: عمود واحد + ثلاثة صفوف (العنوان / الجدول المرن / الأزرار) ══
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(16, 12, 16, 12)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));   // العنوان + العداد
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الأزرار
+
+            // ── العنوان وسطًا + عدّاد معلقات يساره (تسمية حية) ──
+            var header = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             var lblTitle = new Label
             {
                 Text = "الفواتير المعلقة",
-                Bounds = new Rectangle(0, 18, 640, 32),
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
                 ForeColor = AppTheme.TextPrimary
             };
+            // العداد: يتحدث بعد كل تحميل — «N فاتورة معلقة» فوق الجدول
+            _lblCount = new Label
+            {
+                Text = "",
+                Dock = DockStyle.Left,
+                Width = 170,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                ForeColor = AppTheme.Warning
+            };
+            header.Controls.Add(lblTitle);
+            header.Controls.Add(_lblCount);
 
-            _grid = new DataGridView { Bounds = new Rectangle(30, 62, 580, 380) };
+            // ── جدول الفواتير (الصف المرن — يتمدد ويتمرر وحده) ──
+            _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
             UiHelpers.StyleGrid(_grid);
             _grid.Columns.Add("colId", "رقم الفاتورة");
             _grid.Columns.Add("colDate", "التاريخ");
             _grid.Columns.Add("colCustomer", "العميل");
+            _grid.Columns.Add("colItems", "البنود");
             _grid.Columns.Add("colTotal", "الصافي");
-            _grid.Columns["colId"].FillWeight = 20;
-            _grid.Columns["colDate"].FillWeight = 30;
+            _grid.Columns["colId"].FillWeight = 14;
+            _grid.Columns["colDate"].FillWeight = 22;
             _grid.Columns["colCustomer"].FillWeight = 30;
-            _grid.Columns["colTotal"].FillWeight = 20;
+            _grid.Columns["colItems"].FillWeight = 12;
+            _grid.Columns["colTotal"].FillWeight = 22;
+            // الأرقام وسط الصفوف المالية — أسرع قراءة للكاشير
+            _grid.Columns["colItems"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            _grid.Columns["colTotal"].DefaultCellStyle.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+            // نقر مزدوج على صف = استكماله (اختصار نقرتين لواحدة)
+            _grid.DoubleClick += async (_, _) => await ResumeAsync();
+            // لا تحديد نص متشابك: الصف كله وحدة اختيار (StyleGrid يضبط FullRowSelect)
 
-            _btnResume = AppTheme.MakeButton("استكمال الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            _btnResume.Bounds = new Rectangle(30, 460, 220, 50);
+            // ── صف الأزرار: ثلاثة أعمدة — استكمال (يمين، أساسي) |
+            //    إلغاء (وسط، أحمر) | إغلاق (يسار، هادئ) ──
+            var buttons = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                BackColor = AppTheme.CardBg,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+
+            _btnResume = AppTheme.MakeButton("استكمال الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 50);
+            _btnResume.Dock = DockStyle.Fill;
+            _btnResume.Margin = new Padding(0, 6, 4, 6);
             _btnResume.Click += async (_, _) => await ResumeAsync();
 
-            _btnCancelInvoice = AppTheme.MakeButton("إلغاء الفاتورة", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28));
-            _btnCancelInvoice.Bounds = new Rectangle(262, 460, 180, 50);
+            _btnCancelInvoice = AppTheme.MakeButton("إلغاء الفاتورة", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 50);
+            _btnCancelInvoice.Dock = DockStyle.Fill;
+            _btnCancelInvoice.Margin = new Padding(4, 6, 4, 6);
             _btnCancelInvoice.Click += async (_, _) => await CancelInvoiceAsync();
 
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
-                foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnClose.Bounds = new Rectangle(454, 460, 156, 50);
-            btnClose.DialogResult = DialogResult.Cancel;
+                foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 50);
+            btnClose.Dock = DockStyle.Fill;
+            btnClose.Margin = new Padding(4, 6, 0, 6);
+            btnClose.DialogResult = DialogResult.Cancel; // Esc = إغلاق
 
-            Controls.AddRange(new Control[] { lblTitle, _grid, _btnResume, _btnCancelInvoice, btnClose });
+            // RTL: العمود 2 (استكمال) يمينًا، 1 (إلغاء) وسطًا، 0 (إغلاق) يسارًا
+            buttons.Controls.Add(_btnResume, 2, 0);
+            buttons.Controls.Add(_btnCancelInvoice, 1, 0);
+            buttons.Controls.Add(btnClose, 0, 0);
+
+            // ── تجميع صفوف الجذر ──
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(_grid, 0, 1);
+            root.Controls.Add(buttons, 0, 2);
+
+            Controls.Add(root);
             CancelButton = btnClose;
         }
 
@@ -95,8 +181,14 @@ namespace Sayl.UI.Forms
                     _grid.Rows.Add(inv.InvoiceId,
                         inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
                         inv.PartyName ?? "عميل مجهول",
+                        inv.ItemsCount,
                         UiHelpers.Money(inv.NetAmount));
                 }
+
+                // العداد + تلميح فراغ: القائمة الفارغة لا تترك الشاشة ميتة
+                _lblCount.Text = _invoices.Count > 0 ? $"{_invoices.Count} فاتورة معلقة" : "";
+                if (_invoices.Count == 0)
+                    UiHelpers.ShowInfo(this, "لا توجد فواتير معلقة حاليًا.");
             }
             catch
             {

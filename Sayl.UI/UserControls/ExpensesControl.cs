@@ -48,6 +48,7 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة مصروف", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditExpense(null), 140);

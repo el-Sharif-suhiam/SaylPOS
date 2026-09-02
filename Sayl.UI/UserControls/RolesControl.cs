@@ -49,6 +49,7 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة دور", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditRole(null), 140);

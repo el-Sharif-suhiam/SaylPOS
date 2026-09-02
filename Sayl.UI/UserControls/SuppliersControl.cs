@@ -62,6 +62,10 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton (والحيلة البصرية
+        // BringToFront) مشروحة في SectionListControl أعلى الملف.
+        // أول Add هنا = أقصى اليمين بصريًا: إضافة ← تعديل ← سداد ← تعطيل
+        // («إعادة تفعيل» زر أدمن شرطي — إضافة داخل if كما في SettingsControl).
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة مورد", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);

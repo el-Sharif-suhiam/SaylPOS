@@ -62,6 +62,9 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
+        // «تفاصيل» عمود زر داخل الجدول (Grid_CellClick أدناه) يفتح كشف
+        // الحساب — نفس نمط أعمدة الأزرار الموحد (راجع InvoicesControl).
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة عميل", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);

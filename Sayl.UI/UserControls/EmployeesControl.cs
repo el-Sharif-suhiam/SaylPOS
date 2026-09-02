@@ -87,6 +87,9 @@ namespace Sayl.UI.UserControls
             _ => status
         };
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
+        // أوسع شريط أدوات بالنظام: إضافة/تعديل/شفت/رواتب/ربط حساب
+        // + «الشفتات والإجازات» للأدمن فقط (نمط الزر الشرطي).
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة موظف", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditEmployee(null), 140);

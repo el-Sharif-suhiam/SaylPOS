@@ -353,7 +353,11 @@ namespace Sayl.UI.UserControls
             return (headers, _currentRows);
         }
 
-        private void ExportPdf()
+        // 📖 التصدير PDF — مسار async كامل:
+        // أي نداء قاعدة بيانات (اسم المتجر) بـ await، والتوليد نفسه داخل
+        // Task.Run — GetAwaiter().GetResult() على مؤشر الواجهة يعني تجمّدًا
+        // كاملاً (نفس مرض ExportPdf القديم الذي عولج في InvoicePrintHelper).
+        private async void ExportPdf()
         {
             var (headers, rows) = CurrentTable();
             if (rows.Count == 0)
@@ -377,12 +381,16 @@ namespace Sayl.UI.UserControls
                 {
                     using var scope = Program.Services.CreateScope();
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = settings.GetAsync(clsSettingsService.KeyStoreName, "سيل").GetAwaiter().GetResult();
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
                 }
                 catch { /* الترويسة الافتراضية كافية */ }
 
-                PdfService.ExportTableReport(storeName, _currentTitle, _currentPeriod,
-                    SessionState.CurrentUser?.UserName ?? "", headers, rows, save.FileName);
+                // التوليد خارج مؤشر الواجهة — قد يستهلك لحظة مع آلاف الصفوف
+                string title = _currentTitle, period = _currentPeriod,
+                       user = SessionState.CurrentUser?.UserName ?? "", path = save.FileName;
+                await Task.Run(() =>
+                    PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
+
                 UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
             }
             catch (Exception ex)

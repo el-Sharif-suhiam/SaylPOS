@@ -27,28 +27,121 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «الجذر المجزّأ» (راجع PayrollForm للشرح الكامل):
+        //
+        //   ┌──────────────────────────────────────┐
+        //   │ صف0 (Absolute 52): العنوان            │
+        //   ├──────────────────────────────────────┤
+        //   │ صف1 (Absolute 56): رقم الفاتورة + زر   │ ← صف إدخال ثابت
+        //   ├──────────────────────────────────────┤
+        //   │ صف2 (Percent 100): جدول البنود         │ ← يتمدد مع النافذة
+        //   ├──────────────────────────────────────┤
+        //   │ صف3 (Absolute 60): سطر المعلومات الحي  │ ← بطاقة معلومات
+        //   ├──────────────────────────────────────┤
+        //   │ صف4 (Absolute 64): تنفيذ | إغلاق      │ ← لا يُقص أبدًا
+        //   └──────────────────────────────────────┘
+        //
+        // لماذا ليس Bounds يدوية؟ الإحداثيات الثابتة تترك فراغات عند
+        // التكبير وتقصّ عند التصغير (DialogForm يقلّص النافذة تلقائيًا
+        // لشاشات صغيرة) — الصف المرن وحده يتحرك مع النافذة بسلاسة.
+        //
+        // نمط «الجدول المُحمَّل»: الجدول يُبنى فارغًا بـ 4 أعمدة، وبعد
+        // «تحميل الفاتورة» تُضاف صفوفه — عمود «كمية المرتجع» وحده قابل
+        // للتحرير (كل الأعمدة الأخرى عرض فقط). المستخدم يكتب الكميات
+        // مباشرة في خلايا الجدول — لا حقول إدخال منفصلة.
+        //
+        // ⚠️ متغيرات الحالة _originalInvoiceId و _items تربط الجدول
+        //    بالبيانات: فهرس الصف = فهرس البند (LoadInvoiceAsync فقط
+        //    يكتب فيهما — راجع ExecuteReturnAsync للقراءة).
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
+            // ── قواعد النافذة (نفس نمط كل النوافذ الحوارية) ──
             Text = "مرتجع بيع";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(620, 600);
+            ClientSize = new Size(760, 640);
+            MinimumSize = new Size(560, 480);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblTitle = new Label { Text = "مرتجع بيع", Bounds = new Rectangle(0, 18, 620, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            // ══ الجذر: عمود واحد + خمسة صفوف (راجع الخريطة أعلاه) ══
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(16, 12, 16, 12)
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));   // العنوان
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));   // صف رقم الفاتورة
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // سطر المعلومات
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الأزرار
 
-            var lblInvoice = new Label { Text = "رقم فاتورة البيع الأصلية", Bounds = new Rectangle(30, 58, 300, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtInvoiceId = new TextBox { Bounds = new Rectangle(30, 82, 300, 40), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center };
+            // ── العنوان ──
+            var lblTitle = new Label
+            {
+                Text = "مرتجع بيع",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = AppTheme.FontHeading,
+                ForeColor = AppTheme.TextPrimary
+            };
+
+            // ── صف رقم الفاتورة: التسمية+المربع يمينًا، زر التحميل يسارًا ──
+            // Row بعمودين: عمود 1 (يمين) للتسمية+المربع، عمود 0 (يسار، 180px) للزر.
+            // ⚠️ عمود TLP بـ RTL: العمود 0 يظهر يمينًا (عكسي!) — لذلك الزر
+            //    في العمود 0 معناه يسارًا بصريًا. جربنا بالعكس فانقلب الترتيب.
+            var inputRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                BackColor = AppTheme.CardBg,
+                Margin = new Padding(0, 8, 0, 8)
+            };
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // العمود 0: الزر (يسار بصريًا)
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // العمود 1: التسمية+المربع (يمين)
+
+            var lblInvoice = new Label
+            {
+                Text = "رقم فاتورة البيع الأصلية",
+                Dock = DockStyle.Right,
+                Width = 160,
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = AppTheme.TextMuted
+            };
+            _txtInvoiceId = new TextBox
+            {
+                Dock = DockStyle.Right,
+                Width = 130,
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                TextAlign = HorizontalAlignment.Center
+            };
+
+            // حزمة التسمية+المربع في عمود واحد (يمين)، الزر في العمود 0 (يسار)
+            var idBox = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
+            // ⚠️ ترتيب الإرساء داخل اللوحة (RTL): كل Right يتراصف من اليمين —
+            //    أول Add أقصى اليمين. نريد المربع أقصى اليمين فالتسمية يساره:
+            //    إذًا نضيف التسمية (Right) أولًا ثم المربع (Right) يُرسّى بعدها
+            //    إلى يمينها. (الترتيب البديل يجعل التسمية أقصى اليمين — خطأ).
+            idBox.Controls.Add(lblInvoice);
+            idBox.Controls.Add(_txtInvoiceId);
+            inputRow.Controls.Add(idBox, 1, 0);
 
             _btnLoad = AppTheme.MakeButton("تحميل الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            _btnLoad.Bounds = new Rectangle(350, 82, 240, 40);
+            _btnLoad.Dock = DockStyle.Fill;
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
+            inputRow.Controls.Add(_btnLoad, 0, 0);
 
-            _grid = new DataGridView { Bounds = new Rectangle(30, 136, 560, 330) };
+            // ── جدول البنود (الصف المرن — يتمدد مع النافذة) ──
+            _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false;
+            _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             _grid.Columns.Add("colProduct", "المنتج");
             _grid.Columns.Add("colSold", "المباع");
             _grid.Columns.Add("colPrice", "السعر");
@@ -58,20 +151,70 @@ namespace Sayl.UI.Forms
             _grid.Columns["colSold"].FillWeight = 15;
             _grid.Columns["colPrice"].FillWeight = 18;
             _grid.Columns["colReturnQty"].FillWeight = 22;
+            // عمود الكمية «دعوة بصرية» للتحرير: خلفية مختلفة عن بقية الجدول
+            // (نفس حيلة سلة الكاشير في PosForm.StyleCartGrid).
+            _grid.Columns["colReturnQty"].DefaultCellStyle.BackColor = AppTheme.FieldBg;
+            _grid.Columns["colReturnQty"].DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            _grid.Columns["colReturnQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            // حارس الإدخال: أي نص غير رقمي يُرفض قبل وصوله للبيانات
+            _grid.CellValidating += (_, args) =>
+            {
+                if (_grid.Columns[args.ColumnIndex].Name != "colReturnQty")
+                    return;
+                if (!int.TryParse(args.FormattedValue?.ToString()?.Trim() ?? "", out int _))
+                    args.Cancel = true;
+            };
 
-            _lblInfo = new Label { Text = "", Bounds = new Rectangle(30, 474, 560, 26), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            // ── سطر المعلومات: بطاقة رمادية تتحدث بعد التحميل ──
+            _lblInfo = new Label
+            {
+                Text = "أدخل رقم فاتورة البيع ثم اضغط تحميل.",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = AppTheme.TextMuted,
+                BackColor = AppTheme.FieldBg,
+                Padding = new Padding(10, 8, 10, 8)
+            };
 
-            var btnReturn = AppTheme.MakeButton("تنفيذ المرتجع", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9));
-            btnReturn.Bounds = new Rectangle(30, 508, 260, 52);
+            // ── صف الأزرار: تنفيذ (يمين، تحذيري) | إغلاق (يسار) ──
+            // عمودان 55/45 — الأزرار Dock=Fill تتمدد مع النافذة.
+            // ⚠️ RTL يقلب الأعمدة: العمود 0 يظهر يمينًا — لذلك «تنفيذ»
+            //    (الزر الرئيسي، يمينًا بصريًا) في العمود 0، و«إغلاق» في 1.
+            var buttons = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                BackColor = AppTheme.CardBg,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+
+            var btnReturn = AppTheme.MakeButton("تنفيذ المرتجع", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 50);
+            btnReturn.Dock = DockStyle.Fill;
+            btnReturn.Margin = new Padding(0, 6, 4, 6);
             btnReturn.Click += async (_, _) => await ExecuteReturnAsync();
 
-            var btnCancel = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnCancel.Bounds = new Rectangle(330, 508, 260, 52);
-            btnCancel.DialogResult = DialogResult.Cancel;
+            var btnCancel = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 50);
+            btnCancel.Dock = DockStyle.Fill;
+            btnCancel.Margin = new Padding(4, 6, 0, 6);
+            btnCancel.DialogResult = DialogResult.Cancel; // Esc = إغلاق
 
-            Controls.AddRange(new Control[] { lblTitle, lblInvoice, _txtInvoiceId, _btnLoad, _grid, _lblInfo, btnReturn, btnCancel });
+            buttons.Controls.Add(btnReturn, 0, 0);   // العمود 0 = يمين بصريًا
+            buttons.Controls.Add(btnCancel, 1, 0);   // العمود 1 = يسار بصريًا
+
+            // ── تجميع صفوف الجذر (الترتيب يطابق RowStyles أعلاه) ──
+            root.Controls.Add(lblTitle, 0, 0);
+            root.Controls.Add(inputRow, 0, 1);
+            root.Controls.Add(_grid, 0, 2);
+            root.Controls.Add(_lblInfo, 0, 3);
+            root.Controls.Add(buttons, 0, 4);
+
+            Controls.Add(root);
             CancelButton = btnCancel;
-            AcceptButton = _btnLoad;
+            AcceptButton = _btnLoad; // Enter = تحميل (الخطوة الأولى دومًا)
+            ActiveControl = _txtInvoiceId;
         }
 
         private async Task LoadInvoiceAsync()

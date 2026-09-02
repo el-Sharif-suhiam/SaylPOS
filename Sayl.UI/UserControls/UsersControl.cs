@@ -57,6 +57,7 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة مستخدم", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => AddUser(), 150);

@@ -120,9 +120,33 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // ─────────────────────────────────────────────────
-        // بناء الواجهة
-        // ─────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «شريط جانبي + منطقة محتوى» (هيكل التطبيق كله):
+        //
+        //   ┌──────────────┬──────────────────────────────────┐
+        //   │ الشريط الجانبي │ رأس: [عنوان القسم] [بيانات المستخدم]│
+        //   │ (يمين 220px)  ├──────────────────────────────────┤
+        //   │ - شعار        │  ← _hostPanel: القسم النشط يُضاف   │
+        //   │ - أزرار الأقسام│     إليه هنا (SelectSection)       │
+        //   │ - حول/خروج    │                                  │
+        //   └──────────────┴──────────────────────────────────┘
+        //
+        // لماذا الشريط Dock=Right وليس Left؟ الواجهة عربية RTL —
+        // الشريط الجانبي يمينًا هو المعيار (مثل ويندوز العربية).
+        //
+        // البنية برمجيًا:
+        //  sidebar  = Panel Dock=Right 220px، داخله TLP ثلاثة صفوف
+        //             (شعار 84 / قائمة مرنة / تذييل 124) — «جذر مجزّأ»
+        //             داخل الشريط (راجع PayrollForm للنمط).
+        //  content  = Panel Dock=Fill، داخله: رأس Top 76 + _hostPanel Fill.
+        //             ⚠️ ترتيب الإضافة: _hostPanel (Fill) أولًا ثم الرأس —
+        //             آخر المضاف يُرسّى أولًا.
+        //
+        // 💡 لإضافة قسم جديد: سطر واحد في BuildSections —
+        //    _sections["الاسم"] = () => new XxxControl(); — والقائمة
+        //    والأزرار والتلوين تُبنى تلقائيًا من foreach في BuildSidebar.
+        //    (الأقسام المحمية داخل if كما ترى — الصلاحية تحكم الظهور.)
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             Text = "سيل — لوحة التحكم";
@@ -134,6 +158,9 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             Icon = Brand.AppIcon;
 
+            // ── الشريط الجانبي: Dock=Right (يمين النافذة في RTL) ──
+            // Width ثابت 220 (SidebarWidth أعلى الملف) — Padding داخلي
+            // يباعد أزرار القائمة عن حواف الشريط.
             var sidebar = new Panel
             {
                 Dock = DockStyle.Right,
@@ -152,6 +179,15 @@ namespace Sayl.UI.Forms
             Controls.Add(sidebar);
         }
 
+        // ═══ الشريط الجانبي من الداخل: TLP ثلاثة صفوف ═══
+        //   صف0 (84): الشعار + «سيل» أسفله — Dock=Left للشعار وFill للنص
+        //             يضع الشعار يسار الاسم (الاسم محاذاة BottomRight).
+        //   صف1 (Percent 100): قائمة الأقسام — AutoScroll لو طالت القائمة
+        //             عن ارتفاع الشاشة (مهم عند تصغير النافذة).
+        //   صف2 (124): زرا التذييل (حول/خروج) مع فاصل 14px بينهما.
+        //
+        // 💡 الصف المرن الأخير في menuLayout يمتص المساحة الفارغة —
+        //    بلاه تتمدد الأزرار عموديًا وتشوه الشكل (قاعدة TLP ذهبية).
         private void BuildSidebar(Panel sidebar)
         {
             var layout = new TableLayoutPanel
@@ -183,7 +219,9 @@ namespace Sayl.UI.Forms
             brandPanel.Controls.Add(sidebarLogo);
             layout.Controls.Add(brandPanel, 0, 0);
 
-            // قائمة الأقسام
+            // ── قائمة الأقسام: تُبنى حلقيًا من _sections ──
+            // كل زر صف مطلق 54px. RowStyles تُضاف مع كل زر (تطابق الصف
+            // رقمًا) ثم صف Percent يمتص الفائض — لا أزرار متمددة.
             var menuLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -207,7 +245,7 @@ namespace Sayl.UI.Forms
             menuLayout.RowCount = row + 1;
             layout.Controls.Add(menuLayout, 0, 1);
 
-            // أسفل الشريط: حول البرنامج + تسجيل الخروج
+            // أسفل الشريط: حول البرنامج + تسجيل الخروج (صف فاصل بينهما)
             var footer = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -232,6 +270,13 @@ namespace Sayl.UI.Forms
             sidebar.Controls.Add(layout);
         }
 
+        // 📖 MakeNavButton: زر تنقل بشريط جانبي — جديد كليًا عن MakeButton:
+        //  • Dock=Fill داخل صف 54px (يملأ الصف كاملًا).
+        //  • Tag=name: يربط الزر باسم قسمه — SelectSection يطابق به
+        //    (ReferenceEquals لأن Tag كائن نص واحد من القاموس).
+        //  • MouseEnter/Leave: تلوين hover يدوي — لأن FlatAppearance
+        //    يلوّن لكنه يفسد حالة «الزر النشط»؛ الحارس في كل حدث
+        //    (!ReferenceEquals(btn, _activeNavButton)) يمنع تلوين النشط.
         private Button MakeNavButton(string name)
         {
             var btn = new Button
@@ -267,6 +312,8 @@ namespace Sayl.UI.Forms
             return btn;
         }
 
+        // 📖 MakeGhostButton: زر «شبحي» للتذييل — خلفية شفافة وإطار رفيع
+        // فقط (كأنه نص قابل للنقر) — يختلف عن MakeNavButton (شريط صلب).
         private static Button MakeGhostButton(string text, Color foreColor)
         {
             var btn = new Button
@@ -286,6 +333,11 @@ namespace Sayl.UI.Forms
             return btn;
         }
 
+        // ═══ منطقة المحتوى: رأس علوي + مستضيف الأقسام ═══
+        // الرأس TLP بعمودين: (Percent 100 للعنوان | Absolute 380 للمستخدم)
+        // مع RTL ينعكس: العمود 0 يظهر يمينًا — العنوان يمين (كبير غامق)
+        // وبيانات المستخدم يسار (رمادي صغير). الهوامش Margin توزع النص.
+        // _hostPanel: الحاوية الحية — SelectSection يستبدل ابنها الوحيد.
         private void BuildContent(Panel contentArea)
         {
             // رأس الصفحة: عنوان القسم يمينًا + بيانات المستخدم يسارًا
@@ -347,6 +399,12 @@ namespace Sayl.UI.Forms
         // ─────────────────────────────────────────────────
         // التنقل بين الأقسام
         // ─────────────────────────────────────────────────
+        // 📖 دورة حياة القسم (نمط «مستضيف» — المفهوم الأهم هنا):
+        //  1. _sections[name]() يستدعي مصنع القسم → كائن UserControl جديد.
+        //  2. Dispose للقسم القديم أولًا — يحرر ذاكرته (جداول ورسوم).
+        //  3. Add للمستضيف ثم BringToFront فوق الرأس (ترتيب z).
+        // ⚠️ لا نحتفظ بنسخة مخبأة: كل دخول للقسم = تحميل بيانات حية
+        //    (بساطة مقابل بعض ثواني انتظار — قرار مقصود).
         private void SelectSection(string name)
         {
             if (!_sections.ContainsKey(name))
