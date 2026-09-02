@@ -2,22 +2,41 @@ using Common.DTOs.ViewModel;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using QuestPDF.Elements.Table;
 
 namespace Sayl.UI.Infrastructure
 {
     /// <summary>
-    /// خدمة توليد تقارير PDF احترافية بالتنسيق العربي للواجهة.
-    /// تستخدم QuestPDF لإنشاء مستند منسّق (ترويسة، جدول، تذييل) وتنزيله كملف.
+    /// خدمة توليد مستندات PDF بالهوية البصرية الموحدة لسيل — عائلات متمايزة عن قصد:
+    /// 1) ExportInvoiceReceipt : إيصال حراري 80mm لفواتير الكاشير السريعة — صفحة واحدة
+    ///                          متكيفة الارتفاع وفواصل شرطات متوافقة حراريًا.
+    /// 2) ExportInvoiceA4      : فاتورة A4 احترافية مفصلة (بيع / شراء / مرتجعات) — ترويسة
+    ///                          رسمية وبطاقات بيانات وجدول بنود مرقّم وصندوق إجماليات وتوقيعات.
+    /// 3) ExportTableReport    : تقرير جدولي عام موحّد الهوية لكل تقارير النظام.
+    /// 4) ExportPeriodicReport : التقرير الدوري للأرباح ببطاقات مؤشرات وجداول تفصيلية.
+    /// ⚠️ كل الطرق متزامنة — يجب استدعاؤها خارج مؤشر الواجهة (Task.Run) وإلا جمُدت الواجهة.
     /// </summary>
     internal static class PdfService
     {
+        // ═══ لوحة هوية سيل (كحلي/سماوي) — موحدة عبر كل المستندات ═══
+        private const string Navy = "#002B54";
+        private const string NavyMid = "#0B3B69";
+        private const string Sky = "#93C5FD";
+        private const string PanelBlue = "#E7EFFA";
+        private const string BorderGrey = "#E2E8F0";
+        private const string StripeGrey = "#F8FAFC";
+        private const string MutedGrey = "#94A3B8";
+
         // ضبط الترخيص للمشاريع غير التجارية/الصغيرة (مطلوب من إصدار 2024.3+)
         public static void EnsureLicense() => QuestPDF.Settings.License = LicenseType.Community;
 
         /// <summary>
-        /// يولّد ملف PDF لتقرير دوري (ربع سنوي / نصف سنوي / سنوي) ويحفظه في المسار المحدد.
+        /// يولّد التقرير الدوري كملف A4 احترافي: ترويسة كحلية تتكرر بكل صفحة ←
+        /// بطاقات مؤشرات مالية (صافي الإيراد / الربح الإجمالي / المصروفات / صافي الربح) ←
+        /// جدول الفترات بإجمالي كحلي بارز ← سُلّم شرح الربح ← الإيرادات اليومية ←
+        /// ملخص الجلسات (Z) ← سطر التحصيل.
         /// </summary>
-        public static void ExportPeriodicReport(PeriodicReportVM report, string filePath)
+        public static void ExportPeriodicReport(PeriodicReportVM report, string storeName, string filePath)
         {
             EnsureLicense();
 
@@ -26,229 +45,237 @@ namespace Sayl.UI.Infrastructure
                 container.Page(page =>
                 {
                     page.Size(PageSizes.A4);
-                    page.Margin(36);
-                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI"));
+                    page.Margin(24);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI").DirectionFromRightToLeft());
 
+                    // ══ الترويسة (تتكرر بكل صفحة): شريط كحلي بهوية المحل + شريط سماوي تمييز ══
                     page.Header().Column(col =>
                     {
-                        col.Item().Text("سيل — نظام إدارة نقاط البيع")
-                            .FontSize(16).Bold()
-                            .FontColor(Colors.Blue.Darken3);
-                        col.Item().Text($"{report.ReportTypeName} — من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
-                            .FontSize(12)
-                            .FontColor(Colors.Grey.Darken1);
-                        col.Item().PaddingBottom(4).LineHorizontal(0.5f).LineColor(Colors.Grey.Lighten2);
+                        col.Item().Background(Navy).PaddingVertical(11).PaddingHorizontal(14).Row(r =>
+                        {
+                            r.RelativeItem().Column(c2 =>
+                            {
+                                c2.Item().Text(storeName).FontSize(19).Bold().FontColor("#FFFFFF");
+                                c2.Item().Text($"التقرير الدوري — {report.ReportTypeName}")
+                                    .FontSize(9.5f).FontColor(Sky);
+                            });
+                            r.ConstantItem(190).AlignLeft().Column(c2 =>
+                            {
+                                c2.Item().Text("سيل POS").FontSize(9.5f).Bold().FontColor(Sky);
+                                c2.Item().Text($"من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
+                                    .FontSize(8.5f).FontColor(MutedGrey);
+                            });
+                        });
+                        col.Item().Height(2.5f).Background(Sky);
                     });
 
-                    // ملخص عام
-                    page.Content().PaddingVertical(10).Column(col =>
+                    page.Content().PaddingTop(12).Column(col =>
                     {
-                        col.Item().Text("الملخص المالي").FontSize(13).Bold();
-
-                        col.Item().Table(table =>
+                        // ══ بطاقات المؤشرات المالية (KPI) ══
+                        col.Item().Row(r =>
                         {
-                            table.ColumnsDefinition(c =>
+                            void Card(IContainer item, string label, decimal value, bool gap)
                             {
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                            });
-                            table.Header(h =>
-                            {
-                                h.Cell().Element(CellStyle).Text("صافي الإيراد");
-                                h.Cell().Element(CellStyle).Text("الربح الإجمالي");
-                                h.Cell().Element(CellStyle).Text("صافي الربح");
-                            });
-                            table.Cell().Element(CellStyle).Text(Money(report.TotalNetRevenue));
-                            table.Cell().Element(CellStyle).Text(Money(report.TotalGrossProfit));
-                            table.Cell().Element(CellStyle).Text(Money(report.TotalNetProfit));
-                        });
-
-                        col.Item().PaddingTop(12).Text("تفصيل الفترات").FontSize(13).Bold();
-
-                        col.Item().Table(table =>
-                        {
-                            table.ColumnsDefinition(c =>
-                            {
-                                c.RelativeColumn(2);
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                                c.RelativeColumn();
-                            });
-
-                            table.Header(h =>
-                            {
-                                h.Cell().Element(CellStyle).Text("الفترة");
-                                h.Cell().Element(CellStyle).Text("الإيراد");
-                                h.Cell().Element(CellStyle).Text("المرتجعات");
-                                h.Cell().Element(CellStyle).Text("صافي الإيراد");
-                                h.Cell().Element(CellStyle).Text("COGS صافٍ");
-                                h.Cell().Element(CellStyle).Text("الربح الإجمالي");
-                                h.Cell().Element(CellStyle).Text("المصروفات");
-                                h.Cell().Element(CellStyle).Text("صافي الربح");
-                            });
-
-                            foreach (var p in report.Periods)
-                            {
-                                table.Cell().Element(CellStyle).Text(ToArabicDate(p.PeriodLabel));
-                                table.Cell().Element(CellStyle).Text(Money(p.SalesRevenue));
-                                table.Cell().Element(CellStyle).Text(Money(p.ReturnsAmount));
-                                table.Cell().Element(CellStyle).Text(Money(p.NetRevenue));
-                                table.Cell().Element(CellStyle).Text(Money(p.CogsNet));
-                                table.Cell().Element(CellStyle).Text(Money(p.GrossProfit));
-                                table.Cell().Element(CellStyle).Text(Money(p.Expenses));
-                                table.Cell().Element(CellStyle).Text(Money(p.NetProfit));
+                                var card = gap ? item.PaddingLeft(8) : item;
+                                card.Background(PanelBlue).Border(1).BorderColor("#C7D9F0").Padding(10).Column(c2 =>
+                                {
+                                    c2.Item().Text(label).FontSize(9.5f).FontColor("#37536E");
+                                    c2.Item().PaddingTop(2).Text(Money(value)).FontSize(16).Bold().FontColor(Navy);
+                                });
                             }
 
-                            // سطر الإجمالي
-                            table.Cell().Element(CellStyleBold).Text("الإجمالي");
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalSales));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalReturns));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalNetRevenue));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalCogsNet));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalGrossProfit));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalExpenses));
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalNetProfit));
+                            Card(r.RelativeItem(), "صافي الإيراد", report.TotalNetRevenue, gap: true);
+                            Card(r.RelativeItem(), "الربح الإجمالي", report.TotalGrossProfit, gap: true);
+                            Card(r.RelativeItem(), "المصروفات التشغيلية", report.TotalExpenses, gap: true);
+                            Card(r.RelativeItem(), "صافي الربح", report.TotalNetProfit, gap: false);
                         });
 
-                        // شرح حساب الربح المتدرج
-                        col.Item().PaddingTop(12).Text("شرح حساب الربح").FontSize(13).Bold();
-                        col.Item().PaddingTop(4).Table(table =>
+                        col.Item().PaddingTop(12).Element(SectionTitle).Text("تفصيل الفترات");
+
+                        col.Item().Table(table =>
                         {
                             table.ColumnsDefinition(c =>
                             {
-                                c.RelativeColumn();
-                                c.RelativeColumn(3);
+                                c.RelativeColumn(2.4f);   // الفترة
+                                c.RelativeColumn(0.9f);  // الفواتير
+                                c.RelativeColumn(1.2f);  // الإيراد
+                                c.RelativeColumn(1.2f);  // المرتجعات
+                                c.RelativeColumn(1.2f);  // صافي الإيراد
+                                c.RelativeColumn(1.2f);  // COGS
+                                c.RelativeColumn(1.2f);  // الربح الإجمالي
+                                c.RelativeColumn(1.1f);  // المصروفات
+                                c.RelativeColumn(1.2f);  // صافي الربح
                             });
-                            table.Cell().Element(CellStyle).Text("1) الإيراد الإجمالي (المبيعات)");
-                            table.Cell().Element(CellStyle).Text(Money(report.TotalSales));
-                            table.Cell().Element(CellStyle).Text("2) المخصومات (المرتجعات / خصومات الفواتير)");
-                            table.Cell().Element(CellStyle).Text("-" + Money(report.TotalReturns));
-                            table.Cell().Element(CellStyleBold).Text("= صافي الإيراد");
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalNetRevenue));
-                            table.Cell().Element(CellStyle).Text("3) تكلفة البضاعة المباعة (COGS صافٍ)");
-                            table.Cell().Element(CellStyle).Text("-" + Money(report.TotalCogsNet));
-                            table.Cell().Element(CellStyleBold).Text("= الربح الإجمالي (بعد المخصومات فقط)");
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalGrossProfit));
-                            table.Cell().Element(CellStyle).Text("4) المصروفات التشغيلية");
-                            table.Cell().Element(CellStyle).Text("-" + Money(report.TotalExpenses));
-                            table.Cell().Element(CellStyleBold).Text("= صافي هامش الربح");
-                            table.Cell().Element(CellStyleBold).Text(Money(report.TotalNetProfit));
+
+                            table.Header(h =>
+                            {
+                                foreach (var head in new[]
+                                {
+                                    "الفترة", "الفواتير", "الإيراد", "المرتجعات", "صافي الإيراد",
+                                    "COGS صافٍ", "الربح الإجمالي", "المصروفات", "صافي الربح"
+                                })
+                                    h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(8.2f);
+                            });
+
+                            bool stripe = false;
+                            foreach (var p in report.Periods)
+                            {
+                                BodyRow(table, stripe, 8.2f,
+                                    $"{p.FromDate:dd/MM/yyyy} — {p.ToDate:dd/MM/yyyy}",
+                                    p.InvoiceCount.ToString(),
+                                    Money(p.SalesRevenue), Money(p.ReturnsAmount), Money(p.NetRevenue),
+                                    Money(p.CogsNet), Money(p.GrossProfit), Money(p.Expenses), Money(p.NetProfit));
+                                stripe = !stripe;
+                            }
+
+                            TotalRow(table,
+                                "الإجمالي", report.Periods.Sum(p => p.InvoiceCount).ToString(),
+                                Money(report.TotalSales), Money(report.TotalReturns), Money(report.TotalNetRevenue),
+                                Money(report.TotalCogsNet), Money(report.TotalGrossProfit), Money(report.TotalExpenses),
+                                Money(report.TotalNetProfit));
                         });
 
-                        // الإيرادات اليومية (تجمع الفواتير بدل سرد كل فاتورة)
+                        // ══ سُلّم شرح حساب الربح (خطوة بخطوة) ══
+                        col.Item().PaddingTop(12).Element(SectionTitle).Text("شرح حساب الربح (خطوة بخطوة)");
+                        col.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(c =>
+                            {
+                                c.RelativeColumn(3);
+                                c.RelativeColumn(1.4f);
+                            });
+                            table.Header(h =>
+                            {
+                                h.Cell().Element(HeaderCell).AlignRight().Text("البند");
+                                h.Cell().Element(HeaderCell).AlignLeft().Text("القيمة");
+                            });
+
+                            void Ladder(string label, string value, bool result)
+                            {
+                                table.Cell().Element(result ? ResultCell : BodyCell)
+                                    .AlignRight().Text(label).FontSize(9.5f);
+                                table.Cell().Element(result ? ResultCell : BodyCell)
+                                    .AlignLeft().Text(value).FontSize(9.5f);
+                            }
+
+                            Ladder("1) الإيراد الإجمالي (المبيعات)", Money(report.TotalSales), result: false);
+                            Ladder("− المرتجعات والمخصومات", "-" + Money(report.TotalReturns), result: false);
+                            Ladder("= صافي الإيراد", Money(report.TotalNetRevenue), result: true);
+                            Ladder("− تكلفة البضاعة المباعة (COGS صافٍ)", "-" + Money(report.TotalCogsNet), result: false);
+                            Ladder("= الربح الإجمالي (بعد المخصومات فقط)", Money(report.TotalGrossProfit), result: true);
+                            Ladder("− المصروفات التشغيلية", "-" + Money(report.TotalExpenses), result: false);
+                            Ladder("= صافي هامش الربح", Money(report.TotalNetProfit), result: true);
+                        });
+
+                        // ══ الإيرادات اليومية (تجمع الفواتير بدل سرد كل فاتورة) ══
                         if (report.DailyLines.Count > 0)
                         {
-                            col.Item().PaddingTop(12).Text("الإيرادات اليومية").FontSize(13).Bold();
+                            col.Item().PaddingTop(12).Element(SectionTitle).Text("الإيرادات اليومية");
 
                             col.Item().Table(table =>
                             {
                                 table.ColumnsDefinition(c =>
                                 {
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
+                                    c.RelativeColumn(1.5f);  // اليوم
+                                    c.RelativeColumn(1);    // الفواتير
+                                    c.RelativeColumn(1.3f); // إجمالي البيع
+                                    c.RelativeColumn(1.3f); // المرتجعات
+                                    c.RelativeColumn(1.3f); // صافي الإيراد
+                                    c.RelativeColumn(1.3f); // COGS
+                                    c.RelativeColumn(1.3f); // الربح الإجمالي
                                 });
                                 table.Header(h =>
                                 {
-                                    h.Cell().Element(CellStyle).Text("اليوم");
-                                    h.Cell().Element(CellStyle).Text("الفواتير");
-                                    h.Cell().Element(CellStyle).Text("إجمالي البيع");
-                                    h.Cell().Element(CellStyle).Text("المرتجعات");
-                                    h.Cell().Element(CellStyle).Text("صافي الإيراد");
-                                    h.Cell().Element(CellStyle).Text("COGS صافٍ");
-                                    h.Cell().Element(CellStyle).Text("الربح الإجمالي");
+                                    foreach (var head in new[]
+                                        { "اليوم", "الفواتير", "إجمالي البيع", "المرتجعات", "صافي الإيراد", "COGS صافٍ", "الربح الإجمالي" })
+                                        h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(8.2f);
                                 });
 
+                                bool stripe = false;
                                 foreach (var d in report.DailyLines)
                                 {
-                                    table.Cell().Element(CellStyle).Text(d.Date.ToString("dd/MM/yyyy"));
-                                    table.Cell().Element(CellStyle).Text(d.InvoiceCount.ToString());
-                                    table.Cell().Element(CellStyle).Text(Money(d.GrossSales));
-                                    table.Cell().Element(CellStyle).Text(Money(d.ReturnsAmount));
-                                    table.Cell().Element(CellStyle).Text(Money(d.NetSales));
-                                    table.Cell().Element(CellStyle).Text(Money(d.CogsNet));
-                                    table.Cell().Element(CellStyle).Text(Money(d.GrossProfit));
+                                    BodyRow(table, stripe, 8.2f,
+                                        d.Date.ToString("dd/MM/yyyy"),
+                                        d.InvoiceCount.ToString(),
+                                        Money(d.GrossSales), Money(d.ReturnsAmount), Money(d.NetSales),
+                                        Money(d.CogsNet), Money(d.GrossProfit));
+                                    stripe = !stripe;
                                 }
 
-                                table.Cell().Element(CellStyleBold).Text("الإجمالي");
-                                table.Cell().Element(CellStyleBold).Text(report.DailyLines.Sum(x => x.InvoiceCount).ToString());
-                                table.Cell().Element(CellStyleBold).Text(Money(report.DailyLines.Sum(x => x.GrossSales)));
-                                table.Cell().Element(CellStyleBold).Text(Money(report.DailyLines.Sum(x => x.ReturnsAmount)));
-                                table.Cell().Element(CellStyleBold).Text(Money(report.DailyLines.Sum(x => x.NetSales)));
-                                table.Cell().Element(CellStyleBold).Text(Money(report.DailyLines.Sum(x => x.CogsNet)));
-                                table.Cell().Element(CellStyleBold).Text(Money(report.DailyLines.Sum(x => x.GrossProfit)));
+                                TotalRow(table,
+                                    "الإجمالي", report.DailyLines.Sum(x => x.InvoiceCount).ToString(),
+                                    Money(report.DailyLines.Sum(x => x.GrossSales)),
+                                    Money(report.DailyLines.Sum(x => x.ReturnsAmount)),
+                                    Money(report.DailyLines.Sum(x => x.NetSales)),
+                                    Money(report.DailyLines.Sum(x => x.CogsNet)),
+                                    Money(report.DailyLines.Sum(x => x.GrossProfit)));
                             });
                         }
 
                         // ملخص الجلسات المكتملة (نظير تقرير Z)
                         if (report.SessionLines.Count > 0)
+                        // ══ ملخص الجلسات المكتملة (نظير تقرير Z) ══
+                        if (report.SessionLines.Count > 0)
                         {
-                            col.Item().PaddingTop(12).Text("ملخص الجلسات المكتملة (Z)").FontSize(13).Bold();
+                            col.Item().PaddingTop(12).Element(SectionTitle).Text("ملخص الجلسات المكتملة (Z)");
 
                             col.Item().Table(table =>
                             {
                                 table.ColumnsDefinition(c =>
                                 {
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
-                                    c.RelativeColumn();
+                                    for (int i = 0; i < 10; i++)
+                                        c.RelativeColumn(i switch { 0 => 0.8f, 1 => 1.5f, 9 => 1.3f, _ => 1f });
                                 });
                                 table.Header(h =>
                                 {
-                                    h.Cell().Element(CellStyle).Text("الجلسة");
-                                    h.Cell().Element(CellStyle).Text("الكاشير");
-                                    h.Cell().Element(CellStyle).Text("الافتتاحي");
-                                    h.Cell().Element(CellStyle).Text("مبيعات نقدي");
-                                    h.Cell().Element(CellStyle).Text("مرتجعات نقدي");
-                                    h.Cell().Element(CellStyle).Text("قبض نقد");
-                                    h.Cell().Element(CellStyle).Text("صرف نقد");
-                                    h.Cell().Element(CellStyle).Text("النقد المتوقع");
-                                    h.Cell().Element(CellStyle).Text("صافي المبيعات");
-                                    h.Cell().Element(CellStyle).Text("الإغلاق");
+                                    foreach (var head in new[]
+                                    {
+                                        "الجلسة", "الكاشير", "الافتتاحي", "مبيعات نقدي", "مرتجعات نقدي",
+                                        "قبض نقد", "صرف نقد", "النقد المتوقع", "صافي المبيعات", "الإغلاق"
+                                    })
+                                        h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(7.6f);
                                 });
 
+                                bool stripe = false;
                                 foreach (var s in report.SessionLines)
                                 {
-                                    table.Cell().Element(CellStyle).Text("#" + s.SessionId);
-                                    table.Cell().Element(CellStyle).Text(s.UserName);
-                                    table.Cell().Element(CellStyle).Text(Money(s.OpeningAmount));
-                                    table.Cell().Element(CellStyle).Text(Money(s.CashSales));
-                                    table.Cell().Element(CellStyle).Text(Money(s.CashReturns));
-                                    table.Cell().Element(CellStyle).Text(Money(s.CashIn));
-                                    table.Cell().Element(CellStyle).Text(Money(s.CashOut));
-                                    table.Cell().Element(CellStyle).Text(Money(s.ExpectedCash));
-                                    table.Cell().Element(CellStyle).Text(Money(s.NetSales));
-                                    table.Cell().Element(CellStyle).Text(s.ClosedAt?.ToString("dd/MM/yyyy HH:mm") ?? "-");
+                                    BodyRow(table, stripe, 7.6f,
+                                        "#" + s.SessionId,
+                                        s.UserName,
+                                        Money(s.OpeningAmount), Money(s.CashSales), Money(s.CashReturns),
+                                        Money(s.CashIn), Money(s.CashOut), Money(s.ExpectedCash),
+                                        Money(s.NetSales),
+                                        s.ClosedAt?.ToString("dd/MM/yyyy HH:mm") ?? "-");
+                                    stripe = !stripe;
                                 }
                             });
                         }
 
-                        col.Item().PaddingTop(10).Text($"صافي الإيراد: {Money(report.TotalNetRevenue)} — المحصل: {Money(report.TotalCollected)} — غير المحصل: {Money(report.TotalOutstanding)}")
-                            .FontSize(11).Bold();
+                        // ══ سطر التحصيل الختامي ══
+                        col.Item().PaddingTop(12).Background(StripeGrey).Border(1).BorderColor(BorderGrey)
+                            .Padding(10).Row(r =>
+                            {
+                                r.RelativeItem().AlignRight()
+                                    .Text($"صافي الإيراد: {Money(report.TotalNetRevenue)}  —  المحصل: {Money(report.TotalCollected)}")
+                                    .FontSize(11).Bold().FontColor(Navy);
+                                r.ConstantItem(200).AlignLeft()
+                                    .Text($"غير المحصل: {Money(report.TotalOutstanding)}")
+                                    .FontSize(11).Bold().FontColor("#B91C1C");
+                            });
                     });
 
-                    page.Footer().AlignCenter().Text(t =>
+                    // ══ التذييل: ترقيم + هوية ══
+                    page.Footer().Column(col =>
                     {
-                        t.Span("سيل POS — تقرير ");
-                        t.CurrentPageNumber();
-                        t.Span(" / ");
-                        t.TotalPages();
+                        col.Item().PaddingBottom(3).LineHorizontal(0.5f).LineColor("#CBD5E1");
+                        col.Item().AlignCenter().Text(t =>
+                        {
+                            t.Span("سيل POS — نظام نقاط البيع").FontSize(8.5f).FontColor(MutedGrey);
+                            t.Span("    |    صفحة ").FontSize(8.5f).FontColor(MutedGrey);
+                            t.CurrentPageNumber().FontSize(8.5f).FontColor(MutedGrey);
+                            t.Span(" من ").FontSize(8.5f).FontColor(MutedGrey);
+                            t.TotalPages().FontSize(8.5f).FontColor(MutedGrey);
+                        });
                     });
                 });
             });
@@ -256,10 +283,244 @@ namespace Sayl.UI.Infrastructure
             document.GeneratePdf(filePath);
         }
 
-        private static IContainer CellStyle(IContainer c) => c
-            .Border(0.5f).BorderColor(Colors.Grey.Lighten2)
-            .Padding(4)
-            .DefaultTextStyle(x => x.FontSize(9).FontColor(Colors.Grey.Darken3));
+        // ═════════════════════════════════════════════════
+        // فاتورة A4 احترافية مفصلة — الطباعة الرسمية للفواتير
+        // ═════════════════════════════════════════════════
+
+        /// <summary>
+        /// يولّد فاتورة A4 احترافية (بيع / شراء / مرتجعات): ترويسة كحلية رسمية (المحل والهاتف
+        /// والرقم الضريبي يمينًا، نوع الفاتورة ورقمها يسارًا) ← بطاقتا بيانات (الطرف / الفاتورة) ←
+        /// جدول بنود مرقّم بالدفعة والكمية والأسعار ← سطر إجمالي كحلي ← صندوق إجماليات بارز
+        /// بالصافي كحليًا ← سجل المدفوعات ← الملاحظات ← خطّا التوقيع.
+        /// </summary>
+        public static void ExportInvoiceA4(InvoicePrintVM inv, string storeName, string storePhone,
+            string vatNumber, string? receiptFooter, string filePath)
+        {
+            EnsureLicense();
+
+            string typeLabel = TranslateType(inv.Type);
+            bool isSupplierSide = inv.Type is "purchase" or "supplier_return";
+            string partyLabel = isSupplierSide ? "المورد" : "العميل";
+            string partyName = inv.PartyName ?? (isSupplierSide ? "-" : "عميل نقدي");
+
+            var document = QuestPDF.Fluent.Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(24);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI").DirectionFromRightToLeft());
+
+                    // ══ الترويسة الرسمية: شريط كحلي — المحل يمينًا، عنوان الفاتورة يسارًا ══
+                    page.Header().Column(col =>
+                    {
+                        col.Item().Background(Navy).PaddingVertical(14).PaddingHorizontal(16).Row(r =>
+                        {
+                            r.RelativeItem().Column(c2 =>
+                            {
+                                c2.Item().Text(storeName).FontSize(21).Bold().FontColor("#FFFFFF");
+                                if (!string.IsNullOrWhiteSpace(storePhone))
+                                    c2.Item().PaddingTop(2).Text($"هاتف: {storePhone}").FontSize(9f).FontColor(Sky);
+                                if (!string.IsNullOrWhiteSpace(vatNumber))
+                                    c2.Item().Text($"الرقم الضريبي: {vatNumber}").FontSize(9f).FontColor(Sky);
+                            });
+                            r.ConstantItem(230).AlignLeft().Column(c2 =>
+                            {
+                                c2.Item().Text(typeLabel).FontSize(17).Bold().FontColor("#FFFFFF");
+                                c2.Item().PaddingTop(2).Text($"رقم الفاتورة: {inv.InvoiceId}")
+                                    .FontSize(10f).FontColor(Sky);
+                                c2.Item().Text(inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-")
+                                    .FontSize(9f).FontColor(MutedGrey);
+                            });
+                        });
+                        col.Item().Height(3).Background(Sky);
+                    });
+
+                    page.Content().PaddingTop(12).Column(col =>
+                    {
+                        // ══ بطاقتا البيانات: الطرف (يمين) + بيانات الفاتورة (يسار) ══
+                        col.Item().Row(r =>
+                        {
+                            r.RelativeItem().PaddingLeft(6).Border(1).BorderColor(BorderGrey).Padding(10).Column(c2 =>
+                            {
+                                c2.Item().PaddingBottom(4).Text(partyLabel).FontSize(11).Bold().FontColor(NavyMid);
+                                c2.Item().Text(partyName).FontSize(11).Bold();
+                                c2.Item().Text($"الهاتف: {inv.PartyPhone ?? "-"}").FontSize(9.5f).FontColor("#475569");
+                                c2.Item().Text($"العنوان: {inv.PartyAddress ?? "-"}").FontSize(9.5f).FontColor("#475569");
+                            });
+                            r.ConstantItem(255).Border(1).BorderColor(BorderGrey).Padding(10).Column(c2 =>
+                            {
+                                c2.Item().PaddingBottom(4).Text("بيانات الفاتورة").FontSize(11).Bold().FontColor(NavyMid);
+                                c2.Item().Text($"الحالة: {TranslateStatus(inv.Status)}   |   الدفع: {TranslatePayment(inv.PaymentStatus)}")
+                                    .FontSize(9.5f).FontColor("#475569");
+                                c2.Item().Text($"الكاشير: {inv.CashierName}").FontSize(9.5f).FontColor("#475569");
+                                if (inv.SessionId != null)
+                                    c2.Item().Text($"الجلسة: #{inv.SessionId}").FontSize(9.5f).FontColor("#475569");
+                                if (inv.OriginalInvoiceId != null)
+                                    c2.Item().Text($"مرتجع على فاتورة: #{inv.OriginalInvoiceId}")
+                                        .FontSize(9.5f).FontColor("#B91C1C");
+                            });
+                        });
+
+                        // ══ جدول البنود: م / الصنف / الدفعة / الكمية / السعر / الإجمالي ══
+                        col.Item().PaddingTop(14).Table(table =>
+                        {
+                            table.ColumnsDefinition(c =>
+                            {
+                                c.ConstantColumn(24);      // م
+                                c.RelativeColumn(4.5f);   // الصنف
+                                c.RelativeColumn(1.8f);   // الدفعة
+                                c.ConstantColumn(46);     // الكمية
+                                c.RelativeColumn(1.9f);   // سعر الوحدة
+                                c.RelativeColumn(2);      // الإجمالي
+                            });
+
+                            table.Header(h =>
+                            {
+                                h.Cell().Element(HeaderCell).AlignCenter().Text("م").FontSize(9f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text("الصنف").FontSize(9.5f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text("الدفعة").FontSize(9.5f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text("الكمية").FontSize(9.5f);
+                                h.Cell().Element(HeaderCell).AlignLeft().Text("سعر الوحدة").FontSize(9.5f);
+                                h.Cell().Element(HeaderCell).AlignLeft().Text("الإجمالي").FontSize(9.5f);
+                            });
+
+                            int no = 0;
+                            bool stripe = false;
+                            foreach (var item in inv.Items)
+                            {
+                                no++;
+                                BodyRow(table, stripe, 9.5f,
+                                    no.ToString(),
+                                    item.ProductName,
+                                    item.BatchNumber ?? "-",
+                                    item.Quantity.ToString(),
+                                    Money(item.ItemPrice),
+                                    Money(item.ItemPrice * item.Quantity));
+                                stripe = !stripe;
+                            }
+
+                            // سطر الإجمالي — كحلي بارز
+                            table.Cell().ColumnSpan(5).Element(TotalCell).AlignRight()
+                                .Text($"إجمالي البنود ({inv.Items.Count}) — {inv.Items.Sum(i => i.Quantity)} وحدة");
+                            table.Cell().Element(TotalCell).AlignLeft()
+                                .Text(Money(inv.TotalAmount)).FontColor(Sky);
+                        });
+
+                        // ══ صندوق الإجماليات — على حافة الأرقام (يسار) ══
+                        col.Item().PaddingTop(14).AlignLeft().Width(315)
+                            .Background("#F1F5F9").Border(1).BorderColor("#CBD5E1").Padding(10).Column(c2 =>
+                            {
+                                void MoneyLine(string label, string value)
+                                {
+                                    c2.Item().PaddingVertical(1.5f).Row(rr =>
+                                    {
+                                        rr.RelativeItem().Text(label).FontSize(10f);
+                                        rr.ConstantItem(130).AlignLeft().Text(value).FontSize(10.5f).Bold();
+                                    });
+                                }
+
+                                MoneyLine("المجموع (قبل الخصم)", Money(inv.TotalAmount));
+                                if (inv.DiscountAmount > 0)
+                                    MoneyLine("الخصم", "-" + Money(inv.DiscountAmount));
+                                if (inv.TaxAmount > 0)
+                                    MoneyLine("الضريبة", Money(inv.TaxAmount));
+
+                                // الصافي — الأبرز في الفاتورة كلها
+                                c2.Item().PaddingTop(6).Background(Navy).Padding(9).Row(rr =>
+                                {
+                                    rr.RelativeItem().Text("الصافي المستحق").FontSize(11).Bold().FontColor("#FFFFFF");
+                                    rr.ConstantItem(130).AlignLeft().Text(Money(inv.NetAmount))
+                                        .FontSize(12.5f).Bold().FontColor(Sky);
+                                });
+
+                                if (inv.PaidAmount > 0)
+                                    MoneyLine("المدفوع", Money(inv.PaidAmount));
+                                decimal change = inv.PaidAmount - inv.NetAmount;
+                                if (change > 0)
+                                    MoneyLine("الباقي للعميل", Money(change));
+                                if (inv.RemainingAmount > 0)
+                                    c2.Item().PaddingVertical(1.5f).Row(rr =>
+                                    {
+                                        rr.RelativeItem().Text("المتبقي (دَين)").FontSize(10f).FontColor("#B91C1C");
+                                        rr.ConstantItem(130).AlignLeft().Text(Money(inv.RemainingAmount))
+                                            .FontSize(10.5f).Bold().FontColor("#B91C1C");
+                                    });
+                            });
+
+                        // ══ سجل المدفوعات ══
+                        if (inv.Payments.Count > 0)
+                        {
+                            col.Item().PaddingTop(14).Element(SectionTitle).Text("سجل المدفوعات");
+                            col.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(c =>
+                                {
+                                    c.RelativeColumn(2);
+                                    c.RelativeColumn(2);
+                                    c.RelativeColumn(1.4f);
+                                });
+
+                                table.Header(h =>
+                                {
+                                    h.Cell().Element(HeaderCell).AlignCenter().Text("التاريخ");
+                                    h.Cell().Element(HeaderCell).AlignCenter().Text("طريقة الدفع");
+                                    h.Cell().Element(HeaderCell).AlignLeft().Text("المبلغ");
+                                });
+
+                                bool stripe = false;
+                                foreach (var p in inv.Payments)
+                                {
+                                    BodyRow(table, stripe, 9.5f,
+                                        p.PaymentDate.ToString("yyyy-MM-dd"),
+                                        TranslateMethod(p.PaymentMethod),
+                                        Money(p.Amount));
+                                    stripe = !stripe;
+                                }
+                            });
+                        }
+
+                        // ══ الملاحظات ══
+                        if (!string.IsNullOrWhiteSpace(inv.Notes))
+                            col.Item().PaddingTop(10).Background("#FFFBEB").Border(1).BorderColor("#FDE68A")
+                                .Padding(8).Text($"ملاحظات: {inv.Notes}").FontSize(9.5f);
+
+                        // ══ خطّا التوقيع ══
+                        col.Item().PaddingTop(34).Row(r =>
+                        {
+                            r.RelativeItem().PaddingRight(24).Column(c2 =>
+                            {
+                                c2.Item().AlignCenter().Text("توقيع البائع (الكاشير)").FontSize(9f).FontColor("#475569");
+                                c2.Item().PaddingTop(16).LineHorizontal(0.7f).LineColor(MutedGrey);
+                            });
+                            r.RelativeItem().PaddingLeft(24).Column(c2 =>
+                            {
+                                c2.Item().AlignCenter().Text($"توقيع {partyLabel}").FontSize(9f).FontColor("#475569");
+                                c2.Item().PaddingTop(16).LineHorizontal(0.7f).LineColor(MutedGrey);
+                            });
+                        });
+                    });
+
+                    // ══ التذييل: شكر + هوية + ترقيم ══
+                    page.Footer().Column(col =>
+                    {
+                        col.Item().PaddingBottom(3).LineHorizontal(0.5f).LineColor("#CBD5E1");
+                        col.Item().AlignCenter()
+                            .Text(string.IsNullOrWhiteSpace(receiptFooter) ? "شكرًا لتعاملكم معنا" : receiptFooter!)
+                            .FontSize(9f).FontColor("#475569");
+                        col.Item().AlignCenter().Text(t =>
+                        {
+                            t.Span("سيل POS — نظام نقاط البيع    |    صفحة ").FontSize(8f).FontColor(MutedGrey);
+                            t.CurrentPageNumber().FontSize(8f).FontColor(MutedGrey);
+                            t.Span(" / ").FontSize(8f).FontColor(MutedGrey);
+                            t.TotalPages().FontSize(8f).FontColor(MutedGrey);
+                        });
+                    });
+                });
+            });
+
+            document.GeneratePdf(filePath);
+        }
 
         // ═════════════════════════════════════════════════
         // إيصال حراري 80mm — مواصفة 9 أقسام، صفحة واحدة، RTL
@@ -276,14 +537,22 @@ namespace Sayl.UI.Infrastructure
         {
             EnsureLicense();
 
-            // حساب الارتفاع المطلوب ديناميكيًا (صفحة واحدة — لا تقسيم صفحات)
-            int itemsLines = inv.Items.Count + 2;                       // بنود + ترويسة الجدول
+            // حساب الارتفاع ديناميكيًا مع هامش التفاف أسماء الأصناف (عمود الصنف ≈ 20 حرفًا/سطر)
+            int itemsLines = inv.Items.Sum(i =>
+                Math.Max(1, (int)Math.Ceiling((i.ProductName?.Length ?? 0) / 20.0)));
             int paymentLines = 1 + (inv.RemainingAmount > 0 ? 1 : 0)
-                                 + (inv.Payments.Count > 0 ? 1 : 0);
+                                 + (inv.Payments.Count > 0 ? 2 : 0);
             int headerExtra = (string.IsNullOrWhiteSpace(storePhone) ? 0 : 1)
                             + (string.IsNullOrWhiteSpace(vatNumber) ? 0 : 1);
-            double heightMm = Math.Max(60,
-                30 + headerExtra * 4 + itemsLines * 5.2 + paymentLines * 5.0 + 22);
+            double heightMm = 34
+                + headerExtra * 4.2
+                + (string.IsNullOrWhiteSpace(inv.Notes) ? 0 : 5)
+                + itemsLines * 5.3
+                + paymentLines * 5.2
+                + (inv.Status != "completed" ? 5 : 0)
+                + 26;
+            // هامش أمان 15% — اللفافة الحرارية تتحمل الورق الزائد، والاستثناء أغلى من الهامش
+            heightMm = Math.Max(62, heightMm * 1.15);
 
             var document = QuestPDF.Fluent.Document.Create(container =>
             {
@@ -298,30 +567,38 @@ namespace Sayl.UI.Infrastructure
 
                     page.Content().Column(col =>
                     {
+                        // فاصل شرطات نصي — التوافق الأمثل مع الرؤوس الحرارية عند إعادة الطباعة كصورة
                         void Separator() => col.Item()
-                            .PaddingVertical(1.5f)
-                            .BorderBottom(0.4f).BorderColor(Colors.Grey.Darken2);
+                            .PaddingVertical(1)
+                            .AlignCenter().Text(new string('-', 64)).FontColor("#6B7280");
 
                         // 1) ترويسة المحل — الاسم هو الأقوى بصريًا
-                        col.Item().AlignCenter().Text(storeName).FontSize(14).Bold();
+                        col.Item().AlignCenter().Text(storeName).FontSize(15).Bold();
                         if (!string.IsNullOrWhiteSpace(storePhone))
                             col.Item().AlignCenter().Text($"هاتف: {storePhone}").FontSize(8);
                         if (!string.IsNullOrWhiteSpace(vatNumber))
                             col.Item().AlignCenter().Text($"الرقم الضريبي: {vatNumber}").FontSize(8);
                         Separator();
 
-                        // 2) معرّف الفاتورة + 3) الكاشير (إلزامي فوق البنود) + العميل
+                        // 2) معرّف الفاتورة + شارة الحالة غير المكتملة + المرتجع على فاتورة أصلية
+                        if (inv.Status != "completed")
+                            col.Item().AlignCenter().Text($"*** {TranslateStatus(inv.Status)} ***")
+                                .FontSize(8.5f).Bold();
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"{TranslateType(inv.Type)} رقم: {inv.InvoiceId}").FontSize(9).Bold();
+                            r.RelativeItem().Text($"{TranslateType(inv.Type)} رقم: {inv.InvoiceId}").FontSize(9.5f).Bold();
                             r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt?.ToString("dd/MM/yyyy") ?? "-").FontSize(8);
                         });
                         col.Item().Row(r =>
                         {
                             r.RelativeItem().Text($"الوقت: {inv.CreatedAt:HH:mm}").FontSize(8);
+                            if (inv.OriginalInvoiceId != null)
+                                r.ConstantItem(140).AlignLeft().Text($"مرتجع على: #{inv.OriginalInvoiceId}").FontSize(7.5f);
                         });
+
+                        // 3) الكاشير (إلزامي فوق البنود) + الطرف (مورد للشراء، عميل لغيره)
                         col.Item().Text($"الكاشير: {inv.CashierName}").FontSize(8);
-                        col.Item().Text(inv.Type == "purchase"
+                        col.Item().Text(inv.Type is "purchase" or "supplier_return"
                             ? $"المورد: {inv.PartyName ?? "-"}"
                             : $"العميل: {inv.PartyName ?? "عميل نقدي"}").FontSize(8);
                         if (!string.IsNullOrWhiteSpace(inv.Notes))
@@ -437,55 +714,78 @@ namespace Sayl.UI.Infrastructure
         // ═════════════════════════════════════════════════
 
         /// <summary>
-        /// يولّد PDF موحد الهوية لأي تقرير جدولي: اسم المحل + عنوان التقرير + الفترة +
-        /// المستخدم ووقت التوليد، ثم الجدول كاملًا RTL بصفحة A4.
-        /// تُستدعى من قسم التقارير (ExportPdf) — نفس البيانات المعروضة.
+        /// يولّد PDF احترافيًا موحّد الهوية لأي تقرير جدولي (A4):
+        /// شريط ترويسة كحلي باسم المحل والتاريخ ← لوحة عنوان التقرير ←
+        /// جدول بحدود وأنماط متناوبة وصفوف رقمية بمحاذاة ثابتة ←
+        /// سطر السجلات ← تذييل ترقيم مع المستخدم.
+        /// (منفصل عن الإيصاع الحرارية 80mm — لكل نوع فلسفة عرضه.)
         /// </summary>
         public static void ExportTableReport(string storeName, string title, string period,
             string userName, string[] headers, List<string[]> rows, string filePath)
         {
             EnsureLicense();
 
+            // كشف تلقائي: هل آخر عمود رقمي (مبالغ)؟ — يستحق صف إجمالي بالأسفل
+            bool hasAmounts = headers.Length >= 2 && rows.Count > 0 && rows.All(r =>
+                r.Length >= headers.Length &&
+                decimal.TryParse(r[^1]?.Trim(),
+                    System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out _));
+
             var document = QuestPDF.Fluent.Document.Create(container =>
             {
                 container.Page(page =>
                 {
                     page.Size(PageSizes.A4);
-                    page.Margin(28);
+                    page.Margin(24);
                     page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI").DirectionFromRightToLeft());
 
+                    // ══ الترويسة: شريط كحلي بهوية سيل (اسم يسار الشريط، تاريخ يمينه) ══
                     page.Header().Column(col =>
                     {
-                        col.Item().Row(r =>
+                        col.Item().Background("#002B54").PaddingVertical(10).PaddingHorizontal(14).Row(r =>
                         {
-                            r.RelativeItem().AlignRight().Text(storeName).FontSize(16).Bold()
-                                .FontColor(Colors.Blue.Darken3);
-                            r.RelativeItem().AlignLeft().Text($"سيل POS — {DateTime.Now:yyyy-MM-dd HH:mm}")
-                                .FontSize(9).FontColor(Colors.Grey.Darken1);
+                            r.RelativeItem().AlignRight().Text(storeName)
+                                .FontSize(19).Bold().FontColor("#FFFFFF");
+                            r.ConstantItem(180).AlignLeft().Column(c2 =>
+                            {
+                                c2.Item().Text("سيل POS").FontSize(9).Bold().FontColor("#93C5FD");
+                                c2.Item().Text(DateTime.Now.ToString("yyyy-MM-dd HH:mm"))
+                                    .FontSize(8.5f).FontColor("#94A3B8");
+                            });
                         });
-                        col.Item().AlignRight().Text($"{title}    ({period})")
-                            .FontSize(12).Bold().FontColor(Colors.Grey.Darken3);
-                        if (!string.IsNullOrWhiteSpace(userName))
-                            col.Item().AlignRight().Text($"أنشأه: {userName}").FontSize(8.5f).FontColor(Colors.Grey.Darken2);
-                        col.Item().PaddingTop(2).PaddingBottom(6).LineHorizontal(0.6f).LineColor(Colors.Blue.Darken1);
+                        // لوحة العنوان: اسم التقرير + الفترة على خلفية فاتحة
+                        col.Item().Background("#E7EFFA").BorderBottom(1).BorderColor("#002B54").PaddingVertical(6).PaddingHorizontal(10).Row(r =>
+                        {
+                            r.RelativeItem().AlignRight().Text(title)
+                                .FontSize(13.5f).Bold().FontColor("#00335F");
+                            r.ConstantItem(300).AlignLeft().Column(c2 =>
+                            {
+                                c2.Item().Text(period).FontSize(9.5f).FontColor("#004080");
+                                if (!string.IsNullOrWhiteSpace(userName))
+                                    c2.Item().Text($"أنشأه: {userName}").FontSize(8.5f).FontColor("#64748B");
+                            });
+                        });
                     });
 
-                    page.Content().PaddingTop(6).Column(col =>
+                    // ══ المتن: الجدول ══
+                    page.Content().PaddingTop(10).Column(col =>
                     {
                         col.Item().Table(table =>
                         {
-                            // أعمدة متساوية (العرض يتوزع تلقائيًا) — آخر عمود أوسع قليلًا للنصوص
                             table.ColumnsDefinition(c =>
                             {
                                 for (int i = 0; i < headers.Length; i++)
-                                    c.RelativeColumn(i == headers.Length - 1 ? 1.4f : 1f);
+                                    c.RelativeColumn(i == headers.Length - 1 && headers.Length > 3 ? 1.3f : 1f);
                             });
 
+                            // رأس الجدول: شريط كحلي بحد سفلي أزرق
                             table.Header(h =>
                             {
                                 foreach (var head in headers)
-                                    h.Cell().Background(Colors.Blue.Darken2).Padding(5)
-                                        .AlignCenter().Text(head).FontSize(9.5f).Bold().FontColor(Colors.White);
+                                    h.Cell().Background("#0B3B69").PaddingVertical(5).PaddingHorizontal(6).BorderBottom(1)
+                                        .BorderColor("#002B54")
+                                        .AlignCenter().Text(head).FontSize(9.5f).Bold().FontColor("#FFFFFF");
                             });
 
                             bool stripe = false;
@@ -495,33 +795,64 @@ namespace Sayl.UI.Infrastructure
                                 for (int i = 0; i < headers.Length; i++)
                                 {
                                     string value = i < row.Length ? row[i] ?? "" : "";
-                                    var cell = table.Cell().Padding(4);
+                                    var cell = table.Cell().PaddingVertical(4).PaddingHorizontal(5).BorderBottom(1)
+                                        .BorderColor("#E2E8F0");
 
                                     if (isStriped)
-                                        cell.Background(Colors.Grey.Lighten4);
+                                        cell.Background("#F8FAFC");
 
-                                    // الأعمدة الرقمية (كلمات أرقام/عملة) بمحاذاة يسار ثابتة
                                     bool isNumeric = value.Length > 0 &&
                                         value.All(ch => char.IsDigit(ch) || ".,-−%() ".Contains(ch));
-                                    if (isNumeric && i > 0)
+                                    if (i > 0 && isNumeric)
                                         cell.AlignLeft().Text(value).FontSize(9f);
                                     else
                                         cell.AlignRight().Text(value).FontSize(9f);
                                 }
                                 stripe = !stripe;
                             }
+
+                            // صف الإجمالي: للتقارير المالية (آخر عمود أرقام) —
+                            // أبرز صف بالجدول: خلفية كحلية ونص أبيض
+                            if (hasAmounts)
+                            {
+                                table.Cell().ColumnSpan((uint)(headers.Length - 1))
+                                    .Background("#002B54").PaddingVertical(5).PaddingHorizontal(6)
+                                    .AlignRight().Text("الإجمالي").FontSize(10.5f).Bold()
+                                    .FontColor("#FFFFFF");
+
+                                decimal total = 0;
+                                foreach (var r in rows)
+                                    if (decimal.TryParse(r[^1]?.Trim(),
+                                        System.Globalization.NumberStyles.Any,
+                                        System.Globalization.CultureInfo.InvariantCulture, out var v))
+                                        total += v;
+
+                                table.Cell().Background("#002B54").PaddingVertical(5).PaddingHorizontal(6)
+                                    .AlignLeft().Text(total.ToString("N2"))
+                                    .FontSize(10.5f).Bold().FontColor("#93C5FD");
+                            }
                         });
 
-                        col.Item().PaddingTop(8).AlignLeft().Text($"عدد السجلات: {rows.Count}")
-                            .FontSize(8.5f).FontColor(Colors.Grey.Darken2);
+                        col.Item().PaddingTop(8).Row(r =>
+                        {
+                            r.RelativeItem().AlignRight().Text($"عدد السجلات: {rows.Count}")
+                                .FontSize(8.5f).FontColor("#475569");
+                            r.ConstantItem(240).AlignLeft().Text($"سيل POS — نظام نقاط البيع")
+                                .FontSize(8.5f).FontColor("#94A3B8");
+                        });
                     });
 
-                    page.Footer().AlignCenter().Text(t =>
+                    // ══ التذييل: خط فاصل + ترقيم + سطر النظام ══
+                    page.Footer().Column(col =>
                     {
-                        t.Span("سيل POS — صفحة ");
-                        t.CurrentPageNumber();
-                        t.Span(" / ");
-                        t.TotalPages();
+                        col.Item().PaddingBottom(4).LineHorizontal(0.5f).LineColor("#CBD5E1");
+                        col.Item().AlignCenter().Text(t =>
+                        {
+                            t.Span("صفحة ").FontSize(8.5f).FontColor("#64748B");
+                            t.CurrentPageNumber().FontSize(8.5f).FontColor("#64748B");
+                            t.Span(" من ").FontSize(8.5f).FontColor("#64748B");
+                            t.TotalPages().FontSize(8.5f).FontColor("#64748B");
+                        });
                     });
                 });
             });
@@ -546,30 +877,95 @@ namespace Sayl.UI.Infrastructure
             _ => method
         };
 
+        private static string TranslateStatus(string status) => status switch
+        {
+            "completed" => "مكتملة",
+            "suspended" => "معلقة",
+            "cancelled" => "ملغاة",
+            _ => status
+        };
 
-        private static IContainer CellStyleBold(IContainer c) => c
-            .Border(0.5f).BorderColor(Colors.Grey.Darken1)
-            .Background(Colors.Grey.Lighten3)
-            .Padding(4)
-            .DefaultTextStyle(x => x.FontSize(9).Bold().FontColor(Colors.Blue.Darken3));
+        private static string TranslatePayment(string status) => status switch
+        {
+            "paid" => "مدفوعة",
+            "partial" => "جزئية",
+            "unpaid" => "غير مدفوعة",
+            _ => status
+        };
 
         internal static string Money(decimal value) => value.ToString("N2");
 
-        /// <summary>تحويل صيغة "yyyy-MM-dd ← yyyy-MM-dd" إلى صيغة تاريخ عربية مختصرة.</summary>
-        private static string ToArabicDate(string label)
+        // ═════════════════════════════════════════════════
+        // مكوّنات الهوية الموحدة — رؤوس أقسام، خلايا جدول، صفوف جاهزة
+        // ═════════════════════════════════════════════════
+
+        /// <summary>عنوان قسم: خط كحلي يميني ونص كحلي غامق فوق كل جدول.</summary>
+        private static IContainer SectionTitle(IContainer c) => c
+            .PaddingBottom(5)
+            .BorderBottom(1.2f)
+            .BorderColor(Navy)
+            .DefaultTextStyle(x => x.FontSize(12).Bold().FontColor(Navy));
+
+        /// <summary>خلية رأس جدول: خلفية كحلية بنص أبيض.</summary>
+        private static IContainer HeaderCell(IContainer c) => c
+            .Background(NavyMid)
+            .PaddingVertical(5).PaddingHorizontal(6)
+            .BorderBottom(1).BorderColor(Navy)
+            .DefaultTextStyle(x => x.FontSize(9).Bold().FontColor("#FFFFFF"));
+
+        /// <summary>خلية بيانات عادية بحد سفلي خفيف.</summary>
+        private static IContainer BodyCell(IContainer c) => c
+            .PaddingVertical(4).PaddingHorizontal(6)
+            .BorderBottom(1).BorderColor(BorderGrey)
+            .DefaultTextStyle(x => x.FontSize(9).FontColor("#1E293B"));
+
+        /// <summary>خلية نتيجة (نتائج سُلّم الربح): خلفية زرقاء فاتحة وخط غامق.</summary>
+        private static IContainer ResultCell(IContainer c) => c
+            .Background(PanelBlue)
+            .PaddingVertical(4).PaddingHorizontal(6)
+            .BorderBottom(1).BorderColor(Navy)
+            .DefaultTextStyle(x => x.FontSize(9).Bold().FontColor(Navy));
+
+        /// <summary>خلية صف الإجمالي: شريط كحلي بنص أبيض وسماوي.</summary>
+        private static IContainer TotalCell(IContainer c) => c
+            .Background(Navy)
+            .PaddingVertical(5).PaddingHorizontal(6)
+            .DefaultTextStyle(x => x.FontSize(9.5f).Bold().FontColor("#FFFFFF"));
+
+        /// <summary>
+        /// يضيف صف بيانات كاملًا للجدول: أول خلية نص (يمين) والباقي أرقام (يسار، ثابتة العرض)
+        /// مع تظليل متناوب رمادي فاتح.
+        /// </summary>
+        private static void BodyRow(TableDescriptor table, bool striped, float fontSize, params string[] cells)
         {
-            if (string.IsNullOrEmpty(label)) return label;
-            var parts = label.Split("←");
-            if (parts.Length != 2) return label;
-            var from = parts[0].Trim();
-            var to = parts[1].Trim();
-            string Fmt(string s)
+            // سلسلة واحدة متصلة لكل خلية — إعادة استخدام المتغير نفسه في سلسلتين
+            // ترفع DocumentComposeException (single-child container)
+            IContainer Style(IContainer c) => striped ? c.Background(StripeGrey) : c;
+
+            for (int i = 0; i < cells.Length; i++)
             {
-                if (DateTime.TryParseExact(s, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d))
-                    return d.ToString("dd/MM/yyyy");
-                return s;
+                var content = table.Cell().Element(Style).Element(BodyCell)
+                    .DefaultTextStyle(x => x.FontSize(fontSize).FontColor("#1E293B"));
+
+                if (i == 0)
+                    content.AlignRight().Text(cells[i]);
+                else
+                    content.AlignLeft().Text(cells[i]);
             }
-            return $"{Fmt(from)} — {Fmt(to)}";
+        }
+
+        /// <summary>يضيف صف الإجمالي: «الإجمالي» يمينًا ثم القيم يسارًا — كحلي بارز.</summary>
+        private static void TotalRow(TableDescriptor table, params string[] cells)
+        {
+            for (int i = 0; i < cells.Length; i++)
+            {
+                var content = table.Cell().Element(TotalCell);
+
+                if (i == 0)
+                    content.AlignRight().Text(cells[i]);
+                else
+                    content.AlignLeft().Text(cells[i]).FontColor(i == cells.Length - 1 ? Sky : "#FFFFFF");
+            }
         }
     }
 }

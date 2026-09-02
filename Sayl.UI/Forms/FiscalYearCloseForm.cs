@@ -38,6 +38,24 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
+            // ═══════════════════════════════════════════════════════════════
+            // 📖 دليل البناء — نمط «المعالج (Wizard)»: أثمن فكرة في هذا الملف.
+            //
+            // النافذة هيكل واحد ثابت (بنٍى مرة واحدة):
+            //   صف0 (52): عنوان الخطوة الحالية
+            //   صف1 (مرن): _pageBody — لوحة «الصفحة» البديلة
+            //   صف2 (64): شريط التنقل (التالي/رجوع/إلغاء)
+            //
+            // ⚙️ آلية تبديل الصفحات (انظر Go أسفل):
+            //   _pageBody.Controls.Clear() يهدم صفحة الخطوة السابقة
+            //   ثم BuildXxxPage() تبني الجديدة داخل نفس اللوحة.
+            //   كل صفحة دالة مستقلة بناها (Label/أزرار/FiscalData) —
+            //   لا تشارك حالة إلا حقول النتائج (_checks/_backupFile/...).
+            //   💡 لإضافة خطوة: case جديد في Go + دالة BuildXxxPage.
+            //
+            // نمط الشريط السفلي: أزرار Dock=Left داخل RTL — أول Add أقصى
+            // اليمين («التالي» أولًا يمينًا، ثم «رجوع» يساره، ثم «إلغاء»).
+            // ═══════════════════════════════════════════════════════════════
             // جذر: ترويسة الخطوة + متن + شريط تنقل مطلق
             var root = new TableLayoutPanel
             {
@@ -104,6 +122,14 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── الخطوات ─────────────────
+        // 📖 Go: «مبدّل الصفحات» — القلب النابض لنمط المعالج:
+        //  1. يخفي «رجوع» في الخطوة الأولى (_step > 0 شرط الظهور).
+        //  2. يهدم القديم بـ Controls.Clear() — عناصر الصفحة تُرمى للGC.
+        //  3. يقلب نص الزر الرئيسي في الخطوة الأخيرة («إغلاق السنة الآن»).
+        //  4. switch يبني الصفحة الجديدة — بعض الصفحات async (فحوصات
+        //     قاعدة بيانات) فتُستدعى بالنمط `_ = BuildXxxAsync()` —
+        //     discard حتى لا تُنتظر (الصفحة تظهر فورًا وتتعبأ تدريجيًا).
+        // NextAsync هو «الحارس»: يرفض الانتقال لو فشل شرط الخطوة الحالية.
         private void Go(int step)
         {
             if (step < 0) return;
@@ -311,7 +337,20 @@ namespace Sayl.UI.Forms
                 };
                 if (save.ShowDialog(this) != DialogResult.OK) return;
 
-                PdfService.ExportPeriodicReport(r.Data, save.FileName);
+                // 📖 التوليد خارج مؤشر الواجهة — تقرير سنة كاملة قد يستغرق ثوانيًا
+                // (استدعاؤه متزامنًا هنا كان يجمّد النافذة بالكامل)
+                string storeName = "سيل";
+                try
+                {
+                    using var nameScope = Program.Services.CreateScope();
+                    var nameSettings = nameScope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                    storeName = await nameSettings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                }
+                catch { /* الترويسة الافتراضية كافية */ }
+
+                var data = r.Data;
+                await Task.Run(() => PdfService.ExportPeriodicReport(data, storeName, save.FileName));
+
                 _reportFile = save.FileName;
                 UiHelpers.ShowInfo(this, $"تم إنشاء التقرير الختامي:\n{save.FileName}");
             }

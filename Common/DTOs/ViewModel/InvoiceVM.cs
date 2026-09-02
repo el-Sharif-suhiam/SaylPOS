@@ -22,6 +22,9 @@ namespace Common.DTOs.ViewModel
         public string? Notes { get; set; }
         public DateTime? CreatedAt { get; set; }
         public List<InvoiceItemVM> Items { get; set; } = new();
+
+        /// <summary>عدد البنود (يُعبّأ كعدّ فرعي في استعلامات القوائم دون Include).</summary>
+        public int ItemsCount { get; set; }
     }
 
     public class InvoiceItemVM

@@ -6,15 +6,32 @@ using IOPath = System.IO.Path;
 
 namespace Sayl.UI.Infrastructure
 {
+    /// <summary>صيغة الطباعة المطلوبة لفاتورة معينة.</summary>
+    internal enum InvoicePrintFormat
+    {
+        /// <summary>إيصال حراري 80mm — الافتراضي لفواتير الكاشير السريعة (بيع/مرتجع عميل).</summary>
+        ThermalReceipt,
+
+        /// <summary>فاتورة A4 احترافية مفصلة — للطباعة الرسمية (بيع/شراء/مرتجعات).</summary>
+        A4Detailed
+    }
+
     /// <summary>
     /// مسار طباعة موحّد للفواتير: جلب بيانات الفاتورة + إعدادات المحل (async كامل)
-    /// ثم توليد إيصال 80mm PDF في Documents\Sayl_POS\Invoices وفتح نافذة الطباعة
-    /// بالنسخة الجاهزة. يستخدمه POS بعد إتمام البيع وشاشة تفاصيل الفاتورة.
+    /// ثم توليد PDF في Documents\Sayl_POS\Invoices وفتحه للعرض/الطباعة.
+    /// يميّز بين صيغتين متمايزتين:
+    ///  • ThermalReceipt (80mm) — لفواتير الكاشير اليومية السريعة.
+    ///  • A4Detailed (A4) — الفاتورة الرسمية المفصلة بالتوقيعات للاحتياجات الرسمية.
+    /// التوليد داخل Task.Run دائمًا — لا تجميد للواجهة مهما كبرت الفاتورة.
     /// </summary>
     internal static class InvoicePrintHelper
     {
-        /// <summary>طباعة فاتورة بالمعرف — مسار كامل async لا يعلّق الواجهة.</summary>
-        public static async Task PrintAsync(int invoiceId, IWin32Window? owner)
+        /// <summary>طباعة فاتورة بالمعرف (إيصال حراري افتراضيًا) — مسار async كامل لا يعلّق الواجهة.</summary>
+        public static Task PrintAsync(int invoiceId, IWin32Window? owner)
+            => PrintAsync(invoiceId, owner, InvoicePrintFormat.ThermalReceipt);
+
+        /// <summary>طباعة فاتورة بالمعرف بصيغة محددة — مسار async كامل لا يعلّق الواجهة.</summary>
+        public static async Task PrintAsync(int invoiceId, IWin32Window? owner, InvoicePrintFormat format)
         {
             InvoicePrintVM? invoice = null;
             string storeName = "سيل";
@@ -53,9 +70,11 @@ namespace Sayl.UI.Infrastructure
             string? filePath = null;
             try
             {
+                // مجلد منفصل لكل صيغة — الحرارية عن الرسمية A4
+                string formatFolder = format == InvoicePrintFormat.A4Detailed ? "A4" : "Thermal";
                 string dir = IOPath.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "Sayl_POS", "Invoices",
+                    "Sayl_POS", "Invoices", formatFolder,
                     InvoiceDetailsForm.TranslateType(invoice.Type));
                 System.IO.Directory.CreateDirectory(dir);
 
@@ -66,7 +85,10 @@ namespace Sayl.UI.Infrastructure
                 await Task.Run(() =>
                 {
                     PdfService.EnsureLicense();
-                    PdfService.ExportInvoiceReceipt(inv, storeName, storePhone, vatNumber, receiptFooter, filePath);
+                    if (format == InvoicePrintFormat.A4Detailed)
+                        PdfService.ExportInvoiceA4(inv, storeName, storePhone, vatNumber, receiptFooter, filePath);
+                    else
+                        PdfService.ExportInvoiceReceipt(inv, storeName, storePhone, vatNumber, receiptFooter, filePath);
                 });
             }
             catch
@@ -75,29 +97,18 @@ namespace Sayl.UI.Infrastructure
                 return;
             }
 
-            // فتح نافذة الطباعة على النسخة الجاهزة (الفعل "print" — المعالج الافتراضي للنظام)
+            // 📖 فتح الملف للعرض (لا فعل "print" — بعض معالجات PDF تعلّق العملية كلها
+            // بحوارات طباعة خارج نافذتنا). المستخدم يطبع من العارض بضغطة واحدة.
             try
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(filePath)
                 {
-                    Verb = "print",
                     UseShellExecute = true
                 });
             }
             catch
             {
-                // لا يوجد معالج "print" — نفتح الملف للعرض ويطبع المستخدم من العارض
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(filePath)
-                    {
-                        UseShellExecute = true
-                    });
-                }
-                catch
-                {
-                    UiHelpers.ShowInfo(owner, $"الملف محفوظ في:\n{filePath}");
-                }
+                UiHelpers.ShowInfo(owner, $"الملف محفوظ في:\n{filePath}");
             }
         }
     }

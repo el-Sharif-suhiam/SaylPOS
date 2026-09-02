@@ -46,6 +46,23 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await RunAsync(quiet: true);
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — «الجذر المجزّأ» بستة صفوف + TabControl
+        // (الأساسيات في PayrollForm — هنا خصوصيات هذه الشاشة):
+        //
+        //   صف0 (86): شريط عنوان كحلي
+        //   صف1 (60): شريط الفلاتر (نوع/من/إلى/عرض)
+        //   صف2 (72%): TabControl بثلاثة جداول (الفترات/اليومي/الجلسات)
+        //   صف3 (86): لوحة شرح حساب الربح
+        //   صف4 (52): شريط الإجمالي
+        //   صف5 (86): الأزرار (تصدير PDF يمينًا / إغلاق يسارًا)
+        //
+        // نقطتان جديدتان هنا:
+        // 1) التبويبات: TabControl بجداول مستقلة — شرح النمط في ShiftsForm
+        //    («نافذة مصغرة داخل تبويب»).
+        // 2) شرح الربح Label واحد بسطر طويل — يتحدث من SetProfitExplanation.
+        //    (لو أردت أسطرًا منفصلة: عمود TLP بدل سطر واحد متصل.)
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
             var root = new TableLayoutPanel
@@ -165,7 +182,7 @@ namespace Sayl.UI.Forms
             _btnPdf.Dock = DockStyle.Right;
             _btnPdf.Width = 180;
             _btnPdf.Enabled = false;
-            _btnPdf.Click += (_, _) => ExportPdf();
+            _btnPdf.Click += async (_, _) => await ExportPdfAsync();
 
             actions.Controls.Add(_btnPdf);
             actions.Controls.Add(btnClose);
@@ -389,7 +406,9 @@ namespace Sayl.UI.Forms
             }
         }
 
-        private void ExportPdf()
+        // 📖 التصدير PDF — مسار async كامل:
+        // التوليد داخل Task.Run وإلا جمُدت النافذة كاملة (نفس علة FiscalYearCloseForm القديمة)
+        private async Task ExportPdfAsync()
         {
             if (_current == null || _current.Periods.Count == 0)
             {
@@ -407,14 +426,33 @@ namespace Sayl.UI.Forms
             if (save.ShowDialog(this) != DialogResult.OK)
                 return;
 
+            _btnPdf.Enabled = false;
+            Cursor = Cursors.WaitCursor;
             try
             {
-                PdfService.ExportPeriodicReport(_current, save.FileName);
+                string storeName = "سيل";
+                try
+                {
+                    using var scope = Program.Services.CreateScope();
+                    var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                }
+                catch { /* الترويسة الافتراضية كافية */ }
+
+                // التوليد خارج مؤشر الواجهة — التقرير السنوي قد يحوي مئات الصفوف
+                var report = _current;
+                await Task.Run(() => PdfService.ExportPeriodicReport(report, storeName, save.FileName));
+
                 UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
             }
             catch (Exception ex)
             {
                 UiHelpers.ShowError(this, "تعذر إنشاء ملف PDF: " + ex.Message);
+            }
+            finally
+            {
+                _btnPdf.Enabled = true;
+                Cursor = Cursors.Default;
             }
         }
     }

@@ -75,7 +75,10 @@ namespace Sayl.Core.Services
                     TaxAmount = i.TaxAmount,
                     NetAmount = i.NetAmount,
                     Notes = i.Notes,
-                    CreatedAt = i.CreatedAt
+                    CreatedAt = i.CreatedAt,
+                    // عدد البنود كعدّ فرعي — يغني عن Include كامل للبنود
+                    // في استعلام قائمة (عرض فقط) — شاشة الفواتير المعلقة تعرضه.
+                    ItemsCount = i.InvoiceItems.Count
                 })
                 .ToListAsync();
 

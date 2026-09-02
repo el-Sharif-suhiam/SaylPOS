@@ -74,7 +74,7 @@ namespace Sayl.UI.Forms
             _btnPrint = AppTheme.MakeButton("طباعة (PDF)", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
             _btnPrint.Dock = DockStyle.Right;
             _btnPrint.Width = 135;
-            _btnPrint.Click += (_, _) => PrintList();
+            _btnPrint.Click += async (_, _) => await PrintList();
 
             _btnExcel = AppTheme.MakeButton("Excel", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 44);
             _btnExcel.Dock = DockStyle.Right;
@@ -341,7 +341,7 @@ namespace Sayl.UI.Forms
             return (headers, rows);
         }
 
-        private void PrintList()
+        private async Task PrintList()
         {
             var (headers, rows) = CurrentTable();
             if (rows.Count == 0) return;
@@ -356,17 +356,22 @@ namespace Sayl.UI.Forms
 
             try
             {
+                // مسار async كامل — منع التجميد (نفس إصلاح التقارير)
                 string storeName = "سيل";
                 try
                 {
                     using var scope = Program.Services.CreateScope();
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = settings.GetAsync(clsSettingsService.KeyStoreName, "سيل").GetAwaiter().GetResult();
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
                 }
                 catch { }
 
-                PdfService.ExportTableReport(storeName, _sessionOpen ? "قائمة الجرد (للعد الفعلي)" : "قائمة الجرد",
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm"), SessionState.CurrentUser?.UserName ?? "", headers, rows, save.FileName);
+                string title = _sessionOpen ? "قائمة الجرد (للعد الفعلي)" : "قائمة الجرد",
+                       period = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                       user = SessionState.CurrentUser?.UserName ?? "", path = save.FileName;
+                await Task.Run(() =>
+                    PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
+
                 UiHelpers.ShowInfo(this, $"تم إنشاء القائمة:\n{save.FileName}");
             }
             catch (Exception ex)
