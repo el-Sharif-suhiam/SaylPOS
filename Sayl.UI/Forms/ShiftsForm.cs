@@ -35,6 +35,18 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
+            // ═══════════════════════════════════════════════════════════════
+            // 📖 نمط «التبويبات»: TabControl يملأ كامل النافذة (Dock=Fill)
+            // وكل TabPage لوحة مستقلة تُبنى كنافذة مصغرة:
+            //   [شريط أزرار Dock=Top] + [جدول Dock=Fill]
+            //
+            // • لإضافة تبويب جديد: انسخ بنية أي تبويب (Tab + شريط + جدول)
+            //   ثم _tabs.TabPages.Add(التبويب الجديد).
+            // • ترتيب الأزرار داخل الشريط: FlowDirection=RightToLeft يعني
+            //   أول Controls.Add يظهر أقصى اليمين — عدّل ترتيب الأسطر للترتيب.
+            // • ارتفاع الشريط: Height=54 — زر 44 + هامش.
+            // • FlowLayoutPanel خاصية AutoScroll: لو كثرت الأزرار لفّت تلقائيًا.
+            // ═══════════════════════════════════════════════════════════════
             _tabs = new TabControl { Dock = DockStyle.Fill };
 
             // ── تبويب الشفتات ──

@@ -41,6 +41,18 @@ namespace Sayl.UI.UserControls
         private const int ReportPayrolls = 9;
         private const int ReportLastCount = 10;
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 قسم التقارير — نمط «UserControl بشريط فلترة + جدول»:
+        //
+        // لإضافة تقرير جديد (الطريق الكامل):
+        //  1. أضف ثابتًا هنا: private const int ReportX = 11; (رقم متسلسل)
+        //  2. أضف اسمه العربي في Items.AddRange للقائمة أدناه — بنفس الترتيب!
+        //     (الترتيب يربط فهرس القائمة بالثابت — أي خلل = تقرير خاطئ)
+        //  3. أضف case جديد في RunReportAsync: استدعاء خدمة + AddColumns + AddRow
+        //     — ولأن التصدير يقرأ الجدول نفسه، يحصل تقريرك على PDF/Excel مجانًا.
+        //  4. هل يحتاج فترة تاريخ؟ راجع ToggleDateFields لإخفاء/إظهار الحقول.
+        //  ⚠️ ملاحظة: كل تغيير (نوع/تاريخ) يعيد التشغيل فورًا — لا زر إضافي مطلوب.
+        // ═══════════════════════════════════════════════════════════════
         public ReportsControl()
         {
             Dock = DockStyle.Fill;
@@ -51,6 +63,9 @@ namespace Sayl.UI.UserControls
 
         private void BuildUi()
         {
+            // ── شريط الفلترة (أعلى القسم، Dock=Top بارتفاع 70) ──
+            // كل عناصره بـ Dock=Right داخل RTL: أول Add أقصى اليمين.
+            // الترتيب البصري النهائي (من اليمين): النوع ← من ← إلى ← عرض ← PDF ← Excel ← الدوري.
             var filterBar = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = AppTheme.CardBg, Padding = new Padding(16, 14, 16, 10) };
 
             var lblType = new Label { Text = "نوع التقرير", Dock = DockStyle.Right, Width = 78, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
