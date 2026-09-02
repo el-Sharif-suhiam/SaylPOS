@@ -33,8 +33,34 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء بالكود (لغير الملم بواجهات WinForms):
+        //
+        // هذه النافذة تُبنى بأسلوب «الإحداثيات اليدوية»: كل عنصر يوضع
+        // بموضع محدد (Bounds = يسار، أعلى، عرض، ارتفاع بالبكسل).
+        //
+        // كيف تغيّر أي شيء بأمان:
+        // • نص عنصر: غيّر ما بين علامتي التنصيص "..." فقط.
+        // • حجم/موضع عنصر: عدّل أرقام Bounds. مثال: Rectangle(30, y+24, 240, 34)
+        //   يعني: يبدأ من 30 بكسل من اليسار، y+24 من الأعلى، عرضه 240 وارتفاعه 34.
+        // • المسافة بين الحقول: المتغير y يتقدم تلقائيًا (y += 64 داخل
+        //   MakeField) — زيادة 64 تعني حقلاً أعلى/أسفل أبعد.
+        // • ترتيب الحقول: تسلسل أسطر MakeField(...) هو ترتيب ظهورها.
+        // • الألوان: كلها من AppTheme (لوحة موحدة) — لا تكتب لونًا يدويًا.
+        //
+        // قواعد النافذة (لا تحتاج تعديلها غالبًا):
+        // RightToLeft.Yes = كل شيء يبدأ من اليمين (عربي).
+        // ShowInTaskbar=false = نافذة حوارية (لا تظهر بشريط المهام).
+        // CenterParent = تفتح وسط النافذة الأم.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
+            // ── عنوان النافذة وحجمها ──
+            // Text: عنوان شريط النافذة — يتغير حسب (إضافة/تعديل).
+            // ClientSize: حجم منطقة المحتوى (بدون إطار النافذة) بالبكسل.
+            //             نافذة أضيق؟ صغّر العرض 560. أطول؟ كبّر 640.
+            // BackColor: خلفية النافذة — AppTheme.CardBg هي خلفية البطاقات
+            //            البيضاء الموحدة في كل النظام.
             Text = _existing == null ? "إضافة موظف" : "تعديل موظف";
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(560, 640);
@@ -43,6 +69,12 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
+            // ── العنوان الكبير أعلى النافذة ──
+            // Label نصي فقط (غير قابل للنقر).
+            // Bounds: من اليسار 0 ومن الأعلى 14 — عرض كامل 560 وارتفاع 30.
+            // TextAlign=MiddleCenter: يوسّط النص أفقيًا وعموديًا.
+            // لتغيير حجم خط العنوان: عدّل AppTheme.FontHeading في AppTheme.cs
+            // (يتغير في كل النظام) — أو استبدله هنا بخط مخصص لهذه الشاشة فقط.
             var lblTitle = new Label
             {
                 Text = Text,
@@ -52,12 +84,21 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextPrimary
             };
 
+            // ── الحقول النصية المتتالية (الاسم/الجوال/البريد...) ──
+            // y مؤشر يتقدم تلقائيًا لكل حقل جديد — لا تحسبه يدويًا.
+            // MakeField(التسمية، ...) ينشئ: تسمية رمادية فوق مربع إدخال.
+            // لإضافة حقل جديد: انسخ سطرًا وغيّر التسمية، وسيتوضع تلقائيًا.
+            // (تذكير: الحقل الجديد يجب أن يُعلن أيضًا أعلى الملف مع بقية الحقول
+            //  ويُقرأ/يُحفظ داخل SaveAsync ليتصل بقاعدة البيانات.)
             int y = 56;
             _txtName = MakeField("الاسم *", ref y, out _);
             _txtPhone = MakeField("الجوال", ref y, out _);
             _txtEmail = MakeField("البريد الإلكتروني", ref y, out _);
 
-            // نوع الراتب + المعدل في سطر واحد
+            // ── نوع الراتب + المعدل: صف مزدوج (يمين يسار) ──
+            // وضعنا عنصرين في نفس الصف: التسمية+القائمة يمينًا (390..530)
+            // والتسمية+الرقم يسارًا (30..270). المسافة الوسطية فاصلة.
+            // Bounds يسار العنصر الأيمن = 390 (أي أن عرضه من 390 إلى 530).
             var lblType = new Label
             {
                 Text = "نوع الراتب *",
@@ -72,6 +113,10 @@ namespace Sayl.UI.Forms
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
+            // القائمة المنسدلة: Items = الخيارات، SelectedIndex=0 يعني الافتراضي
+            // أول خيار. أضف/احذف خيارًا من AddRange وسيظهر تلقائيًا.
+            // ⚠️ إذا أضفت خيارًا جديدًا: يجب تحديث الترتيب في LoadExisting/SaveAsync
+            //    (الترجمة "شهري/يومي/بالساعة" ↔ قاعدة البيانات).
             _cmbSalaryType = new ComboBox
             {
                 Bounds = new Rectangle(390, y + 24, 140, 34),
@@ -80,6 +125,8 @@ namespace Sayl.UI.Forms
             };
             _cmbSalaryType.Items.AddRange(new object[] { "شهري", "يومي", "بالساعة" });
             _cmbSalaryType.SelectedIndex = 0;
+            // SelectedIndexChanged: يُنفّذ تلقائيًا عند تغيير اختيار المستخدم —
+            // هنا نستدعي UpdateSalaryLabel لتغيير نص "المعدل (شهري/يومي...)".
             _cmbSalaryType.SelectedIndexChanged += (_, _) => UpdateSalaryLabel();
 
             _txtSalary = new TextBox
@@ -88,7 +135,7 @@ namespace Sayl.UI.Forms
                 TextAlign = HorizontalAlignment.Center
             };
             _txtSalary.Text = "0";
-            y += 64;
+            y += 64; // انتهى الصف المزدوج — تقدّم لموضع الصف التالي
 
             _txtPosition = MakeField("المسمى الوظيفي *", ref y, out _);
             _txtDepartment = MakeField("القسم", ref y, out _);
@@ -124,6 +171,12 @@ namespace Sayl.UI.Forms
             _cmbStatus.SelectedIndex = 0;
             y += 64;
 
+            // ── تاريخ الاستقالة (يظهر/يختفي حسب الحالة) ──
+            // نمط «الحقل المشروط»: Visible=false عند البناء ثم يظهر فقط عند
+            // اختيار «مستقيل». لجعل حقل ظاهرًا دائمًا: احذف سطري Visible=false.
+            // DateTimePicker: منتقي تاريخ — CustomFormat="yyyy-MM-dd" يضبط
+            // صيغة العرض (مثال "dd/MM/yyyy" لو أردت اليوم-الشهر-السنة).
+            // RightToLeftLayout=false: التقويم الداخلي يبقى منطقي القراءة.
             // تاريخ الاستقالة — يظهر فقط عند «مستقيل» (يقطع حساب الراتب الشهري عنده)
             var lblResign = new Label
             {
@@ -154,6 +207,14 @@ namespace Sayl.UI.Forms
 
             _txtAddress = MakeField("العنوان", ref y, out _);
 
+            // ── أزرار الحفظ والإغلاق (أسفل النافذة) ──
+            // MakeButton(النص، لون الخلفية): زر موحّد المظهر من AppTheme.
+            //   • AppTheme.Primary = الكحلي (زر الإجراء الأساسي).
+            //   • AppTheme.Bg + foreColor=TextPrimary = زر ثانوي أبيض.
+            // Bounds: (يسار 190، أعلى y+16، عرض 180، ارتفاع 48) — الارتفاع 48
+            //         هو الحد الأدنى المريح للمس (لا تصغّره).
+            // Click += ...: ما يحدث عند الضغط — هنا استدعاء دالة الحفظ.
+            // لتحريك الزرين: عدّل X الأول (190). عرض أكبر؟ عدّل 180.
             _btnSave = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnSave.Bounds = new Rectangle(190, y + 16, 180, 48);
             _btnSave.Click += async (_, _) => await SaveAsync();
@@ -183,6 +244,15 @@ namespace Sayl.UI.Forms
                 UpdateSalaryLabel();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 MakeField: مصنع الحقول النصية الموحّد لهذه الشاشة.
+        // ينشئ: تسمية رمادية (النص = caption) + مربع إدخال تحتها.
+        // بعد الإنشاء يتقدم y بمقدار 64 بكسل جاهزًا للحقل التالي.
+        // لتعديل عرض الحقول: غيّر 500 (عرض كل من التسمية والمربع).
+        // لزيادة التباعد بين الحقول: غيّر y += 64 إلى رقم أكبر.
+        // انتبه: التسمية تُضاف للنافذة هنا داخل الدالة، أما المربع
+        // فيُضاف عبر Controls.AddRange في BuildUi — لا تضفه مرتين.
+        // ═══════════════════════════════════════════════════════════════
         private TextBox MakeField(string caption, ref int y, out Label label)
         {
             label = new Label

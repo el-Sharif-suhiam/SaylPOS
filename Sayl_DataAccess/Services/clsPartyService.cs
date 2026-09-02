@@ -18,13 +18,13 @@ namespace Sayl.Core.Services
 
 
 
-         public async Task<Result> AddNewPartyWithRoleAsync(DtoParty dtoParty)
+         public async Task<Result<int>> AddNewPartyWithRoleAsync(DtoParty dtoParty)
          {
              if (dtoParty.PartyType != 'C' && dtoParty.PartyType != 'S' && dtoParty.PartyType != 'B')
-                 return Result.Fail("نوع الطرف غير صالح.");
+                 return Result<int>.Fail("نوع الطرف غير صالح.");
 
              if (string.IsNullOrWhiteSpace(dtoParty.Name))
-                 return Result.Fail("الاسم مطلوب.");
+                 return Result<int>.Fail("الاسم مطلوب.");
 
              using var transaction = await _dbContext.Database.BeginTransactionAsync();
              try
@@ -53,12 +53,12 @@ namespace Sayl.Core.Services
 
                  await _dbContext.SaveChangesAsync();
                  await transaction.CommitAsync();
-                 return Result<int>.Ok(newParty.PartyId,"تمت إضافة الطرف بنجاح.");
+                 return Result<int>.Ok(newParty.PartyId, "تمت إضافة الطرف بنجاح.");
              }
              catch
              {
                  await transaction.RollbackAsync();
-                 return Result.Fail("فشلت عملية الإضافة. الرجاء المحاولة مرة أخرى.");
+                 return Result<int>.Fail("فشلت عملية الإضافة. الرجاء المحاولة مرة أخرى.");
              }
          }
 

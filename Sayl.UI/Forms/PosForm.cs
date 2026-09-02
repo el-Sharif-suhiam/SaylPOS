@@ -72,7 +72,61 @@ namespace Sayl.UI.Forms
         }
 
         // ═══════════════════════════════════════════════
+        // 📖 اختصارات الكاشير (Function Keys) — تُلتقط هنا مركزيًا
+        // عبر ProcessCmdKey حتى تعمل ولو كان التركيز داخل مربع البحث.
+        // المفاتيح المعتمدة (تظهر على الأزرار أيضًا):
+        //   F2 = دفع الآن   | F3 = تعليق   | F4 = اختيار عميل
+        //   F9 = آخر فاتورة | F12 = مرتجع
+        // لإضافة اختصار: أضف case هنا + أظهر المفتاح في نص الزر المعني.
+        // ملاحظة الأمان: لا يوجد تعارض مع Enter (بحث/إضافة) وEsc (إغلاق القوائم)
+        // لأن مفاتيح F لا تُستهلك بأي معالج آخر في هذه الشاشة.
+        // ═══════════════════════════════════════════════
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            switch (keyData)
+            {
+                case Keys.F2:
+                    _ = CheckoutAsync(suspend: false);
+                    return true;
+
+                case Keys.F3:
+                    _ = CheckoutAsync(suspend: true);
+                    return true;
+
+                case Keys.F4:
+                    PickCustomer();
+                    return true;
+
+                case Keys.F9:
+                    using (var form = new LastInvoiceForm(SessionState.CurrentUser?.UserId ?? 0))
+                        form.ShowDialog(this);
+                    _txtSearch.Focus(); // الماسح جاهز بعد إغلاق النافذة
+                    return true;
+
+                case Keys.F12:
+                    ShowReturnForm();
+                    return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // ═══════════════════════════════════════════════
         // بناء الواجهة
+        // 📖 شاشة POS تبنى بنمط «الإرساء الثلاثي»:
+        //    ┌───────────┬──────────────────┬──────────┐
+        //    │ (Top)     │ شريط العلوي       │          │
+        //    ├───────────┴──────────────────┤ الأزرار   │
+        //    │                            │ (Right   │
+        //    │   سلة الفاتورة (Fill)        │  388px)  │
+        //    │                            │          │
+        //    └────────────────────────────┴──────────┘
+        //  قاعدة الإرساء في WinForms: **آخر ما يُضاف يُرسّى أولًا**
+        //  (يأخذ حافته قبل غيره) — لذلك ترتيب الأسطر الأربعة أدناه
+        //  مقصود وعكسي منطقيًا: نضيف Fill أولًا حتى يُرسى أخيرًا
+        //  ويملأ فقط ما تبقى بعد Top وRight.
+        //  لتغيير عرض لوحة الأزرار: Width=388 داخل BuildActionPanel.
+        //  لتغيير ارتفاع الشريط العلوي: Height=74 داخل BuildTopBar.
         // ═══════════════════════════════════════════════
         private void BuildUi()
         {
@@ -91,6 +145,10 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── الشريط العلوي ─────────────────
+        // 📖 الشريط الكحلي العلوي: الشعار + اسم النظام + مربع البحث
+        // (يستقبله الكتابة اليدوية والماسح الضوئي معًا) + حالة الجلسة + خروج.
+        // داخل اللوحة: عناصر بإرساء Left/Right/Fill — في RTL:
+        // ترتيب Add يحدد التراصف من الحواف نحو الداخل (اقرأ بترتيب الأسطر).
         private void BuildTopBar()
         {
             var top = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = AppTheme.SidebarBg, Padding = new Padding(14, 12, 14, 12) };
@@ -129,6 +187,13 @@ namespace Sayl.UI.Forms
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
+            // 📖 مربع البحث — قلب شاشة الكاشير:
+            //  • الكتابة اليدوية: TextChanged → بحث حي بعد 250ms (debounce
+            //    داخل _searchTimer) يعرض قائمة النتائج المنسدلة.
+            //  • الماسح الضوئي/QR: يكتب بسرعة ثم Enter → SearchCommitAsync
+            //    يضيف المنتج المطابق فورًا للسلة.
+            //  • PlaceholderText: النص الإرشادي الرمادي — غيّره بحرية.
+            //  • Font بحجم 14: مقصود كبيرًا لقراءة سريعة خلف الكاشير.
             _txtSearch.PlaceholderText = " اكتب اسم المنتج للبحث الفوري أو امسح الباركود ثم Enter ";
             _txtSearch.TextChanged += (_, _) => OnSearchTextChanged();
             _txtSearch.KeyDown += Search_KeyDown;
@@ -678,7 +743,7 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.TextPrimary,
                 Padding = new Padding(0, 0, 10, 0)
             };
-            var btnCustomer = AppTheme.MakeButton("اختيار العميل", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
+            var btnCustomer = AppTheme.MakeButton("عميل — F4", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
             btnCustomer.Dock = DockStyle.Left;
             btnCustomer.Width = 128;
             btnCustomer.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
@@ -732,14 +797,14 @@ namespace Sayl.UI.Forms
             };
             AddRow(layout, _lblNet, 62);
 
-            // 4) زر الدفع الكبير
-            _btnPay = AppTheme.MakeButton("دفع الآن", AppTheme.Success, hoverColor: AppTheme.SuccessDark, height: 78);
+            // 4) زر الدفع الكبير — F2 (اختصار الكاشير الأشهر عالميًا)
+            _btnPay = AppTheme.MakeButton("دفع الآن — F2", AppTheme.Success, hoverColor: AppTheme.SuccessDark, height: 78);
             _btnPay.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             _btnPay.Click += async (_, _) => await CheckoutAsync(suspend: false);
             AddRow(layout, _btnPay, 82);
 
-            // 5) تعليق + مسح (صفان متجاوران)
-            _btnSuspend = AppTheme.MakeButton("تعليق الفاتورة", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
+            // 5) تعليق + مسح (صفان متجاوران) — F3 للتعليق
+            _btnSuspend = AppTheme.MakeButton("تعليق — F3", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
             _btnSuspend.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             _btnSuspend.Click += async (_, _) => await CheckoutAsync(suspend: true);
 
@@ -768,7 +833,7 @@ namespace Sayl.UI.Forms
             AddRow(layout, lblOps, 30);
 
             // 7) عمليات 2×2
-            var btnReturn = AppTheme.MakeButton("مرتجع بيع", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 52);
+            var btnReturn = AppTheme.MakeButton("مرتجع — F12", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 52);
             btnReturn.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnReturn.Margin = new Padding(0, 0, 4, 8);
             btnReturn.Click += (_, _) => ShowReturnForm();

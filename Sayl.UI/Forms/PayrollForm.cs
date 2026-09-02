@@ -37,8 +37,34 @@ namespace Sayl.UI.Forms
             Load += async (_, _) => await LoadPayrollsAsync();
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 دليل البناء — نمط «الجذر المجزّأ» (الأهم في النظام):
+        //
+        // هذه الشاشة تجسّد البنية التي تحل مشكلة «زر يختفي بالتمرير»:
+        //
+        //   ┌─────────────────────────────┐
+        //   │ صف0 (Absolute 60): شريط الفترة │ ← ارتفاع ثابت دائمًا
+        //   ├─────────────────────────────┤
+        //   │ صف1 (Percent 100): الجدول     │ ← يأخذ كل المساحة المتبقية
+        //   ├─────────────────────────────┤
+        //   │ صف2 (Absolute 68): الأزرار    │ ← ثابت أسفل الشاشة — لا يتمرر أبدًا
+        //   └─────────────────────────────┘
+        //
+        // قواعد ذهبية لهذا النمط:
+        // 1. TableLayoutPanel واحد فقط يملأ النافذة (Controls.Add(root) وحده).
+        // 2. الصف المطلق (Absolute) محجوز دائمًا مهما صغرت النافذة —
+        //    عكس Dock=Bottom الذي قد تبتلعه منطقة التمرير.
+        // 3. الصف المرن (Percent 100) هو الوحيد الذي يتقلص — ضع فيه ما يُمرَّر.
+        // 4. Padding=12 على الجذر = هامش موحد عن حواف النافذة.
+        //
+        // لتعديل ارتفاع شريط: غيّر 60. لتعديل ارتفاع صف الأزرار: غيّر 68.
+        // لإضافة صف رابع: أضف RowStyle + Controls.Add(عنصر, 0, 3) —
+        //    وانتبه: ترتيب إضافة RowStyles يجب أن يطابق رقم الصف.
+        // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
+            // ── قواعد النافذة (نفس نمط كل النوافذ الحوارية) ──
+            // MinimumSize: أصغر مقاس مسموح — يمنع قصّ الأزرار عند التصغير.
             Text = _filterEmployeeId.HasValue
                 ? $"كشوف رواتب — {_filterEmployeeName}"
                 : "كشوف الرواتب";
@@ -58,12 +84,17 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.Bg,
                 Padding = new Padding(12) // هامش عن الحواف — لا شيء ملتصق
             };
+            // عمود واحد (العرض 100%) — هذه شاشة قوائم عمودية.
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            // الصفوف الثلاثة بالترتيب — الأرقام = الارتفاقات بالبكسل.
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الفترة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));     // الأزرار
 
-            // ── صف الفترة ──
+            // ── صف الفترة (يوضع لاحقًا في خلية الصف 0) ──
+            // عناصره بإرساء Dock داخل اللوحة — الترتيب مهم:
+            // في RTL، كل Controls.Add بإرساء Right يتراصف من اليمين لليسار.
+            // أول Add يوضع أقصى اليمين، التالي إلى يساره... (اقرأ الأسطر بترتيبها)
             var topBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.FieldBg, Padding = new Padding(10, 8, 10, 8) };
 
             var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
@@ -89,6 +120,10 @@ namespace Sayl.UI.Forms
             topBar.Controls.Add(_dtpFrom);
 
             // ── صف الأزرار السفلي (مفصول — خارج منطقة التمرير دائمًا) ──
+            // نمط الترتيب هنا معاكس لشريط الفترة: DockStyle.Left داخل RTL
+            // يرتصف من اليمين (أول Add = أقصى اليمين).
+            // _lblSummary بإرساء Fill يملأ المساحة المتبقية بين الأزرار
+            // ويظهر أرقام المعلق/المصروف — عدّل نصه فقط في RefreshGrid.
             var bottomBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 
             _lblSummary = new Label
@@ -100,6 +135,9 @@ namespace Sayl.UI.Forms
                 ForeColor = AppTheme.PrimaryDark
             };
 
+            // الأزرار: Height=48 (حد اللمس الأدنى — لا تصغّره).
+            // Width هو عرض الزر — عدّله لو غيّرت نصًا أطول.
+            // لترتيب مختلف: غيّر ترتيب أسطر Add أسفل اللوحة (أول سطر = أقصى اليمين).
             _btnPaySelected = AppTheme.MakeButton("صرف المحدد", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 48);
             _btnPaySelected.Dock = DockStyle.Left;
             _btnPaySelected.Width = 140;
@@ -110,6 +148,7 @@ namespace Sayl.UI.Forms
             _btnRefresh.Width = 110;
             _btnRefresh.Click += async (_, _) => await LoadPayrollsAsync();
 
+            // DialogResult=Cancel: يجعل Esc يغلق النافذة — أضفه لكل زر إغلاق.
             var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
             btnClose.Dock = DockStyle.Left;
@@ -122,12 +161,22 @@ namespace Sayl.UI.Forms
             bottomBar.Controls.Add(_btnRefresh);
             bottomBar.Controls.Add(btnClose);
 
-            // ── الجدول ──
+            // ── الجدول (يوضع في خلية الصف المرن — يتمدد ويتمرر وحده) ──
+            // StyleGrid: تنسيق موحد (رأس كحلي/صفوف متناوبة/إرتفاع 40).
+            // ReadOnly=false: بعض خلاياه قابلة للتحرير (المحاسب يعدل مباشرة).
+            // EditMode=EditOnKeystrokeOrF2: الكتابة فوق الخلية تحررها فورًا،
+            //   أو F2 — الأشهر للكاشير/المحاسب.
             _grid = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
 
+            // ── أعمدة الجدول ──
+            // نمط الإضافة: (اسم تقني، نص الرأس). الاسم التقني يُستخدم في
+            // الأحداث والتنسيق — لا تكرره، والنص هو ما يراه المستخدم.
+            // FillWeight: نسبة عرض العمود من الجدول — مجموعها مئة تقريبًا
+            //   (غيّرها لتوسيع/تضييق عمود دون كسر الباقي).
+            // ReadOnly=true على العمود: عرض فقط (المحاسيب/الصافي محسوبة).
             _grid.Columns.Add("colEmp", "الموظف");
             _grid.Columns.Add("colType", "النوع");
             _grid.Columns.Add("colWorked", "أيام/ساعات عمل");

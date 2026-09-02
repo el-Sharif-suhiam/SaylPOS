@@ -191,7 +191,7 @@ namespace Sayl.UI.Forms
                 IsActive = true
             };
 
-            Common.Results.Result result;
+            Common.Results.Result<int> result;
             using (var scope = Program.Services.CreateScope())
             {
                 var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
@@ -204,8 +204,11 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            _txtSearch.Text = dto.Name;
-            await LoadCustomersAsync(dto.Name);
+            // تجربة سلسة: الزبون الجديد يُختار فورًا — الكاشير يكمل الدفع بلا نقرة إضافية
+            SelectedCustomerId = result.Data;
+            SelectedCustomerName = dto.Name;
+            DialogResult = DialogResult.OK;
+            Close();
         }
 
         /// <summary>نافذة إدخال سريعة: اسم + جوال.</summary>
