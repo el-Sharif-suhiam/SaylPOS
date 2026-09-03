@@ -85,7 +85,8 @@ namespace Sayl.Core.Services
                     PartyType = originalInvoice.PartyType,
                     PartyId = originalInvoice.PartyId,
                     UserId = request.UserId,
-                    SessionId = originalInvoice.SessionId,
+                    // VULN-05: فاتورة المرتجع تنتمي لجلسة الفعل (درج اليوم)
+                    SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
                     CreatedAt = DateTime.Now
@@ -126,7 +127,7 @@ namespace Sayl.Core.Services
                     await RestockProductAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
                 }
 
-                await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total);
+                await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
 
                 clsAudit.Log(_dbContext, request.UserId, "CustomerReturn",
                     $"مرتجع بيع على الفاتورة #{originalInvoice.InvoiceId} — القيمة: {total:N2}");
@@ -206,6 +207,8 @@ namespace Sayl.Core.Services
                     PartyType = originalInvoice.PartyType,
                     PartyId = originalInvoice.PartyId,
                     UserId = request.UserId,
+                    // VULN-05: جلسة الفعل — نقد الاسترداد يعود لدرج من دفعه اليوم
+                    SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
                     CreatedAt = DateTime.Now
@@ -246,7 +249,7 @@ namespace Sayl.Core.Services
                     await DeductProductStockAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
                 }
 
-                await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total);
+                await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -368,7 +371,9 @@ namespace Sayl.Core.Services
             inventory.UpdatedAt = DateTime.Now;
         }
 
-        private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal)
+        // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —
+        // تقرير Z لليوم يرى المرتجع الذي دُفع اليوم، لا يُحمَّل على جلسة مجمدة.
+        private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
             decimal paidSoFar = await _dbContext.Payments
                 .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
@@ -384,6 +389,7 @@ namespace Sayl.Core.Services
                     InvoiceId = returnInvoice.InvoiceId,
                     PartyType = 'C',
                     PartyId = originalInvoice.PartyId,
+                    SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = cashRefund,
                     PaymentDate = DateOnly.FromDateTime(DateTime.Now),
                     PaymentMethod = "cash",
@@ -404,7 +410,8 @@ namespace Sayl.Core.Services
             }
         }
 
-        private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal)
+        // VULN-05: نفس توجيه مرتجع العميل — نقد الاسترداد يعود لدرج جلسة الفعل.
+        private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
             decimal paidSoFar = await _dbContext.Payments
                 .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
@@ -420,6 +427,7 @@ namespace Sayl.Core.Services
                     InvoiceId = returnInvoice.InvoiceId,
                     PartyType = 'S',
                     PartyId = originalInvoice.PartyId,
+                    SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = cashRefund,
                     PaymentDate = DateOnly.FromDateTime(DateTime.Now),
                     PaymentMethod = "cash",

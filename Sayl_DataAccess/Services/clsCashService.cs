@@ -66,24 +66,47 @@ namespace Sayl.Core.Services
         }
 
         /// <summary>ملخص نقد الجلسة: الافتتاحي + مبيعات نقدي − مرتجعات نقدي + قبض − صرف.</summary>
+        // 📖 VULN-05 — المصدر المزدوج بعد إضافة Payment.SessionId:
+        //  1) المسار الجديد: دفعات موجهة صراحة لدرج هذه الجلسة (إكمال المعلقات،
+        //     مرتجعات اليوم، تحصيلات لاحقة) — النقد يُنسب حيث استُلم فعليًا.
+        //  2) المسار المتوافق (بيات ما قبل Upgrade_06): دفعات SessionId=null
+        //     تُنسب لجلسة فاتورتها كما كانت — فتبقى كل تقارير Z القديمة مطابقة.
         public async Task<Result<SessionCashSummary>> GetSessionCashSummaryAsync(int sessionId)
         {
             var session = await _dbContext.PosSessions.FindAsync(sessionId);
             if (session == null)
                 return Result<SessionCashSummary>.Fail("الجلسة غير موجودة.");
 
-            var sessionInvoiceIds = _dbContext.Invoices
-                .Where(i => i.SessionId == sessionId && i.Status == enInvoicesStatus.completed)
-                .Select(i => (int?)i.InvoiceId);
-
-            decimal cashSales = await _dbContext.Payments
-                .Where(p => sessionInvoiceIds.Contains(p.InvoiceId)
+            // المسار الجديد: درج هذه الجلسة استلم هذه الدفعات صراحة
+            decimal cashSalesNew = await _dbContext.Payments
+                .Where(p => p.SessionId == sessionId
                          && p.PaymentMethod == "cash"
                          && p.Type == enPaymentType.income)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
-            decimal cashReturns = await _dbContext.Payments
-                .Where(p => sessionInvoiceIds.Contains(p.InvoiceId)
+            decimal cashReturnsNew = await _dbContext.Payments
+                .Where(p => p.SessionId == sessionId
+                         && p.PaymentMethod == "cash"
+                         && p.Type == enPaymentType.outcome)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            // المسار المتوافق: دفعات قديمة بلا توجيه — تنسب لجلسة فاتورتها
+            var legacyInvoiceIds = _dbContext.Invoices
+                .Where(i => i.SessionId == sessionId && i.Status == enInvoicesStatus.completed)
+                .Select(i => (int?)i.InvoiceId);
+
+            decimal cashSalesLegacy = await _dbContext.Payments
+                .Where(p => p.SessionId == null
+                         && p.InvoiceId != null
+                         && legacyInvoiceIds.Contains(p.InvoiceId)
+                         && p.PaymentMethod == "cash"
+                         && p.Type == enPaymentType.income)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            decimal cashReturnsLegacy = await _dbContext.Payments
+                .Where(p => p.SessionId == null
+                         && p.InvoiceId != null
+                         && legacyInvoiceIds.Contains(p.InvoiceId)
                          && p.PaymentMethod == "cash"
                          && p.Type == enPaymentType.outcome)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
@@ -95,6 +118,9 @@ namespace Sayl.Core.Services
             decimal cashOut = await _dbContext.CashMovements
                 .Where(m => m.SessionId == sessionId && m.MovementType == 'O')
                 .SumAsync(m => (decimal?)m.Amount) ?? 0m;
+
+            decimal cashSales = cashSalesNew + cashSalesLegacy;
+            decimal cashReturns = cashReturnsNew + cashReturnsLegacy;
 
             var summary = new SessionCashSummary
             {

@@ -65,9 +65,14 @@ namespace Sayl.UI.UserControls
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         // «تفاصيل» عمود زر داخل الجدول (Grid_CellClick أدناه) يفتح كشف
         // الحساب — نفس نمط أعمدة الأزرار الموحد (راجع InvoicesControl).
+        // VULN-33: «تحصيل دفعة» كان مفقودًا كليًا — ديون العملاء تنمو
+        // بلا أي طريق سداد داخل المنتج (الخدمة ReceiveCustomerPaymentAsync
+        // كانت جاهزة وبلا مستدعٍ واحد). الزر يستدعيها بعد تحصيل المبلغ.
         protected override void BuildToolbar()
         {
             AddToolbarButton("إضافة عميل", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);
+            AddToolbarGap();
+            AddToolbarButton("تحصيل دفعة", AppTheme.Success, Color.FromArgb(21, 128, 61), async (_, _) => await CollectPaymentAsync(), 130);
             AddToolbarGap();
             AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
@@ -81,6 +86,55 @@ namespace Sayl.UI.UserControls
             }
 
             Grid.CellClick += Grid_CellClick;
+        }
+
+        /// <summary>VULN-33: تحصيل دفعة من رصيد عميل مدين —
+        /// مسار التحصيل اليومي الغائب: يسأل المبلغ والطريقة ثم يستدعي
+        /// ReceiveCustomerPaymentAsync (Serializable + سقف الرصيد داخلية).</summary>
+        private async Task CollectPaymentAsync()
+        {
+            int idx = Grid.CurrentRow?.Index ?? -1;
+            var visible = _customers.Where(c => c.Party != null).ToList();
+            if (idx < 0 || idx >= visible.Count)
+            {
+                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                return;
+            }
+
+            var customer = visible[idx];
+            decimal balance = customer.Balance ?? 0;
+            if (balance <= 0)
+            {
+                UiHelpers.ShowInfo(this, $"العميل '{customer.Party!.Name}' لا عليه رصيد مستحق.");
+                return;
+            }
+
+            // نافذة دفع مبسطة للتحصيل: المبلغ + الطريقة (نستخدم PaymentForm بلا تقسيم)
+            using var form = new PaymentForm(balance, hasCustomer: true)
+            {
+                Text = "تحصيل من العميل"
+            };
+            // نغلف النتيجة بدفعة واحدة مسماة «تحصيل دفعة رصيد»
+            if (form.ShowDialog(FindForm()) != DialogResult.OK || form.PaymentsList.Count == 0)
+                return;
+
+            Common.Results.Result result;
+            using (var scope = Program.Services.CreateScope())
+            {
+                var paymentService = scope.ServiceProvider.GetRequiredService<clsPaymentService>();
+                result = await paymentService.ReceiveCustomerPaymentAsync(new Common.DTOs.RequestModels.DtoPaymentRequest
+                {
+                    PartyId = customer.PartyId,
+                    Amount = form.PaymentsList.Sum(p => p.Amount),
+                    Method = form.PaymentsList[0].Method,
+                    PaymentDate = DateOnly.FromDateTime(DateTime.Today),
+                    Notes = $"تحصيل دفعة من الرصيد — {customer.Party!.Name}"
+                });
+            }
+
+            UiHelpers.ShowResult(this, result);
+            if (result.IsSuccess)
+                await LoadDataAsync();
         }
 
         private void Grid_CellClick(object? sender, DataGridViewCellEventArgs e)

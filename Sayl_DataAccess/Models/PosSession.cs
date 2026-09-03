@@ -24,4 +24,7 @@ public partial class PosSession
     public virtual User User { get; set; } = null!;
 
     public virtual ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
+
+    /// <summary>VULN-05: الدفعات التي استلمها درج هذه الجلسة — قد تخص فواتير جلسات أخرى.</summary>
+    public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
 }

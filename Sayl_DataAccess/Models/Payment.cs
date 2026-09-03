@@ -22,11 +22,19 @@ public partial class Payment
 
     public string PaymentMethod { get; set; } = null!;
 
+    /// <summary>VULN-05: جلسة الدرج التي استلمت هذه الدفعة فعليًا —
+    /// قد تختلف عن جلسة الفاتورة (إكمال معلقة بجلسة لاحقة، مرتجع اليوم لبيع قديم).
+    /// null = دفعات بلا جلسة أو بيانات ما قبل الترقية (تقارير الجلسة تسقطها
+    /// على جلسة الفاتورة كمسار متوافق — راجع Upgrade_06).</summary>
+    public int? SessionId { get; set; }
+
     public string? Notes { get; set; }
 
     public DateTime? CreatedAt { get; set; }
 
     public virtual Invoice? Invoice { get; set; }
+
+    public virtual PosSession? Session { get; set; }
 
     public virtual Party? Party { get; set; }
 }

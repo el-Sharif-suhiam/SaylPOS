@@ -88,12 +88,26 @@ namespace Sayl.Core.Services
                     .Where(p => p.InvoiceId == invoice.InvoiceId)
                     .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
-                decimal remaining = invoice.NetAmount - paidSoFar;
+                // VULN-07: المرتجعات على هذه الفاتورة خفّضت الالتزام الأصلي —
+                // بدون خصمها كان «المتبقي» يسمح بسداد كامل لفاتورة أُرجع نصفها
+                // (سداد زائد حقيقي للطرفين: المورد يقبض 1000 على بضاعة 500،
+                // والعميل يُحصّل دَينًا رُدّ نصفه). المرتجعات فواتير سالبة
+                // مرتبطة بـ OriginalInvoiceId — نُخصم قيمتها المطلقة.
+                decimal returnedTotal = await _dbContext.Invoices
+                    .Where(i => i.OriginalInvoiceId == invoice.InvoiceId
+                             && i.Status == enInvoicesStatus.completed
+                             && (i.Type == enInvoicesType.customer_return
+                              || i.Type == enInvoicesType.supplier_return))
+                    .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // سالبة بالتصميم
+
+                decimal effectiveNet = invoice.NetAmount + returnedTotal; // صافٍ بعد المرتجعات
+
+                decimal remaining = effectiveNet - paidSoFar;
                 if (remaining <= 0)
-                    return Result.Fail("الفاتورة مسددة بالكامل.");
+                    return Result.Fail("الفاتورة مسددة بالكامل (مع مراعاة المرتجعات).");
 
                 if (request.Amount > remaining)
-                    return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة ({remaining:N2}).");
+                    return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة بعد المرتجعات ({remaining:N2}).");
 
                 _dbContext.Payments.Add(new Payment
                 {
@@ -111,7 +125,8 @@ namespace Sayl.Core.Services
                 });
 
                 decimal totalPaid = paidSoFar + request.Amount;
-                invoice.PaymentStatus = totalPaid >= invoice.NetAmount
+                // VULN-07: حالة السداد تُقيّم على الصافي الفعلي بعد المرتجعات
+                invoice.PaymentStatus = totalPaid >= effectiveNet
                     ? enPaymentStatus.paid
                     : enPaymentStatus.partial;
 

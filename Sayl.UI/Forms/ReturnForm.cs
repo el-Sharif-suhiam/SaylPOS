@@ -20,10 +20,15 @@ namespace Sayl.UI.Forms
         private int _originalInvoiceId;
         private List<Common.DTOs.ViewModel.InvoiceItemVM> _items = new();
 
+        /// <summary>VULN-05: جلسة الدرج النشطة — نقد الاسترداد يُنسب لها في تقرير Z
+        /// (لا لجلسة الفاتورة الأصلية المتجمدة). يمرَّر من PosForm عند الفتح.</summary>
+        private readonly int? _activeSessionId;
+
         public bool Returned { get; private set; }
 
-        public ReturnForm()
+        public ReturnForm(int? activeSessionId = null)
         {
+            _activeSessionId = activeSessionId;
             BuildUi();
         }
 
@@ -317,6 +322,7 @@ namespace Sayl.UI.Forms
             {
                 OriginalInvoiceId = _originalInvoiceId,
                 UserId = SessionState.CurrentUser?.UserId ?? 0,
+                SessionId = _activeSessionId, // VULN-05: درج الفعل
                 Items = returnItems,
                 Notes = null
             };

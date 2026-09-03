@@ -409,6 +409,9 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.InvoiceId, "IX_Payments_InvoiceId");
 
+            // VULN-05: فهرس جلسة الدرج لتقارير Z (يُنشأ فعليًا بسكربت Upgrade_06)
+            entity.HasIndex(e => e.SessionId, "IX_Payments_SessionId");
+
             entity.HasIndex(e => new { e.PartyType, e.PartyId }, "IX_Payments_PartyType_PartyId");
 
             entity.HasIndex(e => e.PaymentDate, "IX_Payments_PaymentDate");
@@ -427,6 +430,11 @@ public partial class SaylDbContext : DbContext
             entity.HasOne(d => d.Invoice).WithMany(p => p.Payments)
                 .HasForeignKey(d => d.InvoiceId)
                 .HasConstraintName("FK_Payments_InvoiceId");
+
+            // VULN-05: علاقة اختيارية بجلسة الدرج (null مسموح — بيانات ما قبل الترقية)
+            entity.HasOne(d => d.Session).WithMany(p => p.Payments)
+                .HasForeignKey(d => d.SessionId)
+                .HasConstraintName("FK_Payments_SessionId");
 
             entity.HasOne(d => d.Party).WithMany(p => p.Payments)
                 .HasForeignKey(d => d.PartyId)

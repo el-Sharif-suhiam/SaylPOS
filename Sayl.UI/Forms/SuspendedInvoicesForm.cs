@@ -20,11 +20,16 @@ namespace Sayl.UI.Forms
 
         private List<Common.DTOs.ViewModel.InvoiceVM> _invoices = new();
 
+        /// <summary>VULN-05: جلسة الدرج النشطة — دفعات الاستكمال تُنسب لها في Z اليوم.
+        /// يمرَّر من PosForm؛ null (الافتراضي) = شاشة من خارج جلسة بيع.</summary>
+        private readonly int? _activeSessionId;
+
         /// <summary>يصبح true إذا تم استكمال أو إلغاء أي فاتورة (لتحديث شاشة البيع).</summary>
         public bool Changed { get; private set; }
 
-        public SuspendedInvoicesForm()
+        public SuspendedInvoicesForm(int? activeSessionId = null)
         {
+            _activeSessionId = activeSessionId;
             BuildUi();
             Load += async (_, _) => await LoadInvoicesAsync();
         }
@@ -218,7 +223,8 @@ namespace Sayl.UI.Forms
             {
                 var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
                 result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentsList,
-                    actorUserId: SessionState.CurrentUser?.UserId ?? 0);
+                    actorUserId: SessionState.CurrentUser?.UserId ?? 0,
+                    actorSessionId: _activeSessionId); // VULN-05: درج اليوم
             }
 
             if (!result.IsSuccess)

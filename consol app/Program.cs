@@ -35,7 +35,7 @@ namespace consol_app
                 await ReturnCycle();
                 await CashDeskCycle(sessionId);
             }
-            await FinancialGuardsAttackCycle();
+            await FinancialGuardsAttackCycle(sessionId);
             await CreditRulesCycle();
             await PermissionRulesCycle();
             await ReportsCycle();
@@ -365,7 +365,7 @@ namespace consol_app
 
         // ───────────────── 6.5 Financial guards ATTACKS (VULN-01/02/06/08) ─────────────────
         // كل حالة هنا هجوم موثق في ATTACK_REPORT.md — الدفاع الجديد يجب أن يرفضه.
-        private static async Task FinancialGuardsAttackCycle()
+        private static async Task FinancialGuardsAttackCycle(int sessionId)
         {
             Console.WriteLine("--- FINANCIAL GUARDS ATTACKS ---");
             using var s = Scope();
@@ -463,8 +463,51 @@ namespace consol_app
 
                 var ownComplete = await checkout.CompleteSuspendedInvoiceAsync(suspForeign.Data,
                     new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } },
-                    actorUserId: admin.UserId);
+                    actorUserId: admin.UserId,
+                    actorSessionId: sessionId); // VULN-05: درج الفعل
                 Check("own resume allowed", ownComplete.IsSuccess, ownComplete.Message);
+
+                // VULN-05: دفعة الإكمال موجهة لدرج الجلسة التي أكملت (لا جلسة التعليق)
+                if (ownComplete.IsSuccess)
+                {
+                    var paySession = await VerifyAsync(vdb =>
+                        vdb.Payments.AsNoTracking()
+                            .Where(p => p.InvoiceId == suspForeign.Data && p.PaymentMethod == "cash")
+                            .Select(p => p.SessionId).FirstOrDefaultAsync());
+                    Check("resume payment attributed to acting session", paySession == sessionId,
+                        $"paySession={paySession} expected={sessionId}");
+                }
+            }
+
+            // VULN-05: مرتجع اليوم يوجّه نقد الاسترداد لدرج جلسة الفعل
+            // (نبني فاتورة بيع بجلسة أخرى ثم نرتجع بجلسة اليوم ونفحص التوجيه)
+            var retSession = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                SessionId = sessionId, // بيع اليوم بجلسة اليوم — المرتجع من نفس الجلسة
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("VULN-05 probe sale in session", retSession.IsSuccess, retSession.Message);
+            if (retSession.IsSuccess)
+            {
+                var ret = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = retSession.Data,
+                    UserId = admin.UserId,
+                    SessionId = sessionId, // درج الفعل
+                    Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 1 } }
+                });
+                Check("VULN-05 return executed", ret.IsSuccess, ret.Message);
+                if (ret.IsSuccess)
+                {
+                    var refundSession = await VerifyAsync(vdb =>
+                        vdb.Payments.AsNoTracking()
+                            .Where(p => p.InvoiceId == ret.Data && p.Type == Common.Enums.enPaymentType.outcome)
+                            .Select(p => p.SessionId).FirstOrDefaultAsync());
+                    Check("refund attributed to acting session", refundSession == sessionId,
+                        $"refundSession={refundSession} expected={sessionId}");
+                }
             }
 
             // VULN-06: خصم شراء يتجاوز الإجمالي → رصيد مورد سالب

@@ -8,6 +8,11 @@ namespace Common.DTOs.RequestModels
     {
         public int OriginalInvoiceId { get; set; }
         public int UserId { get; set; }
+
+        /// <summary>VULN-05: جلسة الدرج التي يخرج منها نقد الاسترداد (إن وُجد) —
+        /// درج اليوم لا درج جلسة البيع الأصلية المتجمدة. null = خارج جلسات البيع.</summary>
+        public int? SessionId { get; set; }
+
         public List<DtoReturnItem> Items { get; set; } = new();
         public string? Notes { get; set; }
     }

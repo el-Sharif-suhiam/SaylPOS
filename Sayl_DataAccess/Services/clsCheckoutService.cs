@@ -161,7 +161,7 @@ namespace Sayl.Core.Services
         // وغيره يحتاج صلاحية محاسب فأعلى. (كان الإكمال بلا أي فحص ملكية
         // بينما الإلغاء مشدد — سجل: الإكمال يحرك مالًا ومخزونًا نهائيًا.)
         // ─────────────────────────────────────────────────
-        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments, int actorUserId)
+        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments, int actorUserId, int? actorSessionId = null)
         {
             if (payments == null || !payments.Any(p => p.Amount > 0))
                 return Result.Fail("يجب إدخال مبلغ دفعة واحد على الأقل.");
@@ -204,11 +204,14 @@ namespace Sayl.Core.Services
 
                 await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId);
 
-                // معالجة الدفع (دفعة واحدة أو دفعات مقسومة)
+                // معالجة الدفع — VULN-05: دفعات الإكمال تُنسب لدرج جلسة المستكمِل
+                // الفعلية (actorSessionId) لا لجلسة التعليق القديمة: النقد دخل درج
+                // اليوم فتقرير Z لليوم هو من يراه. null = بلا جلسة (تُهمل بتقارير الجلسات).
                 var request = new DtoCheckoutRequest
                 {
                     CustomerId = invoice.PartyId,
                     Payments = payments,
+                    SessionId = actorSessionId,
                     DiscountPercent = 0, // يمكنك إضافة حقول للخصم في الفاتورة المعلقة
                     TaxPercent = 0
                 };
@@ -513,6 +516,9 @@ namespace Sayl.Core.Services
                     InvoiceId = invoice.InvoiceId,
                     PartyType = 'C',
                     PartyId = invoice.PartyId ?? null,
+                    // VULN-05: الدفعة تُنسب لدرج الجلسة الفعلية المستلمة
+                    // (نفس جلسة الفاتورة في البيع المباشر — دع request.SessionId يقرر)
+                    SessionId = request.SessionId,
                     Amount = payment.Amount,
                     PaymentDate = payment.PaymentDate,
                     PaymentMethod = payment.Method,

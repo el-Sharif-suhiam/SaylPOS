@@ -26,6 +26,14 @@ namespace Sayl.UI.Infrastructure
             grid.MultiSelect = false;                          // تحديد صف واحد فقط في المرة
             grid.RowHeadersVisible = false;                    // إخفاء العمود الرمادي «السهم» أقصى اليمين
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect; // النقر يظلل الصف كاملًا
+            // VULN-32: تعطيل الفرز مركزيًا — نصف الشاشات تفهرس الصف المحدد
+            // على قائمة خلفية غير مفرزة؛ نقرة رأس عمود تقلب الترتيب البصري
+            // فيصيب الفعل (صرف/حذف/تعديل/تحصيل) السجل الخطأ.
+            // StyleGrid يُستدعى قبل إضافة الأعمدة غالبًا، فالتعطيل يتم
+            // عبر حدثين: الأعمدة الموجودة الآن، وكل عمود يُضاف لاحقًا.
+            foreach (DataGridViewColumn col in grid.Columns)
+                col.SortMode = DataGridViewColumnSortMode.NotSortable;
+            grid.ColumnAdded += (s, e) => e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill; // الأعمدة تتمدد تملأ العرض — FillWeight يوزع
             grid.BackgroundColor = AppTheme.CardBg;           // خلفية ما وراء الصفوف (منطقة الفائض)
             grid.BorderStyle = BorderStyle.None;              // بلا إطار — الحاوية هي من يحدد الشكل

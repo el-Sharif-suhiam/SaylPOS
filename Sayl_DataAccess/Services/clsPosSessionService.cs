@@ -119,21 +119,40 @@ namespace Sayl.Core.Services
                     return Result.Fail("الجلسة مغلقة بالفعل.");
 
                 // النقد المتوقع في الدرج = الافتتاحي + مبيعات نقدي − مرتجعات نقدي + قبض − صرف
-                // (نفس حساب clsCashService.GetSessionCashSummaryAsync — الشبكة والتحويل لا تدخل الدرج)
+                // (الشبكة والتحويل لا تدخل الدرج)
+                //
+                // 📖 VULN-05 — المصدر المزدوج (نفس منطق clsCashService.GetSessionCashSummaryAsync):
+                //  1) جديد: دفعات موجهة صراحة لدرج هذه الجلسة (Payment.SessionId).
+                //  2) متوافق: دفعات قديمة SessionId=null تُنسب لجلسة فاتورتها —
+                //     فلا تتزحزح أرقام أي تقرير Z قديم بعد الترقية.
+                decimal cashIncomeNew = await _dbContext.Payments
+                    .Where(p => p.Type == enPaymentType.income
+                             && p.PaymentMethod == "cash"
+                             && p.SessionId == sessionId)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+                decimal cashOutcomeNew = await _dbContext.Payments
+                    .Where(p => p.Type == enPaymentType.outcome
+                             && p.PaymentMethod == "cash"
+                             && p.SessionId == sessionId)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
                 var sessionInvoiceIds = _dbContext.Invoices
                     .Where(i => i.SessionId == sessionId && i.Status == enInvoicesStatus.completed)
                     .Select(i => (int?)i.InvoiceId);
 
-                decimal cashIncome = await _dbContext.Payments
+                decimal cashIncomeLegacy = await _dbContext.Payments
                     .Where(p => p.Type == enPaymentType.income
                              && p.PaymentMethod == "cash"
+                             && p.SessionId == null
                              && p.InvoiceId != null
                              && sessionInvoiceIds.Contains(p.InvoiceId))
                     .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
-                decimal cashOutcome = await _dbContext.Payments
+                decimal cashOutcomeLegacy = await _dbContext.Payments
                     .Where(p => p.Type == enPaymentType.outcome
                              && p.PaymentMethod == "cash"
+                             && p.SessionId == null
                              && p.InvoiceId != null
                              && sessionInvoiceIds.Contains(p.InvoiceId))
                     .SumAsync(p => (decimal?)p.Amount) ?? 0m;
@@ -146,7 +165,10 @@ namespace Sayl.Core.Services
                     .Where(m => m.SessionId == sessionId && m.MovementType == 'O')
                     .SumAsync(m => (decimal?)m.Amount) ?? 0m;
 
-                decimal expected = session.OpeningAmount + cashIncome - cashOutcome + cashIn - cashOut;
+                decimal expected = session.OpeningAmount
+                                 + (cashIncomeNew + cashIncomeLegacy)
+                                 - (cashOutcomeNew + cashOutcomeLegacy)
+                                 + cashIn - cashOut;
 
                 session.ExpectedAmount = expected;
                 session.ClosingAmount = closingAmount;

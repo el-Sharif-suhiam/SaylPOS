@@ -1408,12 +1408,20 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            // VULN-35: الطباعة الحرارية التلقائية — كان إعداد «طباعة تلقائية بعد
+            // كل بيع» محفوظًا ولا يُقرأ (طابعة كاملة من الكود الميت). الآن:
+            // إن فعّلها المدير وضبط طابعة → ESC/POS مباشرة بعد كل بيع
+            // (بلا نافذة PDF) — الإيصال يخرج لحظة اكتمال الفاتورة.
+            await TryAutoThermalPrintAsync(result.Data);
+
             // اكتملت الفاتورة (دفع كامل أو دَين) — سؤال واحد بسيط: هل يريد الكاشير طباعتها؟
-            if (ConfirmationDialog.Show(this, "طباعة الفاتورة",
+            // (يُسأل فقط لو لم تخرج حراريًا تلقائيًا — لا نكرر الطباعة مرتين)
+            if (!_autoPrintedThisSale && ConfirmationDialog.Show(this, "طباعة الفاتورة",
                     "هل تريد طباعة الفاتورة؟", dangerStyle: false))
             {
                 await InvoicePrintHelper.PrintAsync(result.Data, this);
             }
+            _autoPrintedThisSale = false; // تصفير للفاتورة القادمة
 
             ClearCart();
             await RefreshStockAsync();
@@ -1423,6 +1431,49 @@ namespace Sayl.UI.Forms
         // ───────────────── طباعة الفاتورة بعد إتمامها ─────────────────
         // (PDF في Documents\Sayl_POS\Invoices ثم فتح نافذة الطباعة بالنسخة الجاهزة)
 
+        /// <summary>VULN-35: الطباعة الحرارية التلقائية بعد البيع —
+        /// يقرأ إعدادَي AutoPrintReceipt وReceiptPrinter (كانا يُحفظان ولا يُقرآن)
+        /// ويطلق ReceiptPrinter.PrintInvoiceAsync (كان كودًا ميتًا) على Task.Run —
+        /// الإرسال الخام winspool حظر فلا يلامس مؤشر الواجهة. أي فشل صامت:
+        /// الإيصال تحسين، لا يوقف البيع، والسؤال اليدوي يبقى للأحوال.</summary>
+        private bool _autoPrintedThisSale;
+        private async Task TryAutoThermalPrintAsync(int invoiceId)
+        {
+            try
+            {
+                bool autoPrint;
+                string printerName;
+                InvoicePrintVM? invoice = null;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                    autoPrint = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
+                    if (!autoPrint) return;
+                    printerName = await settings.GetAsync(clsSettingsService.KeyReceiptPrinter, "");
+                    if (string.IsNullOrWhiteSpace(printerName)) return;
+
+                    var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                    var res = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
+                    if (res.IsSuccess) invoice = res.Data;
+                }
+
+                if (invoice == null) return;
+
+                var inv = invoice;
+                var printer = printerName;
+                await Task.Run(async () =>
+                {
+                    var (ok, _) = await ReceiptPrinter.PrintInvoiceAsync(inv, printer);
+                });
+
+                _autoPrintedThisSale = true; // خرجت حراريًا — لا نكرر بالسؤال
+            }
+            catch
+            {
+                // صمت مقصود: فشل الإيصال لا يعطل البيع — السؤال اليدوي يبقى بديلًا
+            }
+        }
+
         // ───────────────── المرتجع / النقد / إغلاق الجلسة ─────────────────
         // 📖 نوافذ الكاشير الجانبية — نمط موحد: ShowDialog (نافذة حوارية
         // توقف POS حتى تغلق — الكاشير لا يبيع ويعيد بنفس اللحظة)، ثم
@@ -1431,7 +1482,8 @@ namespace Sayl.UI.Forms
         // الماسح أول ما ينتظر بعد أي نافذة (سلسلة عمل متصلة).
         private void ShowReturnForm()
         {
-            using var form = new ReturnForm();
+            // VULN-05: نمرر جلسة الدرج الحالية — استردادات اليوم تُنسب لتقرير Z اليوم
+            using var form = new ReturnForm(_sessionId);
             form.ShowDialog(this);
             _ = RefreshStockAsync();
             _txtSearch.Focus();
@@ -1476,7 +1528,8 @@ namespace Sayl.UI.Forms
 
         private void ShowSuspendedInvoices()
         {
-            using var form = new SuspendedInvoicesForm();
+            // VULN-05: نمرر جلسة الدرج الحالية — دفعات الإكمال تُنسب لتقرير Z اليوم
+            using var form = new SuspendedInvoicesForm(_sessionId);
             form.ShowDialog(this);
             _ = RefreshStockAsync();
             _txtSearch.Focus();
