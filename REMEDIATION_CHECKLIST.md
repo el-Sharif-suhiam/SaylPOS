@@ -10,12 +10,14 @@
 
 ## P0 — حرجة (سرقة مال مباشرة)
 
-- [ ] **VULN-01** 🔴 ازدواج بنود المرتجع داخل الطلب → تجميع `GroupBy(ProductId)` قبل فحص الكميات (مرتجع العميل + مرتجع المورد، خارج وداخل المعاملة)
-- [ ] **VULN-02** 🔴 حراس مبالغ البيع: `0≤DiscountPercent≤100`، `0≤DiscountAmount≤total`، `0≤TaxPercent≤100`، `net≥0` (clsCheckoutService.CreateInvoiceHeaderAsync)
-- [ ] **VULN-02b** 🔴 سقف الدفع: `paid ≤ net` في ProcessPaymentAsync (Checkout + إكمال المعلقة)
-- [ ] **VULN-06** 🔴 حراس مبالغ الشراء: خصم/ضريبة/دفع + رسائل InvalidOperationException تصل للمستخدم (clsPurchaseService)
-- [ ] **VULN-08** 🟠 ملكية إكمال المعلقة: Actor check (owner أو محاسب+) — نفس قاعدة الإلغاء
-- [ ] **VULN-02-DB** 🔴 سكربت SQL: `CHECK (NetAmount >= 0)` على Invoices + تطبيقه على SaylDB
+- [x] **VULN-01** ✅ ازدواج بنود المرتجع داخل الطلب → `GroupRequestItems` (تجميع GroupBy) في المرتجعين، خارج وداخل المعاملة، وبناء البنود مجمّعة — `e5f00d9`
+- [x] **VULN-02** ✅ حراس مبالغ البيع: خصم بالنسبة 0..100، خصم بالمبلغ 0..total، ضريبة 0..100، صافي ≥ 0 — `e5f00d9`
+- [x] **VULN-02b** ✅ سقف الدفع `paid ≤ net` (Checkout + إكمال المعلقة) — `e5f00d9`
+- [x] **VULN-06** ✅ حراس مبالغ الشراء (خصم/ضريبة/دفع) + رسائل الحرس تصل للمستخدم (catch InvalidOperationException مخصص) — `e5f00d9`
+- [x] **VULN-08** ✅ ملكية إكمال المعلقة: `actorUserId` + قاعدة owner-or-accountant مطابقة للإلغاء — `e5f00d9`
+- [x] **VULN-02-DB** ✅ سكربت `Upgrade_05_FinancialGuards.sql` + تطبيق حي: `CK_Invoices_NonNegativeNet` (بيع/شراء فقط — المرتجعات سالبة بالتصميم)، `CK_Suppliers_NonNegativeBalance`، `CK_Customers_NonNegativeBalance`. تحقق حي: بيع سالب مرفوض، مرتجع سالب مقبول — `e5f00d9`
+  - ℹ️ اكتشاف جانبي أثناء التطبيق: فاتورة هجومية قديمة (78: صافٍ −999,900) كانت عالقة بالقاعدة — حُذفت. واختبار harness قديم كان يدفع 100 على صافٍ 6.25 (عيب في الاختبار) — صُحح.
+  - ℹ️ اختبارات: `FinancialGuardsAttackCycle` الجديدة — 11 اختبار هجومي كلها PASS. الإجمالي الحي: **66/66**.
 
 ## P1 — عالية (تلف مالي/عمى رقابي)
 
@@ -65,3 +67,5 @@
 | Commit | المكتشف | ملخص | اختبار |
 |--------|---------|-------|--------|
 | be0733d | — | توثيق: تقرير الهجوم 45 مكتشفًا | — |
+| 2561c21 | — | توثيق: checklist الإصلاح P0..P3 (VULN-22 مؤجل بقرار المالك) | — |
+| e5f00d9 | VULN-01/02/02b/06/08/02-DB | موجة P0: حراس المبالغ + ازدواج المرتجع + ملكية الإكمال + CHECK قاعدة | 66/66 (11 هجوميًا جديدًا) |
