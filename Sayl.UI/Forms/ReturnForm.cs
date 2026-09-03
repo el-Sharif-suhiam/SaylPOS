@@ -77,7 +77,7 @@ namespace Sayl.UI.Forms
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));   // العنوان
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));   // صف رقم الفاتورة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));   // صف رقم الفاتورة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الجدول
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // سطر المعلومات
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الأزرار
@@ -98,48 +98,61 @@ namespace Sayl.UI.Forms
             //    العمود 1 (Absolute 180) = زر التحميل — يسارًا بعرض ثابت.
             // ⚠️ RowCount=1 إلزامي: بدونه يعتبر TLP نفسه «قابلًا للنمو»
             //    فتتبدل الأدوار ويظهر زر أزرق ضخم يبتلع الصف (علة سابقة).
+          
+
             var inputRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1,
                 BackColor = AppTheme.CardBg,
                 Margin = new Padding(0, 8, 0, 8)
             };
-            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // العمود 0: التسمية+المربع (يمين بصريًا)
-            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // العمود 1: الزر (يسار بصريًا)
+
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220)); // التسمية
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // مربع الرقم
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // زر التحميل
+
+            
 
             var lblInvoice = new Label
             {
                 Text = "رقم فاتورة البيع الأصلية",
-                Dock = DockStyle.Right,
-                Width = 160,
+                Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
-                ForeColor = AppTheme.TextMuted
-            };
-            _txtInvoiceId = new TextBox
-            {
-                Dock = DockStyle.Right,
-                Width = 130,
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-                TextAlign = HorizontalAlignment.Center
+                ForeColor = AppTheme.TextMuted,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                AutoEllipsis = true
             };
 
+            _txtInvoiceId = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
+                TextAlign = HorizontalAlignment.Center,
+                BackColor = AppTheme.FieldBg,
+            };
+
+
             // حزمة التسمية+المربع في العمود المرن (0 = يمين بصريًا)
-            var idBox = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
+            //var idBox = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             // ⚠️ ترتيب الإرساء داخل اللوحة (RTL): كل Right يتراصف من اليمين —
             //    أول Add أقصى اليمين. نريد المربع أقصى اليمين فالتسمية يساره:
             //    إذًا نضيف التسمية (Right) أولًا ثم المربع (Right) يُرسّى
             //    بعدها إلى يمينها. (الترتيب البديل يجعل التسمية أقصى اليمين — خطأ).
-            idBox.Controls.Add(lblInvoice);
-            idBox.Controls.Add(_txtInvoiceId);
-            inputRow.Controls.Add(idBox, 0, 0);
 
-            _btnLoad = AppTheme.MakeButton("تحميل الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+
+
+
+
+            _btnLoad = AppTheme.MakeButton("تحميل الفاتورة", AppTheme.Primary,hoverColor: AppTheme.PrimaryDark);
+            _btnLoad.TextAlign = ContentAlignment.MiddleCenter; 
             _btnLoad.Dock = DockStyle.Fill;
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
-            inputRow.Controls.Add(_btnLoad, 1, 0);
 
+            inputRow.Controls.Add(lblInvoice, 0, 0);
+            inputRow.Controls.Add(_txtInvoiceId, 1, 0);
+            inputRow.Controls.Add(_btnLoad, 2, 0);
             // ── جدول البنود (الصف المرن — يتمدد مع النافذة) ──
             _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
             UiHelpers.StyleGrid(_grid);
