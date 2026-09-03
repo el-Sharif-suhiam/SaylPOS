@@ -1338,6 +1338,23 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            // VULN-09: لا بيع بلا جلسة — فشل فتح الجلسة كان صامتًا فكان يوم
+            // كامل مبيعات بـ SessionId=null لا تراها أي تقارير Z (نقد درج بلا
+            // رقابة). الآن: نحاول فتحها؛ وإن تعذّر نمنع البيع برسالة صريحة.
+            if (!_sessionId.HasValue)
+            {
+                await OpenSessionAsync();
+                if (!_sessionId.HasValue)
+                {
+                    UiHelpers.ShowError(this,
+                        "لا توجد جلسة بيع مفتوحة وتعذر فتح واحدة.\n" +
+                        "أغلق البرنامج وأعد تشغيله أو راجع الاتصال بقاعدة البيانات — " +
+                        "البيع بلا جلسة يخرج كل النقد من تقارير التسوية.");
+                    _txtSearch.Focus();
+                    return;
+                }
+            }
+
             List<DtoPaymentInfo> payments = new();
 
             if (!suspend)

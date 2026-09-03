@@ -160,7 +160,9 @@ namespace Sayl.UI.Forms
     {
         private readonly TextBox _txt = new();
 
-        public string Value => _txt.Text?.Trim() ?? "";
+        // VULN-31: بلا Trim — كلمة المرور قيمة حرفية؛ المسافات الجانبية
+        // المقصودة كانت تُقلَم بصمت فتُحفظ غير المكتوبة (وتختلف عن المدخلة).
+        public string Value => _txt.Text ?? "";
 
         public PasswordInputForm(string caption)
         {

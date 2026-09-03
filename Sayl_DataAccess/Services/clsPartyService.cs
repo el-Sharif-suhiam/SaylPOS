@@ -102,17 +102,34 @@ namespace Sayl.Core.Services
              return Result.Ok("تم تحديث الطرف بنجاح.");
          }
 
-         // تعطيل طرف (حذف ناعم)
-         public async Task<Result> DeactivatePartyAsync(int id)
-         {
-             Party? party = await _dbContext.Parties.FindAsync(id);
-             if (party == null)
-                 return Result.Fail("الطرف غير موجود.");
+          // تعطيل طرف (حذف ناعم)
+          // VULN-34: طرف له رصيد مستحق لا يُعطَّل — كان التعطيل يخفيه من
+          // كل القوائم والمنتقيات فيستحيل سداد رصيده المتبقي من أي شاشة
+          // (عملاء: زر التحصيل يختفي؛ موردون: «سداد رصيد» يختفي) والدَّين
+          // يبقى في التقارير للأبد. المطلوب: سدّد ثم عطّل.
+          public async Task<Result> DeactivatePartyAsync(int id)
+          {
+              Party? party = await _dbContext.Parties.FindAsync(id);
+              if (party == null)
+                  return Result.Fail("الطرف غير موجود.");
 
-             party.IsActive = false;
-             await _dbContext.SaveChangesAsync();
-             return Result.Ok("تم تعطيل الطرف بنجاح.");
-         }
+              if (party.PartyType == 'C')
+              {
+                  var customer = await _dbContext.Customers.FindAsync(id);
+                  if (customer != null && (customer.Balance ?? 0) > 0)
+                      return Result.Fail($"لا يمكن تعطيل العميل '{party.Name}' — عليه رصيد مستحق ({customer.Balance:N2}). حصّل الرصيد أولًا.");
+              }
+              else if (party.PartyType == 'S')
+              {
+                  var supplier = await _dbContext.Suppliers.FindAsync(id);
+                  if (supplier != null && (supplier.Balance ?? 0) > 0)
+                      return Result.Fail($"لا يمكن تعطيل المورد '{party.Name}' — له رصيد مستحق ({supplier.Balance:N2}). سدّد الرصيد أولًا.");
+              }
+
+              party.IsActive = false;
+              await _dbContext.SaveChangesAsync();
+              return Result.Ok("تم تعطيل الطرف بنجاح.");
+          }
 
          // إعادة تفعيل طرف
          public async Task<Result> ActivatePartyAsync(int id)

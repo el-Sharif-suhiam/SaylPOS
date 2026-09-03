@@ -439,12 +439,12 @@ namespace Sayl.Core.Services
                     throw new InvalidOperationException($"لا يوجد مخزون للمنتج {item.ProductName}");
 
                 // يجب أن تكون الكمية المحجوزة قد غطت هذا الطلب (عند الإكمال) أو لم تحجز (عند البيع المباشر)
-                if (inv.QuantityAvailable is not null)
-                {
-                    int availableNow = (inv.QuantityAvailable ?? 0) - (inv.QuantityReserved ?? 0);
-                    if (availableNow < item.Quantity)
-                        throw new InvalidOperationException($"المخزون غير كافٍ للمنتج {product.Name}");
-                }
+                // VULN-10: صف Inventory بـ NULL كان يتخطى فحص التوفر كليًا (is not null)
+                // فباعة بلا حاجز بينما تبقى قيمة NULL تنجرف. الآن: NULL يعامل كصفر —
+                // البيع يرفض برسالة واضحة، والقيمة الفاسدة تظهر بدل أن تختبئ.
+                int availableNow = (inv.QuantityAvailable ?? 0) - (inv.QuantityReserved ?? 0);
+                if (availableNow < item.Quantity)
+                    throw new InvalidOperationException($"المخزون غير كافٍ للمنتج {product.Name}");
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
                     // FEFO — مع استبعاد الدفعات المنتهية الصلاحية

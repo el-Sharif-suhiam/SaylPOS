@@ -162,9 +162,12 @@ namespace Sayl.Core.Services
                     await _dbContext.SaveChangesAsync();
                     created++;
                 }
-                catch (DbUpdateException)
+                catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_PayrollRecords_Employee_Period"))
                 {
-                    // كشف موجود لهذه الفترة (تزامن أو إعادة توليد) — نتجاوز
+                    // كشف موجود لهذه الفترة (تزامن أو إعادة توليد) — نتجاوز.
+                    // VULN-11: كان catch بلا فلتر يبتلع كل أخطاء القاعدة
+                    // (CHECK/FK/مهلة) كـ«موجود مسبقًا» — كشوف تختفي بصمت
+                    // مع رسالة نجاح للبقية. الآن: نتجاوز التكرار الحقيقي فقط.
                     _dbContext.ChangeTracker.Clear();
                 }
             }
@@ -326,6 +329,12 @@ namespace Sayl.Core.Services
             if (record.ExpenseId == null)
                 return Result.Fail("لا يوجد مصروف مرتبط بالكشف — استرجع الأمر يدويًا مع المحاسب.");
 
+            // VULN-12: حارس السنة المالية — عكس الصرف يحذف مصروفًا مؤرخًا
+            // في الفترة، وعكس كشف من سنة مقفلة يعدل ربح سنة مجمّدة بأثر
+            // رجعي (نفس الحارس الذي يملك التعديل — كان سهمًا منسيًا هنا).
+            if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(record.PeriodFrom))
+                return Result.Fail("كشف من سنة مالية مغلقة — لا يمكن عكس صرفه (مؤرشف).");
+
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
@@ -356,6 +365,19 @@ namespace Sayl.Core.Services
                 _dbContext.ChangeTracker.Clear();
                 return Result.Fail("فشل عكس الصرف.");
             }
+        }
+
+        /// <summary>VULN-11: هل الاستثناء انتهاك قيد الفريد المحدد فعلًا؟
+        /// (نفس فكرة clsPurchaseService — تجاوز «موجود مسبقًا» للتكرار الحقيقي فقط).</summary>
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)
+        {
+            for (Exception? e = ex; e != null; e = e.InnerException)
+            {
+                if (e is Microsoft.Data.SqlClient.SqlException sql
+                    && sql.Message.Contains(constraintName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>عدد أيام النطاق عدا الجمعة والسبت (اقتراح أيام العمل لليومي — قابل للتعديل يدويًا).</summary>

@@ -207,16 +207,28 @@ namespace Sayl.Core.Services
                 .Include(u => u.Employee)
                 .FirstOrDefaultAsync(u => u.Username == username);
 
+            // VULN-25: رسالة موحدة + dummy-hash — ثلاث رسائل مميزة كانت تكشف
+            // وجود الاسم/تعطيله، والمستخدم الغائب كان يرجع بلا أي عمل BCrypt
+            // = قناة توقيت تؤكد وجود الأسماء. الآن: مسار متطابق زمنيًا ورسالة واحدة.
+            const string invalidCredentials = "اسم المستخدم أو كلمة المرور غير صحيحة.";
+            const string dummyHash = "$2a$11$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890123456789012"; // تجزئة عديمة الفائدة — تعويض التوقيت فقط
+
             if (user == null)
-                return Result<UserVM>.Fail("اسم المستخدم غير صحيح.");
+            {
+                _ = BCrypt.Net.BCrypt.Verify(password, dummyHash); // يعمل بنفس زمن الحقيقي
+                return Result<UserVM>.Fail(invalidCredentials);
+            }
 
             if (!user.IsActive)
-                return Result<UserVM>.Fail("هذا الحساب معطَّل. راجع المدير.");
+            {
+                _ = BCrypt.Net.BCrypt.Verify(password, dummyHash);
+                return Result<UserVM>.Fail(invalidCredentials);
+            }
 
             if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             {
                 RegisterFailedLogin(username);
-                return Result<UserVM>.Fail("كلمة المرور غير صحيحة.");
+                return Result<UserVM>.Fail(invalidCredentials);
             }
 
             lock (_failedLogins)
@@ -224,15 +236,23 @@ namespace Sayl.Core.Services
                 _failedLogins.Remove(username);
             }
 
-            // إنشاء سجل دخول
-            _dbContext.SystemLogs.Add(new SystemLog
+            // VULN-29: سجل الدخول best-effort — كان فشل كتابة السجل يرفض
+            // دخولًا صحيح البصمات (امتلاء سجل = كل الموظفين خارج الخدمة).
+            try
             {
-                UserId = user.UserId,
-                Action = "Login",
-                Details = $"تسجيل دخول المستخدم '{user.Username}'",
-                CreatedAt = DateTime.Now
-            });
-            await _dbContext.SaveChangesAsync();
+                _dbContext.SystemLogs.Add(new SystemLog
+                {
+                    UserId = user.UserId,
+                    Action = "Login",
+                    Details = $"تسجيل دخول المستخدم '{user.Username}'",
+                    CreatedAt = DateTime.Now
+                });
+                await _dbContext.SaveChangesAsync();
+            }
+            catch
+            {
+                // التدقيق تحسين — لا يمنع الدخول الصحيح
+            }
 
             var userVm = new UserVM
             {

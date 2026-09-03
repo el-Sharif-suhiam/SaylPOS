@@ -83,10 +83,26 @@ namespace Sayl.UI
             }
         }
 
-        /// <summary>سجل الأخطاء مع التاريخ الكامل.</summary>
-        public static void LogError(string source, Exception ex) =>
-            File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui-error.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {source}: {ex}\n");
+        /// <summary>سجل الأخطاء مع التاريخ الكامل.
+        /// VULN-30: كان يكتب بجوار الـ exe — على Program Files يرفض ويندوز
+        /// الكتابة فينفجر «معالج الأخطاء» نفسه ويقتل التطبيق بدل إنقاذه.
+        /// الآن: %LocalAppData%\Sayl_POS — مكتوب دائمًا لأي مستخدم.</summary>
+        public static void LogError(string source, Exception ex)
+        {
+            try
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Sayl_POS");
+                Directory.CreateDirectory(dir);
+                File.AppendAllText(Path.Combine(dir, "ui-error.log"),
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {source}: {ex}\n");
+            }
+            catch
+            {
+                // فشل التسجيل لا يجوز أن يفجّر معالج الأخطاء — الرسالة المرئية تظل
+            }
+        }
 
         /// <summary>رسالة خطأ مرئية بالعربية عند أي خطأ غير متوقع في الواجهة.</summary>
         private static void ShowUnexpectedError(Exception ex)
@@ -95,7 +111,7 @@ namespace Sayl.UI
             {
                 MessageBox.Show(
                     "حدث خطأ غير متوقع:\n" + ex.Message +
-                    "\n\nتم تسجيل التفاصيل في ملف ui-error.log بجوار البرنامج.",
+                    "\n\nتم تسجيل التفاصيل في ملف ui-error.log داخل مجلد Sayl_POS في بيانات التطبيق.",
                     "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error,
                     MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
             }

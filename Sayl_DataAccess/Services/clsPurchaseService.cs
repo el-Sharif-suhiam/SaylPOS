@@ -18,11 +18,18 @@ namespace Sayl.Core.Services
 
         // ─────────────────────────────────────────────────
         // فاتورة شراء: استلام الدفعات + تحديث المخزون + رصيد المورد
+        // VULN-26: بوابة صلاحية خدمية — فاتورة الشراء تحرك مالًا (رصيد
+        // المورد) ومخزونًا وسعر تكلفة؛ كانت تثق بأي مستدعٍ (الواجهة فقط
+        // تحجب). المطلوب الآن: محاسب فأعلى (الشراء قرار مكتب خلفي).
         // ─────────────────────────────────────────────────
         public async Task<Result<int>> CreatePurchaseInvoiceAsync(DtoPurchaseRequest request)
         {
             if (request.Items == null || !request.Items.Any())
                 return Result<int>.Fail("يجب إضافة بنود إلى فاتورة الشراء.");
+
+            int creatorRole = await GetUserRoleValueAsync(request.UserId);
+            if (!clsPermissions.HasAtLeast(creatorRole, clsPermissions.Accountant))
+                return Result<int>.Fail("إنشاء فاتورة شراء يتطلب صلاحية محاسب أو أعلى.");
 
             foreach (var item in request.Items)
             {
@@ -214,6 +221,16 @@ namespace Sayl.Core.Services
                     return true;
             }
             return false;
+        }
+
+        /// <summary>قيمة دور المستخدم (VULN-26 — بوابة الشراء الخدمية).</summary>
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return 0;
+            var user = await _dbContext.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+            return user?.Role.RoleValue ?? 0;
         }
 
         private async Task ProcessPaymentAsync(Invoice invoice, DtoPurchaseRequest request)

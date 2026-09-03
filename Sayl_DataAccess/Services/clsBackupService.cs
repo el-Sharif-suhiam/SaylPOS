@@ -55,10 +55,14 @@ namespace Sayl.Core.Services
         /// <summary>
         /// خدمة SQL Server غالبًا لا تملك صلاحية الكتابة في مجلدات المستخدم.
         /// نقرأ حساب خدمة SQL من قاعدة البيانات ونمنحه صلاحية التعديل على مجلد النسخ.
+        /// VULN-24: كان يُمنح «Authenticated Users»Modify أيضًا — أي حساب
+        /// ويندوز عادي على جهاز المحل المشترك يستطيع حذف/استبدال كل النسخ.
+        /// الآن: حساب خدمة SQL فقط (وإن تعذّر قراءته نوقف بلا منح واسع —
+        /// فشل النسخ اللاحق أوضح من نسخ قابلة للتلاعب بصمت).
         /// </summary>
         private async Task EnsureSqlServiceCanWriteAsync(string folder)
         {
-            string serviceAccount = "Authenticated Users";
+            string? serviceAccount = null;
             try
             {
                 var accounts = await _dbContext.Database
@@ -69,11 +73,11 @@ namespace Sayl.Core.Services
             }
             catch
             {
-                // نستخدم القيمة الافتراضية
+                // لا نمنح شيئًا — رسالة فشل BACKUP ستوجه المدير يدويًا
             }
 
-            RunIcaclsGrant(folder, serviceAccount);
-            RunIcaclsGrant(folder, "Authenticated Users");
+            if (!string.IsNullOrWhiteSpace(serviceAccount))
+                RunIcaclsGrant(folder, serviceAccount);
         }
 
         private static void RunIcaclsGrant(string folder, string account)
@@ -103,6 +107,10 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         // استعادة نسخة احتياطية: بأمان عالٍ — ترفض عند وجود جلسات مفتوحة،
         // تضع القاعدة في وضع أحادي المستخدم أثناء الاستعادة وتعيدها دائمًا.
+        // VULN-23: نسخة احتياطية إلزامية قبل الاستعادة — كانت «توصية نصية»
+        // في حوار التأكيد فقط؛ أي استعادة فاشلة كانت تترك المحل بلا قاعدة
+        // وبلا رجوع. الآن: نسخة وقائية تُنشأ وتنجح قبل لمس القاعدة، وإلا
+        // ترفض العملية (النسخة تُميَّز بلاحقة pre-restore لعدم عبور cleanup).
         // ─────────────────────────────────────────────────
         public async Task<Result<string>> RestoreAsync(string backupFilePath)
         {
@@ -115,6 +123,14 @@ namespace Sayl.Core.Services
                     .AnyAsync(s => s.Status == enPosSessionStatusType.open);
                 if (hasOpenSessions)
                     return Result<string>.Fail("توجد جلسات بيع مفتوحة. أغلق جميع الجلسات ثم حاول الاستعادة.");
+
+                // VULN-23: نسخة إلزامية قبل أي استعادة — بلاها كانت الاستعادة
+                // الفاشلة كارثة غير قابلة للتراجع.
+                string preRestoreFolder = Path.GetDirectoryName(backupFilePath)
+                                          ?? DefaultBackupFolder;
+                var preBackup = await BackupToFolderAsync(preRestoreFolder, fileNameSuffix: "pre-restore");
+                if (!preBackup.IsSuccess || string.IsNullOrWhiteSpace(preBackup.Data))
+                    return Result<string>.Fail($"يجب نجاح نسخة احتياطية قبل الاستعادة (فشلت: {preBackup.Message}). لم تُلمس قاعدة البيانات.");
 
                 string dbName = _dbContext.Database.GetDbConnection().Database;
                 string safeName = dbName.Replace("]", "]]");
@@ -191,6 +207,36 @@ namespace Sayl.Core.Services
         {
             await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 600 };
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>VULN-23: نسخة وقائية قبل الاستعادة — بلا تنظيف تلقائي
+        /// (لا تُحسب في keepLast فلا تُمسح بموجة تنظيف لاحقة)، وباسم مميز
+        /// يسهل تمييزها عند الحاجة للتراجع.</summary>
+        private async Task<Result<string>> BackupToFolderAsync(string folder, string fileNameSuffix)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                await EnsureSqlServiceCanWriteAsync(folder);
+
+                string dbName = _dbContext.Database.GetDbConnection().Database;
+                string fileName = $"{dbName}_{DateTime.Now:yyyyMMdd_HHmmss}_{fileNameSuffix}.bak";
+                string fullPath = Path.Combine(folder, fileName);
+
+                string sql = "BACKUP DATABASE [" + dbName.Replace("]", "]]") + "] TO DISK = @path WITH INIT, NAME = @name";
+                var parameters = new[]
+                {
+                    new SqlParameter("@path", fullPath),
+                    new SqlParameter("@name", $"Sayl {fileNameSuffix} backup {DateTime.Now:yyyy-MM-dd HH:mm}")
+                };
+
+                await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters);
+                return Result<string>.Ok(fullPath, "تم إنشاء النسخة الوقائية.");
+            }
+            catch (Exception ex)
+            {
+                return Result<string>.Fail(ex.Message);
+            }
         }
 
         private static Task CleanupOldBackupsAsync(string backupFolder, int keepLast)

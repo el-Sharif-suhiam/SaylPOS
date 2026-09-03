@@ -27,6 +27,20 @@ namespace consol_app
                 .AddSaylServices("Server=.;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
                 .BuildServiceProvider();
 
+            // مسبار التزويد: دورات الهارنس تستهلك مخزون المنتج 1 دورة بعد دورة
+            // (بيع/تعليق/مرتجع...) — نعيد 500 وحدة بدمغة وقتية فريدة قبل كل جولة
+            // كي تبقى الاختبارات قابلة للتكرار إلى ما لا نهاية (idempotent).
+            using (var ws = Scope())
+            {
+                var stock = Svc<clsStockService>(ws);
+                await stock.ReceiveStockAsync(new DtoStockReceiveRequest
+                {
+                    ProductId = 1,
+                    BatchNumber = "HARNESS-" + DateTime.Now.Ticks,
+                    Quantity = 500
+                });
+            }
+
             await AuthCycle();
             var (sessionId, cashierId) = await SessionAndSaleCycle();
             if (sessionId > 0)
@@ -519,6 +533,15 @@ namespace consol_app
                 DiscountAmount = 1_000_000m
             });
             Check("ATTACK purchase over-discount rejected", !badPurchase.IsSuccess, $"'{badPurchase.Message}'");
+
+            // VULN-26: كاشير ينشئ فاتورة شراء → مرفوض خدميًا (كان مفتوحًا للجميع)
+            var cashierPurchase = await purchase.CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+            {
+                SupplierId = 13,
+                UserId = cashier.UserId,
+                Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 5m, Quantity = 1, BatchNumber = "ATK-ROLE-" + DateTime.Now.Ticks % 100000 } }
+            });
+            Check("ATTACK cashier purchase rejected", !cashierPurchase.IsSuccess, $"'{cashierPurchase.Message}'");
         }
 
         // ───────────────── 6. Credit rules ─────────────────
