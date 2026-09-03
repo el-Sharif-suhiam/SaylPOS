@@ -58,10 +58,25 @@ namespace Sayl.Core.Services
             try
             {
                 decimal total = request.Items.Sum(i => i.UnitCost * i.Quantity);
+
+                // ══ VULN-06: حراس المبالغ (حدود الخدمة) ══
+                // خصم شراء يتجاوز الإجمالي يجعل الصافي سالبًا فيُخصم من رصيد
+                // المورد بلا حد (Balance += سالب ضخم) — المورد «يستحق علينا»
+                // وهمًا ثم يستحيل سداده. والدفع الزائد يقلب الرصيد سالبًا كذلك.
+                if (request.DiscountAmount < 0 || request.DiscountAmount > total)
+                    throw new InvalidOperationException("مبلغ خصم الشراء لا يمكن أن يتجاوز إجمالي الفاتورة أو يكون سالبًا.");
+                if (request.TaxPercent < 0 || request.TaxPercent > 100)
+                    throw new InvalidOperationException("نسبة ضريبة الشراء يجب أن تكون بين 0 و 100.");
+                if (request.Payment is { } pay && (pay.Amount < 0 || pay.Amount > total))
+                    throw new InvalidOperationException("مبلغ دفع الشراء يجب أن يكون بين صفر وإجمالي الفاتورة (لا دفع زائد).");
+
                 decimal discount = request.DiscountAmount;
                 decimal afterDiscount = total - discount;
                 decimal tax = request.TaxPercent > 0 ? afterDiscount * request.TaxPercent / 100 : 0;
                 decimal net = afterDiscount + tax;
+
+                if (net < 0)
+                    throw new InvalidOperationException("صافي فاتورة الشراء لا يمكن أن يكون سالبًا.");
 
                 var invoice = new Invoice
                 {
@@ -174,6 +189,13 @@ namespace Sayl.Core.Services
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return Result<int>.Ok(invoice.InvoiceId, "تم إنشاء فاتورة الشراء بنجاح.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                // رسائل حراس المبالغ تصل للمستخدم كما هي — لا تُبتلع
+                return Result<int>.Fail(ex.Message);
             }
             catch
             {

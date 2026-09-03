@@ -157,8 +157,11 @@ namespace Sayl.Core.Services
 
         // ─────────────────────────────────────────────────
         // إكمال فاتورة معلقة
+        // VULN-08: المستكمِل يُفحص كالإلغاء تمامًا — صاحب الفاتورة يكملها،
+        // وغيره يحتاج صلاحية محاسب فأعلى. (كان الإكمال بلا أي فحص ملكية
+        // بينما الإلغاء مشدد — سجل: الإكمال يحرك مالًا ومخزونًا نهائيًا.)
         // ─────────────────────────────────────────────────
-        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments)
+        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments, int actorUserId)
         {
             if (payments == null || !payments.Any(p => p.Amount > 0))
                 return Result.Fail("يجب إدخال مبلغ دفعة واحد على الأقل.");
@@ -169,6 +172,14 @@ namespace Sayl.Core.Services
 
             if (invoice == null)
                 return Result.Fail("الفاتورة المعلقة غير موجودة أو تم إكمالها بالفعل.");
+
+            // ملكية الإكمال: نفس قاعدة الإلغاء (CancelSuspendedInvoiceAsync)
+            if (invoice.UserId != actorUserId)
+            {
+                int actorRole = await GetUserRoleValueAsync(actorUserId);
+                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
+                    return Result.Fail("إكمال فاتورة معلقة لكاشير آخر يتطلب صلاحية محاسب أو أعلى.");
+            }
 
             // المعاملة تحتضن الانتقال الذري: فشل أي خطوة لاحقة يعيد الحالة suspended معها
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -310,7 +321,19 @@ namespace Sayl.Core.Services
                     throw new InvalidOperationException($"المنتج {item.ProductName} غير موجود.");
                 total += prod.BasePrice * item.Quantity;
             }
-            
+
+            // ══ VULN-02: حراس المبالغ (حدود الخدمة — الواجهة ليست حد الثقة) ══
+            // الخصم بالنسبة: 0..100. الخصم بالمبلغ: 0..total — وإلا صافٍ سالب
+            // يصنع فواتير «مدفوعة» من العدم ويمحو ديون العملاء وهميًا.
+            if (request.DiscountPercent < 0 || request.DiscountPercent > 100)
+                throw new InvalidOperationException("نسبة الخصم يجب أن تكون بين 0 و 100.");
+            if (request.DiscountAmount < 0 || request.DiscountAmount > total)
+                throw new InvalidOperationException("مبلغ الخصم لا يمكن أن يتجاوز إجمالي الفاتورة أو يكون سالبًا.");
+            // الضريبة: نسبة فقط وضمن سقف عقلاني — النسب الجنونية تنتج ديونًا
+            // وهمية تفوق المبيعات (خصوصًا مع CreditLimit=0 أي «غير محدود»).
+            if (request.TaxPercent < 0 || request.TaxPercent > 100)
+                throw new InvalidOperationException("نسبة الضريبة يجب أن تكون بين 0 و 100.");
+
             decimal discount = request.DiscountPercent > 0
                 ? total * request.DiscountPercent / 100
                 : request.DiscountAmount;
@@ -321,6 +344,10 @@ namespace Sayl.Core.Services
                 : 0;
 
             decimal net = afterDiscount + tax;
+
+            // الصافي لا يهبط لما دون صفر — حد الفاتورة المجانية صافي 0
+            if (net < 0)
+                throw new InvalidOperationException("صافي الفاتورة لا يمكن أن يكون سالبًا.");
 
             var invoice = new Invoice
             {
@@ -472,6 +499,13 @@ namespace Sayl.Core.Services
             {
                 if (payment.Amount <= 0)
                     continue;
+
+                // ══ VULN-02b: سقف الدفع (حد الخدمة) ══
+                // الدفع الزائد عن الصافي كان يُبتلع بلا أثر: لا باقٍ للعميل ولا
+                // رصيد — دفعة 500 على فاتورة 100 تجعل 400 تختفي من الدفاتر،
+                // ومع المرتجعات يُرد الصافي فقط فتضيع الفاتورة الفارقة نهائيًا.
+                if (paid + payment.Amount > net)
+                    throw new InvalidOperationException($"مجموع الدفعات يتجاوز صافي الفاتورة ({net:N2}). الباقي للعميل يُحسب خارج الدفعات المسجلة.");
 
                 _dbContext.Payments.Add(new Payment
                 {

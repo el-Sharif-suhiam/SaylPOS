@@ -41,17 +41,21 @@ namespace Sayl.Core.Services
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
 
-            foreach (var item in request.Items)
+            // ══ VULN-01: حارس الازدواج داخل الطلب الواحد ══
+            // نفس المنتخ مرتين في الطلب (مثال هجومي: {X:5},{X:5} على فاتورة بِيعت 8)
+            // كان يجتاز الفحص الفردي (5≤8 و5≤8) فيُرتجَع 10 ويُخزَّن 10 — سرقة نقد
+            // ومخزون وهمي. التجميع أولاً يجعل الفحص ضد المجموع لا ضد كل سطر وحده.
+            foreach (var g in GroupRequestItems(request.Items))
             {
                 var originalItem = originalInvoice.InvoiceItems
-                    .FirstOrDefault(ii => ii.ProductId == item.ProductId);
+                    .FirstOrDefault(ii => ii.ProductId == g.ProductId);
 
                 if (originalItem == null)
-                    return Result<int>.Fail($"المنتج {item.ProductId} غير موجود في الفاتورة الأصلية.");
+                    return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
-                if (returnedSoFar + item.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
+                if (returnedSoFar + g.Quantity > originalItem.Quantity)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
             // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
@@ -60,15 +64,16 @@ namespace Sayl.Core.Services
             try
             {
                 // إعادة-فحص داخل المعاملة: طلب إرجاع متوازٍ commit بين الفحص الأول وبداية المعاملة
+                // (بنفس حارس التجميع — الازدواج داخل الطلب يُفحص هنا أيضاً)
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
-                foreach (var item in request.Items)
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
-                    int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
-                    if (returnedSoFar + item.Quantity > originalItem.Quantity)
-                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                    int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
+                    if (returnedSoFar + g.Quantity > originalItem.Quantity)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
                 }
 
                 decimal total = 0;
@@ -86,12 +91,12 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.Now
                 };
 
-                foreach (var item in request.Items)
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
-                    total += originalItem.ItemPrice * item.Quantity;
+                    total += originalItem.ItemPrice * g.Quantity;
                 }
 
                 returnInvoice.TotalAmount = -total;
@@ -102,22 +107,23 @@ namespace Sayl.Core.Services
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
 
-                foreach (var item in request.Items)
+                // بنود مجمّعة: لا سطران لنفس المنتج في فاتورة المرتجع
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
                     _dbContext.InvoiceItems.Add(new InvoiceItem
                     {
                         InvoiceId = returnInvoice.InvoiceId,
-                        ProductId = item.ProductId,
-                        Quantity = item.Quantity,
-                        BatchId = item.BatchId ?? originalItem.BatchId,
+                        ProductId = g.ProductId,
+                        Quantity = g.Quantity,
+                        BatchId = originalItem.BatchId,
                         ItemPrice = originalItem.ItemPrice,
                         ItemCost = originalItem.ItemCost
                     });
 
-                    await RestockProductAsync(item.ProductId, item.Quantity, item.BatchId ?? originalItem.BatchId, returnInvoice);
+                    await RestockProductAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
                 }
 
                 await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total);
@@ -161,33 +167,34 @@ namespace Sayl.Core.Services
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
 
-            foreach (var item in request.Items)
+            // VULN-01: حارس الازدواج داخل الطلب — التجميع قبل الفحص (نفس مرتجع العميل)
+            foreach (var g in GroupRequestItems(request.Items))
             {
                 var originalItem = originalInvoice.InvoiceItems
-                    .FirstOrDefault(ii => ii.ProductId == item.ProductId);
+                    .FirstOrDefault(ii => ii.ProductId == g.ProductId);
 
                 if (originalItem == null)
-                    return Result<int>.Fail($"المنتج {item.ProductId} غير موجود في الفاتورة الأصلية.");
+                    return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
-                if (returnedSoFar + item.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
+                if (returnedSoFar + g.Quantity > originalItem.Quantity)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
             }
 
             // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
-                // إعادة-فحص داخل المعاملة بعد قفل النطاق
+                // إعادة-فحص داخل المعاملة بعد قفل النطاق (بنفس حارس التجميع)
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
-                foreach (var item in request.Items)
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
-                    int returnedSoFar = alreadyReturned.TryGetValue(item.ProductId, out int qty) ? qty : 0;
-                    if (returnedSoFar + item.Quantity > originalItem.Quantity)
-                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {item.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                    int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
+                    if (returnedSoFar + g.Quantity > originalItem.Quantity)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
                 }
 
                 decimal total = 0;
@@ -204,12 +211,12 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.Now
                 };
 
-                foreach (var item in request.Items)
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
-                    total += originalItem.ItemPrice * item.Quantity;
+                    total += originalItem.ItemPrice * g.Quantity;
                 }
 
                 returnInvoice.TotalAmount = -total;
@@ -220,22 +227,23 @@ namespace Sayl.Core.Services
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
 
-                foreach (var item in request.Items)
+                // بنود مجمّعة — لا سطران لنفس المنتج
+                foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == item.ProductId);
+                        .First(ii => ii.ProductId == g.ProductId);
 
                     _dbContext.InvoiceItems.Add(new InvoiceItem
                     {
                         InvoiceId = returnInvoice.InvoiceId,
-                        ProductId = item.ProductId,
-                        Quantity = item.Quantity,
-                        BatchId = item.BatchId ?? originalItem.BatchId,
+                        ProductId = g.ProductId,
+                        Quantity = g.Quantity,
+                        BatchId = originalItem.BatchId,
                         ItemPrice = originalItem.ItemPrice,
                         ItemCost = originalItem.ItemCost
                     });
 
-                    await DeductProductStockAsync(item.ProductId, item.Quantity, item.BatchId ?? originalItem.BatchId, returnInvoice);
+                    await DeductProductStockAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
                 }
 
                 await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total);
@@ -254,6 +262,17 @@ namespace Sayl.Core.Services
         // ═════════════════════════════════════════════════
         // الدوال الخاصة
         // ═════════════════════════════════════════════════
+
+        /// <summary>
+        /// VULN-01: تجميع بنود طلب المرتجع حسب المنتخ — المجموع لا السطر.
+        /// يُستعمل في كل فحوص الكميات وبناء البنود في المرتجعين معًا،
+        /// فلا يمر طلب ببنود مزدوجة حتى لو تكرر المنتخ عشر مرات.
+        /// </summary>
+        private static IEnumerable<(int ProductId, int Quantity)> GroupRequestItems(
+            List<DtoReturnItem> items) =>
+            items
+                .GroupBy(i => i.ProductId)
+                .Select(g => (g.Key, g.Sum(i => i.Quantity)));
 
         private async Task<Dictionary<int, int>> GetReturnedQuantitiesAsync(int originalInvoiceId, enInvoicesType returnType)
         {

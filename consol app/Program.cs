@@ -35,6 +35,7 @@ namespace consol_app
                 await ReturnCycle();
                 await CashDeskCycle(sessionId);
             }
+            await FinancialGuardsAttackCycle();
             await CreditRulesCycle();
             await PermissionRulesCycle();
             await ReportsCycle();
@@ -230,7 +231,7 @@ namespace consol_app
             {
                 new() { Amount = net / 2, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) },
                 new() { Amount = net - net / 2, Method = "bank_transfer", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
-            });
+            }, actorUserId: cashierId);
             Check("resume completes with split payments", done.IsSuccess, done.Message);
 
             var resumed = await VerifyAsync(db =>
@@ -362,6 +363,121 @@ namespace consol_app
             }
         }
 
+        // ───────────────── 6.5 Financial guards ATTACKS (VULN-01/02/06/08) ─────────────────
+        // كل حالة هنا هجوم موثق في ATTACK_REPORT.md — الدفاع الجديد يجب أن يرفضه.
+        private static async Task FinancialGuardsAttackCycle()
+        {
+            Console.WriteLine("--- FINANCIAL GUARDS ATTACKS ---");
+            using var s = Scope();
+            var checkout = Svc<clsCheckoutService>(s);
+            var returns = Svc<clsReturnService>(s);
+            var purchase = Svc<clsPurchaseService>(s);
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+            var admin = await db.Users.FirstAsync(u => u.Username == "admin");
+            var cashier = await db.Users.FirstAsync(u => u.Username == "cashier1");
+
+            // VULN-02: خصم مبلغ يتجاوز الإجمالي → صافٍ سالب «مدفوع من العدم»
+            var overDiscount = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
+                DiscountAmount = 1_000_000m,
+                Payments = new List<DtoPaymentInfo>()
+            });
+            Check("ATTACK over-discount rejected", !overDiscount.IsSuccess, $"'{overDiscount.Message}'");
+
+            // VULN-02: نسبة خصم سالبة
+            var negDiscount = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
+                DiscountPercent = -10m,
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("ATTACK negative discount rejected", !negDiscount.IsSuccess, $"'{negDiscount.Message}'");
+
+            // VULN-02: ضريبة 50000% (كانت تمر حتى للكاشير — ديون وهمية)
+            var crazyTax = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = cashier.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
+                TaxPercent = 50_000m,
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("ATTACK 50000% tax rejected", !crazyTax.IsSuccess, $"'{crazyTax.Message}'");
+
+            // VULN-02b: دفع يتجاوز الصافي (كانت 400 تختفي من الدفاتر)
+            var overpay = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 10_000m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("ATTACK overpayment rejected", !overpay.IsSuccess, $"'{overpay.Message}'");
+
+            // VULN-01: مرتجع ببنود مزدوجة — {X:5},{X:5} على مباع 8
+            var probeSale = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 8 } },
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m * 8, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("ATTACK probe sale (8 units)", probeSale.IsSuccess, probeSale.Message);
+            if (probeSale.IsSuccess)
+            {
+                var dupReturn = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = probeSale.Data,
+                    UserId = admin.UserId,
+                    Items = new List<DtoReturnItem>
+                    {
+                        new() { ProductId = 1, Quantity = 5 },
+                        new() { ProductId = 1, Quantity = 5 }
+                    }
+                });
+                Check("ATTACK duplicate-line return rejected", !dupReturn.IsSuccess, $"'{dupReturn.Message}'");
+
+                // والمرتجع الصحيح المفرد يبقى مقبولًا
+                var okReturn = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = probeSale.Data,
+                    UserId = admin.UserId,
+                    Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 3 } }
+                });
+                Check("legit single return still allowed", okReturn.IsSuccess, okReturn.Message);
+            }
+
+            // VULN-08: كاشير يكمل معلقة أدمن → مرفوض؛ المالك يكملها → مقبول
+            var suspForeign = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } }
+            }, suspend: true);
+            Check("ATTACK foreign-resume setup", suspForeign.IsSuccess, suspForeign.Message);
+            if (suspForeign.IsSuccess)
+            {
+                var foreignComplete = await checkout.CompleteSuspendedInvoiceAsync(suspForeign.Data,
+                    new List<DtoPaymentInfo> { new() { Amount = 20m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } },
+                    actorUserId: cashier.UserId);
+                Check("ATTACK foreign resume rejected", !foreignComplete.IsSuccess, $"'{foreignComplete.Message}'");
+
+                var ownComplete = await checkout.CompleteSuspendedInvoiceAsync(suspForeign.Data,
+                    new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } },
+                    actorUserId: admin.UserId);
+                Check("own resume allowed", ownComplete.IsSuccess, ownComplete.Message);
+            }
+
+            // VULN-06: خصم شراء يتجاوز الإجمالي → رصيد مورد سالب
+            var badPurchase = await purchase.CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+            {
+                SupplierId = 13,
+                UserId = admin.UserId,
+                Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 5m, Quantity = 2, BatchNumber = "ATK-" + DateTime.Now.Ticks % 100000 } },
+                DiscountAmount = 1_000_000m
+            });
+            Check("ATTACK purchase over-discount rejected", !badPurchase.IsSuccess, $"'{badPurchase.Message}'");
+        }
+
         // ───────────────── 6. Credit rules ─────────────────
         private static async Task CreditRulesCycle()
         {
@@ -437,12 +553,14 @@ namespace consol_app
             Check("cashier >10% discount rejected", !bigDiscount.IsSuccess, bigDiscount.Message);
 
             // admin same discount OK
+            // (VULN-02b: الدفع الآن محدود بالصافي — الاختبار القديم كان يدفع 100
+            //  على صافٍ 6.25 أي يمرر دفعًا زائدًا فاسدًا؛ صححناه ليؤدي الصافي تمامًا)
             var adminDiscount = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
             {
                 UserId = admin.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
                 DiscountPercent = 50,
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 6.25m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
             });
             Check("admin big discount allowed", adminDiscount.IsSuccess, adminDiscount.Message);
 

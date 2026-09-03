@@ -217,7 +217,8 @@ namespace Sayl.UI.Forms
             using (var scope = Program.Services.CreateScope())
             {
                 var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
-                result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentsList);
+                result = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payment.PaymentsList,
+                    actorUserId: SessionState.CurrentUser?.UserId ?? 0);
             }
 
             if (!result.IsSuccess)
