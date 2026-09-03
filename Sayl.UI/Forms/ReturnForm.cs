@@ -93,18 +93,21 @@ namespace Sayl.UI.Forms
             };
 
             // ── صف رقم الفاتورة: التسمية+المربع يمينًا، زر التحميل يسارًا ──
-            // Row بعمودين: عمود 1 (يمين) للتسمية+المربع، عمود 0 (يسار، 180px) للزر.
-            // ⚠️ عمود TLP بـ RTL: العمود 0 يظهر يمينًا (عكسي!) — لذلك الزر
-            //    في العمود 0 معناه يسارًا بصريًا. جربنا بالعكس فانقلب الترتيب.
+            // ⚠️ عمودا TLP بـ RTL: العمود 0 يظهر يمينًا (عكسي!):
+            //    العمود 0 (Percent 100) = idBox التسمية+المربع — يمينًا.
+            //    العمود 1 (Absolute 180) = زر التحميل — يسارًا بعرض ثابت.
+            // ⚠️ RowCount=1 إلزامي: بدونه يعتبر TLP نفسه «قابلًا للنمو»
+            //    فتتبدل الأدوار ويظهر زر أزرق ضخم يبتلع الصف (علة سابقة).
             var inputRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
+                RowCount = 1,
                 BackColor = AppTheme.CardBg,
                 Margin = new Padding(0, 8, 0, 8)
             };
-            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // العمود 0: الزر (يسار بصريًا)
-            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // العمود 1: التسمية+المربع (يمين)
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // العمود 0: التسمية+المربع (يمين بصريًا)
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); // العمود 1: الزر (يسار بصريًا)
 
             var lblInvoice = new Label
             {
@@ -122,20 +125,20 @@ namespace Sayl.UI.Forms
                 TextAlign = HorizontalAlignment.Center
             };
 
-            // حزمة التسمية+المربع في عمود واحد (يمين)، الزر في العمود 0 (يسار)
+            // حزمة التسمية+المربع في العمود المرن (0 = يمين بصريًا)
             var idBox = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             // ⚠️ ترتيب الإرساء داخل اللوحة (RTL): كل Right يتراصف من اليمين —
             //    أول Add أقصى اليمين. نريد المربع أقصى اليمين فالتسمية يساره:
-            //    إذًا نضيف التسمية (Right) أولًا ثم المربع (Right) يُرسّى بعدها
-            //    إلى يمينها. (الترتيب البديل يجعل التسمية أقصى اليمين — خطأ).
+            //    إذًا نضيف التسمية (Right) أولًا ثم المربع (Right) يُرسّى
+            //    بعدها إلى يمينها. (الترتيب البديل يجعل التسمية أقصى اليمين — خطأ).
             idBox.Controls.Add(lblInvoice);
             idBox.Controls.Add(_txtInvoiceId);
-            inputRow.Controls.Add(idBox, 1, 0);
+            inputRow.Controls.Add(idBox, 0, 0);
 
             _btnLoad = AppTheme.MakeButton("تحميل الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnLoad.Dock = DockStyle.Fill;
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
-            inputRow.Controls.Add(_btnLoad, 0, 0);
+            inputRow.Controls.Add(_btnLoad, 1, 0);
 
             // ── جدول البنود (الصف المرن — يتمدد مع النافذة) ──
             _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
@@ -181,10 +184,12 @@ namespace Sayl.UI.Forms
             // عمودان 55/45 — الأزرار Dock=Fill تتمدد مع النافذة.
             // ⚠️ RTL يقلب الأعمدة: العمود 0 يظهر يمينًا — لذلك «تنفيذ»
             //    (الزر الرئيسي، يمينًا بصريًا) في العمود 0، و«إغلاق» في 1.
+            // ⚠️ RowCount=1: نفس حيلة inputRow — بدونها ينكمش الصف المطلق.
             var buttons = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
+                RowCount = 1,
                 BackColor = AppTheme.CardBg,
                 Margin = new Padding(0, 8, 0, 0)
             };

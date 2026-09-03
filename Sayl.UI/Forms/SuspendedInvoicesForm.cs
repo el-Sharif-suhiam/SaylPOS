@@ -120,10 +120,13 @@ namespace Sayl.UI.Forms
 
             // ── صف الأزرار: ثلاثة أعمدة — استكمال (يمين، أساسي) |
             //    إلغاء (وسط، أحمر) | إغلاق (يسار، هادئ) ──
+            // ⚠️ RowCount=1 إلزامي: بدونه يعتبر TLP نفسه قابلًا للنمو
+            //    فيبتلع ارتفاع الصف المطلق 64 (علة الزر الأزرق بالمرتجع).
             var buttons = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
+                RowCount = 1,
                 BackColor = AppTheme.CardBg,
                 Margin = new Padding(0, 8, 0, 0)
             };

@@ -14,6 +14,16 @@ namespace Sayl.UI.Forms
     /// </summary>
     public class PosForm : Form
     {
+        // ═══════════════════════════════════════════════
+        // 📖 نماذج البيانات الصغيرة للشاشة (nested classes):
+        //  • CartItem: بند السلة في الذاكرة فقط — Total خاصية محسوبة
+        //    (Price × Quantity) تتحدث تلقائيًا، لا حقل يُنسى تحديثه.
+        //  • SearchItem: منتج + رصيده الحالي — القائمة المنسدلة تعرض
+        //    الرصيد بجانب الاسم (لماذا القائمة؟ الكاشير يقرأ «متوفر 3»
+        //    قبل الإضافة لا بعدها — قرار UX بلا رسائل مزعجة).
+        // قاعدة عامة: نماذج العرض الصغيرة تعيش داخل الشاشة التي تخدمها
+        // ولا تتسرب للطبقات الأدنى — العزل يبقي PosForm مفهومًا كوحدة.
+        // ═══════════════════════════════════════════════
         private sealed class CartItem
         {
             public int ProductId { get; init; }
@@ -283,6 +293,24 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── قائمة نتائج البحث الحية ─────────────────
+        // ═══════════════════════════════════════════════
+        // 📖 BuildSearchPopup: «القائمة المنسدلة المصنوعة يدويًا» — Panel
+        // عائم فوق كل شيء (BringToFront) يظهر/يختفي حسب نتائج البحث:
+        //
+        //  • ليس ComboBox: نحتاج بطاقة نتائج غنية (اسم + سعر + رصيد
+        //    ملوّن حسب الحالة) — فنرسمها بأنفسنا (OwnerDrawFixed).
+        //  • الموقع: RepositionSearchPopup يحسب إحداثيات شاشة مربع البحث
+        //    (PointToScreen) ثم يعيدها لنظام النافذة (PointToClient) —
+        //    القائمة «تلتصق» بالمربع حتى لو تحركت النافذة.
+        //  • الارتفاع ديناميكي: صف × 54px بحد أقصى 380 (ShowSearchPopup).
+        //  • مؤقتان حيويان هنا:
+        //    _searchTimer (250ms) = debounce: الكتابة السريعة لا ترمي
+        //      استعلامًا لكل حرف — استعلام واحد بعد توقف القلم.
+        //    _warnTimer (4s) = تلاشي تلقائي لتحذيرات المخزون — الرسالة
+        //      الحمراء تموت وحدها (لا نقر إغلاق إضافي على الكاشير).
+        //  • Resize يخفي القائمة: نافذة كشير تتحجم كثيرًا — القائمة
+        //    المعرفة على موضع قديم تبدو معلقة؛ الإخفاء أرخص من مطاردتها.
+        // ═══════════════════════════════════════════════
         private void BuildSearchPopup()
         {
             _searchPopup = new Panel
@@ -328,6 +356,12 @@ namespace Sayl.UI.Forms
             Resize += (_, _) => { if (_searchPopup.Visible) HideSearchPopup(); };
         }
 
+        // 📖 LstResults_DrawItem: الرسم اليدوي لبطاقة نتيجة (OwnerDraw):
+        // DrawBackground ثم نرسم بأنفسنا مستطيل الخلفية (محدد=PrimaryLight)
+        // وسطرين: الاسم (غامق 11.5) ثم «السعر • الرصيد» (9pt).
+        // الرصيد ملوّن دلاليًا: رمادي لغير المخزني، أحمر=صفر، برتقالي≤10،
+        // أخضر غير ذلك — عين الكاشير تمسك الحالة قبل قراءة الرقم.
+        // StringFlags.DirectionRightToLeft: النص يرتب يمينًا داخل المستطيل.
         private void LstResults_DrawItem(object? sender, DrawItemEventArgs e)
         {
             e.DrawBackground();
@@ -362,6 +396,9 @@ namespace Sayl.UI.Forms
                 new Rectangle(rect.X, rect.Y + 27, rect.Width - 24, 20), format);
         }
 
+        // 📖 RepositionSearchPopup/Show/Hide: دورة حياة القائمة المنسدلة —
+        // Show: موضع + ارتفاع ديناميكي (صفوف × 54 بحد 380) + BringToFront.
+        // Hide: إخفاء + إعادة التركيز لمربع البحث (الماسح أولوية دائمًا).
         private void RepositionSearchPopup()
         {
             var host = _txtSearch.Parent!;
@@ -430,6 +467,20 @@ namespace Sayl.UI.Forms
             _searchTimer.Start();
         }
 
+        // ═══════════════════════════════════════════════
+        // 📖 منطق مسارات البحث الثلاثة — خريطة القرار في RunLiveSearchAsync:
+        //
+        //  1) LooksLikeScannerToken(term) صادف المنتج → أضف فورًا وأنهِ.
+        //  2) رمز نمطي لا يعرف منتجًا → ShowScanNotFound (رسالة حمراء
+        //     مؤقتة + صوت) — لا صمت أبدًا: كاشير القارئ 2D يعتمد على
+        //     الإشارة السلبية مثل الإيجابية.
+        //  3) نص حر → 8 نتائج كحد أقصى + تحديد أول نتيجة جاهزًا لـ Enter.
+        //
+        // ⚠️ _searchSeq (عداد التسلسل): حارس السباق — لو بدأ الكاشير بحثًا
+        //    ثم عدّل النص قبل عودة النتيجة الأولى، النتيجة القديمة
+        //    تُهمل (seq != _searchSeq) فلا «يرتد» البحث لاحقًا ويكتب فوق
+        //    نتائج أحدث. كل مسار async يعود للواجهة عبر هذا الحارس.
+        // ═══════════════════════════════════════════════
         private async Task RunLiveSearchAsync()
         {
             string term = CleanScannerInput(_txtSearch.Text);
@@ -498,6 +549,9 @@ namespace Sayl.UI.Forms
             }
         }
 
+        // 📖 Search_KeyDown: مفتاحان فقط — Down ينقل التحديد للقائمة
+        // (سهم الكاشير لا يحتاج فأرة)، وEnter يقطع الـ debounce ويكلف
+        // فورًا (الماسح يرسل Enter — الانتظار 250ms يبطئ مسحًا متسلسلًا).
         private void Search_KeyDown(object? sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Down && _searchPopup.Visible && _lstResults.Items.Count > 0)
@@ -563,6 +617,9 @@ namespace Sayl.UI.Forms
             }
         }
 
+        // 📖 LstResults_KeyDown: تفاعل لوحة مفاتيح كامل داخل القائمة —
+        // Enter=اختيار، Esc=إخفاء (وعودة للمربع)، Up عند أول عنصر يعيد
+        // التركيز للمربع (دورة مغلقة: المربع ↔ القائمة بلا فأرة أبدًا).
         private void LstResults_KeyDown(object? sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Enter)
@@ -594,6 +651,10 @@ namespace Sayl.UI.Forms
             FinishSearchInput();
         }
 
+        // 📖 FinishSearchInput: «تصفير دورة البحث» — يبطل أي بحث جارٍ
+        // (زيادة _searchSeq تهمل نتائجه)، يوقف المؤقت، يمسح المربع،
+        // ويخفي القائمة. يستدعى بعد كل إضافة ناجحة — المربع جاهز
+        // دائمًا للمسح التالي (دورة ماسح متسلسلة بلا بقايا نص قديم).
         private void FinishSearchInput()
         {
             _searchSeq++;
@@ -719,6 +780,14 @@ namespace Sayl.UI.Forms
             _gridCart.CellEndEdit += GridCart_CellEndEdit;
         }
 
+        // 📖 GridCart_CellValidating/CellEndEdit — زوج حراسة الكمية:
+        //  Validating: يرفض أي نص غير رقمي قبل خروج التركيز (فيبقى
+        //  المحرر مفتوحًا حتى يصحح المستخدم — لا قيمة فاسدة تصل أبدًا).
+        //  CellEndEdit: قراءة القيمة → تقريب لصحيح → حد أدنى 1 →
+        //  حد أقصى المتاح من المخزون (مع رسالة تقييد) → تحديث البند
+        //  ثم BeginInvoke(RefreshCart): التأجيل للخارج من محرر الجدول
+        //  بأمان — إعادة بناء الصفوف داخل CellEndEdit مباشرة تقتل
+        //  التحرير نفسه (DataGridView يستاء من هدم صفوفه أثناء حديثه).
         private void GridCart_CellValidating(object? sender, DataGridViewCellValidatingEventArgs e)
         {
             if (_gridCart.Columns[e.ColumnIndex].Name != "colQty") return;
@@ -751,6 +820,12 @@ namespace Sayl.UI.Forms
             BeginInvoke(new Action(RefreshCart));
         }
 
+        // 📖 GridCart_CellClick: «موزع أزرار السلة» — النقر على +/−/حذف
+        // يلتقط بمقارنة اسم العمود (لا رقمه — إعادة ترتيب الأعمدة آمنة).
+        //  • قبل أي شيء: إثبات التحرير المعلق (EndEdit) — الكمية المكتوبة
+        //    جزء من العملية، وإلا عمل + على قيمة لم تُعتمد بعد.
+        //  • + يفحص سقف المخزون قبل الزيادة (برسالة، لا صمت).
+        //  • − لا ينزل تحت 1 (للحذف زر حذف — خلط العمليتين يشوش).
         private void GridCart_CellClick(object? sender, DataGridViewCellEventArgs e)
         {
             HideSearchPopup();
@@ -1034,6 +1109,12 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── الجلسة والمخزون ─────────────────
+        // 📖 OpenSessionAsync: «جلسة العمل» — النموذج المحاسبي لكل كاشير:
+        //  كل عملية بيع/قبض/صرف تُنسب لجلسة لها نقد افتتاحي؛ إغلاقها (Z)
+        //  يطابق النقد المتوقع مع المعدود. هنا: جلسة مفتوحة سابقًا؟ تُستأنف
+        //  (استدعاء العمل بعد استراحة يكمل نفس الجلسة) وإلا OpenSessionForm
+        //  لعدّ النقد الافتتاحي. ثم تُقرأ نسبة الضريبة الافتراضية من
+        //  الإعدادات وتُحقن في المربع — الكاشير لا يكتبها يدويًا كل مرة.
         private async Task OpenSessionAsync()
         {
             int userId = SessionState.CurrentUser?.UserId ?? 0;
@@ -1075,6 +1156,10 @@ namespace Sayl.UI.Forms
             }
         }
 
+        // 📖 RefreshStockAsync: لقطة أرصدة المخزون كاملة للذاكرة
+        // (_stockByProduct: معرف → متاح). تُقرأ عند الفتح وبعد كل
+        // بيع/مرتجع/استلام — هي مصدر «سقف الكمية» في السلة بأكملها.
+        // فشلها لا يعطل البيع: القيم تصفر ببساطة (فقط تفقد التقييد).
         private async Task RefreshStockAsync()
         {
             try
@@ -1092,6 +1177,13 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── البحث والإضافة للسلة ─────────────────
+        // 📖 AddToCart: قلب السلة — قاعدتان:
+        //  1) «دمج أو إضافة»: منتج موجود؟ كمية++ (سطر واحد لكل منتج —
+        //     الفاتورة تبقى قصيرة)؛ جديد؟ CartItem بكمية 1.
+        //  2) «سقف ناعم ثم تنبيه»: تجاوز المتاح يمنع الزيادة أصلًا
+        //     (منع مسبق أفضل من فشل لاحق)، والوصول للحد ينبّه دون منع —
+        //     لاحظ الفرق: AddToCart الموجود = منع، الجديد الذي نال
+        //     الكمية كاملة = تنبيه فقط (بيع خدمي/صفر مخزون ممكن).
         private void AddToCart(DtoProduct product)
         {
             var existing = _cart.FirstOrDefault(i => i.ProductId == product.ProductId);
@@ -1126,6 +1218,13 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── السلة والإجماليات ─────────────────
+        // 📖 RefreshCart: «مصدر الحقيقة يرسم» — يهدم صفوف الجدول ويعيد
+        // بناءها من _cart (لا تحرير موضعي للخلايا) — أبسط نموذجًا وأقل
+        // إمساكًا بالحالة المتشابكة؛ جدول كاشير صغير يجعله مجاني الأداء.
+        // الشارة: «N بند • M قطعة» — البنود والقطعات معلومات مختلفتان
+        // (الكاشير يهتم بالقطع عند الجرد، والزبون بالبنود عند الفحص).
+        // لون الصافي: رمادي عند الفراغ («لا شيء يُدفع») وAccent عند الحياة.
+        // ثم التغذية الحية لشاشة الزبون الثاني (إن وجدت).
         private void RefreshCart()
         {
             _gridCart.Rows.Clear();
@@ -1143,6 +1242,12 @@ namespace Sayl.UI.Forms
             NotifyCustomerDisplay();
         }
 
+        // 📖 معادلة التسعير (تفحصها المحاسبة — لا تعدلها بتفاهم):
+        //  الصافي = (المجموع − المجموع × نسبةالخصم) × (1 + نسبةالضريبة/100)
+        //  الترتيب مقصود: الخصم على المجموع أولًا، والضريبة على الصافي
+        //  بعد الخصم (الطريقة الأشهر في المتاجر — لا ضريبة على مبلغ
+        //  لم يُطلب أصلًا). ParsePercent: يرفض السالب ويقص فوق 100.
+        //  كل القيم decimal (لا double أبدًا — فاصلة عائمة نقود = خطيئة).
         private decimal Subtotal => _cart.Sum(i => i.Total);
 
         private decimal DiscountPercent => ParsePercent(_txtDiscount.Text);
@@ -1206,6 +1311,23 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── الدفع / التعليق ─────────────────
+        // ═══════════════════════════════════════════════
+        // 📖 CheckoutAsync — المسار المالي الأهم في النظام:
+        //
+        //  مسار البيع (suspend=false):
+        //    تأكيد → إشعار شاشة الزبون («جهّز المبلغ») → PaymentForm
+        //    (دفعات مقسمة/دَين لعميل) → بناء DtoCheckoutRequest →
+        //    ProcessCheckoutAsync (معاملة واحدة: فاتورة+دفعات+مخزون
+        //    +حركة+أرصدة) → سؤال الطباعة → تصفير السلة → تحديث المخزون.
+        //
+        //  مسار التعليق (suspend=true — F3):
+        //    «فاتورة مؤجلة»: تحجز مخزونها (لا يبيعها كاشير آخر) وتعود
+        //    من شاشة الفواتير المعلقة للاستكمال أو الإلغاء (يحرر الحجز).
+        //
+        //  💡 نقطة الإلغاء الحساسة: إلغاء الدفع يعيد شاشة الزبون
+        //     (checkoutRequested:false) — كل مسار خروج يُعلم الشاشة
+        //     الثانية، وإلا بقيت «جهّز المبلغ» لزبون لم يشترِ.
+        // ═══════════════════════════════════════════════
         private async Task CheckoutAsync(bool suspend)
         {
             HideSearchPopup();
@@ -1302,6 +1424,11 @@ namespace Sayl.UI.Forms
         // (PDF في Documents\Sayl_POS\Invoices ثم فتح نافذة الطباعة بالنسخة الجاهزة)
 
         // ───────────────── المرتجع / النقد / إغلاق الجلسة ─────────────────
+        // 📖 نوافذ الكاشير الجانبية — نمط موحد: ShowDialog (نافذة حوارية
+        // توقف POS حتى تغلق — الكاشير لا يبيع ويعيد بنفس اللحظة)، ثم
+        // «تحديث ما مسّته النافذة»: المرتجع/المعلقة تحدث المخزون، إغلاق
+        // الجلسة يفتح جلسة جديدة، وكلها تعيد التركيز لمربع البحث —
+        // الماسح أول ما ينتظر بعد أي نافذة (سلسلة عمل متصلة).
         private void ShowReturnForm()
         {
             using var form = new ReturnForm();
