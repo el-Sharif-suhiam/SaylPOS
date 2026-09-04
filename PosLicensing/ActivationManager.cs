@@ -24,6 +24,48 @@ namespace PosLicensing
             return ValidateAgainstThisDevice(stored);
         }
 
+        // ─────────────────────────────────────────────────
+        // VULN-27: مرساة زمنية ضد رجوع الساعة
+        // كان الفحص يعتمد على ساعة الجهاز وحدها — رجوع الساعة أيامًا يعيد
+        // إحياء رخصة منتهية. الآن: كل فحص ناجح يخزن «آخر وقت رؤية» (UTC)
+        // في قيمة Registry منفصلة؛ وإن رُصد الوقت الحالي أقدم من آخر رؤية
+        // بأكثر من يوم واحد كامل (سماح ضبط يدوي طفيف) تُعتبر الساعة مرجوعة
+        // والرخصة مرفوضة — الترخيص التجريبي لا يُمدد بإرجاع عقارب الساعة.
+        // ─────────────────────────────────────────────────
+        private const string LastSeenValueName = "LastSeenUtc";
+        private static readonly TimeSpan ClockRollbackTolerance = TimeSpan.FromDays(1);
+
+        private static bool ClockWasRolledBack()
+        {
+            try
+            {
+                using RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryPath, true)
+                                        ?? Registry.CurrentUser.CreateSubKey(RegistryPath);
+                string raw = key.GetValue(LastSeenValueName) as string;
+                if (!long.TryParse(raw, out long lastSeenTicks))
+                {
+                    // أول فحص — نسجل ونكمل
+                    key.SetValue(LastSeenValueName, DateTime.UtcNow.Ticks.ToString());
+                    return false;
+                }
+
+                var lastSeen = new DateTime(lastSeenTicks, DateTimeKind.Utc);
+                var now = DateTime.UtcNow;
+
+                if (now < lastSeen - ClockRollbackTolerance)
+                    return true; // الساعة رُجعت أيامًا — رفض
+
+                // تحديث المرساة (تقدم طبيعي أو رجوع ضمن السماح)
+                key.SetValue(LastSeenValueName, now.Ticks.ToString());
+                return false;
+            }
+            catch
+            {
+                // Registry معطوب؟ لا نعطل البرنامج بالخطأ — سلوك التحقق الأصلي يكفي
+                return false;
+            }
+        }
+
         public static bool Activate(string licenseText, out string error)
         {
             error = null;
@@ -87,6 +129,8 @@ namespace PosLicensing
             LicensePayload payload;
             if (!LicenseCrypto.TryVerify(licenseText, PublicKeyXml, out payload)) return false;
             if (payload.ExpiryTicksUtc < DateTime.UtcNow.Ticks) return false;
+            // VULN-27: مرساة زمنية — رجوع الساعة لا يُحيي رخصة منتهية
+            if (ClockWasRolledBack()) return false;
 
             string currentHwid = MachineFingerprint.Normalize(MachineFingerprint.GetDeviceCode());
             return string.Equals(payload.Hwid, currentHwid, StringComparison.Ordinal);

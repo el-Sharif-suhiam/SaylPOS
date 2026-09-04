@@ -322,7 +322,10 @@ namespace Sayl.Core.Services
             {
                 if (!products.TryGetValue(item.ProductId, out var prod))
                     throw new InvalidOperationException($"المنتج {item.ProductName} غير موجود.");
-                total += prod.BasePrice * item.Quantity;
+
+                // VULN-14: سعر السلة (snapshot) أولًا — وإن غاب (مستدعٍ قديم)
+                // فسعر المنتج الحالي كما كان.
+                total += (item.UnitPrice ?? prod.BasePrice) * item.Quantity;
             }
 
             // ══ VULN-02: حراس المبالغ (حدود الخدمة — الواجهة ليست حد الثقة) ══
@@ -373,24 +376,25 @@ namespace Sayl.Core.Services
             return invoice;
         }
 
-        private async Task AddInvoiceItemsAsync(int invoiceId, List<DtoCheckoutItem> items)
-        {
-            foreach (var item in items)
-            {
-                var product = await _dbContext.Products.FindAsync(item.ProductId);
-                var invoiceItem = new InvoiceItem
-                {
-                    InvoiceId = invoiceId,
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    BatchId = item.BatchId, // قد يكون null
-                    ItemPrice = product?.BasePrice ?? 0,
-                    ItemCost = product?.CostPrice
-                };
+         private async Task AddInvoiceItemsAsync(int invoiceId, List<DtoCheckoutItem> items)
+         {
+             foreach (var item in items)
+             {
+                 var product = await _dbContext.Products.FindAsync(item.ProductId);
+                 var invoiceItem = new InvoiceItem
+                 {
+                     InvoiceId = invoiceId,
+                     ProductId = item.ProductId,
+                     Quantity = item.Quantity,
+                     BatchId = item.BatchId, // قد يكون null
+                     // VULN-14: snapshot سعر السلة — لا السعر الحالي بعد لحظة البناء
+                     ItemPrice = item.UnitPrice ?? product?.BasePrice ?? 0,
+                     ItemCost = product?.CostPrice
+                 };
 
             _dbContext.InvoiceItems.Add(invoiceItem);
-            }
-        }
+             }
+         }
 
         private async Task ReserveStockAsync(List<DtoCheckoutItem> items)
         {
@@ -457,12 +461,15 @@ namespace Sayl.Core.Services
                         .ToListAsync();
 
                     int remaining = item.Quantity;
+                    int? firstConsumedBatchId = null; // VULN-36: الدفعة الأولى المستهلكة فعليًا
                     foreach (var batch in batches)
                     {
                         if (remaining <= 0) break;
                         int take = Math.Min(remaining, batch.BatchQuantity);
                         batch.BatchQuantity -= take;
                         remaining -= take;
+
+                        firstConsumedBatchId ??= batch.BatchId;
 
                         _dbContext.StockMovements.Add(new StockMovement
                         {
@@ -478,6 +485,26 @@ namespace Sayl.Core.Services
 
                     if (remaining > 0)
                         throw new InvalidOperationException($"المخزون غير كافٍ لتغطية الطلب للمنتج {product.Name}");
+
+                    // VULN-36: كتابة الدفعة الفعلية على بند الفاتورة — كانت
+                    // كل فواتير البيع المباشر تحمل BatchId=null فيُفقد تتبع
+                    // FEFO/الصلاحية، ومرتجعها كان يزيد Inventory بلا Batch
+                    // ولا حركة (انحراف ثلاثي دائم). أول دفعة مستهلكة تُثبَّت
+                    // على البند؛ التوزيع الكامل موثق في StockMovements.
+                    // ⚠️ البحث في الكيانات المتتبعة (Local) لا القاعدة:
+                    // البنود أُضيفت للـ tracker ولم تُحفظ بعد — استعلام القاعدة
+                    // يرمي "Sequence contains no elements". Local يعطي نفس
+                    // الكائن الذي سيُحفظ فتُكتب الدفعة في نفس الحفظ.
+                    if (firstConsumedBatchId.HasValue && item.BatchId == null)
+                    {
+                        var trackedItem = _dbContext.InvoiceItems.Local
+                            .FirstOrDefault(ii => ii.InvoiceId == invoiceId && ii.ProductId == item.ProductId);
+                        if (trackedItem != null)
+                        {
+                            trackedItem.BatchId = firstConsumedBatchId;
+                            item.BatchId = firstConsumedBatchId; // كائن الطلب أيضًا — لأسطح لاحقة داخل نفس الطلب
+                        }
+                    }
                 
 
                 // تحديث المخزون

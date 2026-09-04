@@ -90,6 +90,11 @@ namespace Sayl.UI.Infrastructure
                     else
                         PdfService.ExportInvoiceReceipt(inv, storeName, storePhone, vatNumber, receiptFooter, filePath);
                 });
+
+                // VULN-40: كل طباعة كانت تترك PDF بطابع زمني جديد — سنوات التشغيل
+                // تكدس آلاف الملفات في Documents بلا نظافة. نحتفظ بآخر 3 نسخ
+                // لكل فاتورة (النسخة الحالية + سابقتان للتراجع) ونمسح الأقدم.
+                PruneOldInvoicePdfs(dir, invoice.InvoiceId);
             }
             catch
             {
@@ -109,6 +114,31 @@ namespace Sayl.UI.Infrastructure
             catch
             {
                 UiHelpers.ShowInfo(owner, $"الملف محفوظ في:\n{filePath}");
+            }
+        }
+
+        /// <summary>VULN-40: مسح نسخ PDF القديمة لفاتورة معينة — الاحتفاظ
+        /// بآخر MaxCopiesPerInvoice (الطوابع الزمنية بالنزول؛ الأقدم يُحذف).
+        /// فشل المسح صمت مقصود — النظافة تحسين لا توقف الطباعة.</summary>
+        private const int MaxCopiesPerInvoice = 3;
+        private static void PruneOldInvoicePdfs(string dir, int invoiceId)
+        {
+            try
+            {
+                string prefix = $"Invoice_{invoiceId}_";
+                var oldFiles = new DirectoryInfo(dir)
+                    .EnumerateFiles(prefix + "*.pdf")
+                    .OrderByDescending(f => f.Name) // الطابع الزمني في الاسم — نصيًا يعادل زمنيًا
+                    .Skip(MaxCopiesPerInvoice)
+                    .ToList();
+                foreach (var f in oldFiles)
+                {
+                    try { f.Delete(); } catch { /* مقفول من العارض — المرة القادمة */ }
+                }
+            }
+            catch
+            {
+                // نظافة تحسينية — لا تفسد الطباعة
             }
         }
     }

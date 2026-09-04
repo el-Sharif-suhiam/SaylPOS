@@ -72,7 +72,11 @@ namespace Sayl.UI.Forms
             _gridShifts.Columns.Add("colName", "الاسم");
             _gridShifts.Columns.Add("colStart", "من");
             _gridShifts.Columns.Add("colEnd", "إلى");
-            _gridShifts.Columns.Add("colNight", "يعبر منتصف الليل");
+            // VULN-37: العنوان كان «يعبر منتصف الليل» موحيًا بأن الرواتب تعالج
+            // العبور — القرار المعماري الموثق: الشفتات بيانات تنظيمية فقط
+            // (الرواتب تحسب أيام العمل/الإجازات لا الساعات) — فسمّينا العمود
+            // بما هو فعلًا: «شفت ليلي» معلومة عرض لا وعد حساب.
+            _gridShifts.Columns.Add("colNight", "شفت ليلي");
             _gridShifts.Columns.Add("colNotes", "ملاحظات");
             _gridShifts.Columns["colName"].FillWeight = 24;
             _gridShifts.Columns["colStart"].FillWeight = 14;

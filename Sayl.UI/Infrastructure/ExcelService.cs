@@ -45,11 +45,19 @@ namespace Sayl.UI.Infrastructure
                 {
                     var cell = ws.Cell(headerRow + 1 + r, c + 1);
                     string raw = c < rows[r].Length ? rows[r][c] ?? "" : "";
+                    string trimmed = raw.Trim();
 
                     // الأرقام تُدرج كأرقام حقيقية حتى تعمل المعادلات/الفرز في Excel
-                    if (decimal.TryParse(raw.Trim(), System.Globalization.NumberStyles.Any,
-                            System.Globalization.CultureInfo.InvariantCulture, out var num) &&
-                        raw.Trim() != "")
+                    // VULN-41: كان الفحص InvariantCulture فقط — الشاشات تنسق
+                    // بثقافة الجهاز (على العربية: فواصل/مجموعات مختلفة) فكانت
+                    // كل المبالغ تهبط «نصًا» يكسر المعادلات والفلاتر. الآن:
+                    // نجرب الثقافتين — الجهاز أولًا (المصدر) ثم الثابتة (فأرقام
+                    // الجداول النصية القديمة تظل تعمل).
+                    if (trimmed != "" &&
+                        (decimal.TryParse(trimmed, System.Globalization.NumberStyles.Any,
+                             System.Globalization.CultureInfo.CurrentCulture, out var num) ||
+                         decimal.TryParse(trimmed, System.Globalization.NumberStyles.Any,
+                             System.Globalization.CultureInfo.InvariantCulture, out num)))
                         cell.Value = num;
                     else
                         cell.Value = raw;

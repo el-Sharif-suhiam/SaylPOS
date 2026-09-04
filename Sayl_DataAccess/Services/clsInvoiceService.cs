@@ -116,6 +116,8 @@ namespace Sayl.Core.Services
                 NetAmount = invoice.NetAmount,
                 Notes = invoice.Notes,
                 CreatedAt = invoice.CreatedAt,
+                // VULN-42: كان يملأ Items ويترك ItemsCount=0 — فخ لمستهلك مستقبلي
+                ItemsCount = invoice.InvoiceItems.Count,
                 Items = invoice.InvoiceItems.Select(ii => new InvoiceItemVM
                 {
                     InvoiceItemId = ii.InvoiceItemId,

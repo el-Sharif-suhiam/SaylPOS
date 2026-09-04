@@ -726,11 +726,16 @@ namespace Sayl.UI.Infrastructure
             EnsureLicense();
 
             // كشف تلقائي: هل آخر عمود رقمي (مبالغ)؟ — يستحق صف إجمالي بالأسفل
+            // VULN-41: فحص بثقافتين — الجهاز أولًا (الشاشات تنسق بها) ثم
+            // الثابتة — فلا يفوت صف الإجمالي على جهاز عربي الفواصل.
+            bool ParseMoneyCell(string? s, out decimal v) =>
+                decimal.TryParse(s?.Trim(), System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.CurrentCulture, out v) ||
+                decimal.TryParse(s?.Trim(), System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out v);
+
             bool hasAmounts = headers.Length >= 2 && rows.Count > 0 && rows.All(r =>
-                r.Length >= headers.Length &&
-                decimal.TryParse(r[^1]?.Trim(),
-                    System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out _));
+                r.Length >= headers.Length && ParseMoneyCell(r[^1], out _));
 
             var document = QuestPDF.Fluent.Document.Create(container =>
             {
@@ -822,9 +827,7 @@ namespace Sayl.UI.Infrastructure
 
                                 decimal total = 0;
                                 foreach (var r in rows)
-                                    if (decimal.TryParse(r[^1]?.Trim(),
-                                        System.Globalization.NumberStyles.Any,
-                                        System.Globalization.CultureInfo.InvariantCulture, out var v))
+                                    if (ParseMoneyCell(r[^1], out var v)) // VULN-41: ثقافتان
                                         total += v;
 
                                 table.Cell().Background("#002B54").PaddingVertical(5).PaddingHorizontal(6)

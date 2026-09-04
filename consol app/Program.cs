@@ -183,6 +183,13 @@ namespace consol_app
                     var qtyAfter = await vdb.Batches.AsNoTracking().Where(b => b.BatchId == firstId).Select(b => b.BatchQuantity).FirstAsync();
                     Check("FEFO batch consumed", qtyAfter == batchesBefore[0].Qty - 2,
                         $"batch {firstId}: {batchesBefore[0].Qty}->{qtyAfter}");
+
+                    // VULN-36: بند فاتورة البيع يحمل دفعة FEFO الفعلية (كانت null دائمًا)
+                    var itemBatch = await vdb.InvoiceItems.AsNoTracking()
+                        .Where(ii => ii.InvoiceId == _saleInvoiceId && ii.ProductId == prodId)
+                        .Select(ii => ii.BatchId).FirstOrDefaultAsync();
+                    Check("sale item carries FEFO batch", itemBatch == firstId,
+                        $"itemBatchId={itemBatch} expectedFefo={firstId}");
                 }
                 var payCount = await vdb.Payments.CountAsync(p => p.InvoiceId == _saleInvoiceId);
                 Check("two payment rows saved", payCount == 2, $"count={payCount}");
@@ -199,6 +206,41 @@ namespace consol_app
             var oversell = await checkout.ProcessCheckoutAsync(huge);
             Check("oversell rejected with clear message", !oversell.IsSuccess && !oversell.Message.Contains("فشلت عملية البيع"),
                 $"msg='{oversell.Message}'");
+
+            // VULN-14: snapshot سعر السلة — الفاتورة تُبنى على سعر لحظة الإضافة
+            // حتى لو تغير سعر المنتج قبل الحفظ (كان الزبون يُفترس بصمت)
+            {
+                using var ps = Scope();
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                var prod = await pdb.Products.FindAsync(prodId);
+                decimal original = prod.BasePrice;
+                prod.BasePrice = original + 100m; // محاكاة تعديل سعر أثناء بناء سلة
+                await pdb.SaveChangesAsync();
+                prod.BasePrice = original; // إرجاع فوري — الفحص على الطلب فقط
+                var snapReq = new DtoCheckoutRequest
+                {
+                    UserId = cashier.UserId,
+                    SessionId = sessionId,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = 1, UnitPrice = original } },
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = original, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                };
+                var snapSale = await checkout.ProcessCheckoutAsync(snapReq);
+                Check("VULN-14 snapshot sale executes", snapSale.IsSuccess, snapSale.Message);
+                if (snapSale.IsSuccess)
+                {
+                    var pricedAt = await VerifyAsync(vdb =>
+                        vdb.InvoiceItems.AsNoTracking()
+                            .Where(ii => ii.InvoiceId == snapSale.Data && ii.ProductId == prodId)
+                            .Select(ii => ii.ItemPrice).FirstAsync());
+                    Check("VULN-14 invoice priced at cart snapshot", pricedAt == original,
+                        $"priced={pricedAt} expected={original}");
+                }
+                // إرجاع سعر المنتج في القاعدة (المحاكاة انتهت)
+                await pdb.SaveChangesAsync();
+                var restored = await VerifyAsync(vdb =>
+                    vdb.Products.AsNoTracking().Where(p => p.ProductId == prodId).Select(p => p.BasePrice).FirstAsync());
+                Check("product price restored", restored == original, $"{restored}");
+            }
 
             return (sessionId, cashier.UserId);
         }

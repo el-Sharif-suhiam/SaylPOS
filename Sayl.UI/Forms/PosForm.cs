@@ -1395,7 +1395,8 @@ namespace Sayl.UI.Forms
                 {
                     ProductId = i.ProductId,
                     ProductName = i.ProductName,
-                    Quantity = i.Quantity
+                    Quantity = i.Quantity,
+                    UnitPrice = i.Price // VULN-14: snapshot سعر السلة — سعر لحظة الإضافة
                 }).ToList(),
                 DiscountPercent = DiscountPercent,
                 DiscountAmount = 0,

@@ -28,6 +28,12 @@ namespace Common.DTOs.RequestModels
         public string ProductName { get; set; }
         public int Quantity { get; set; }
         public int? BatchId { get; set; }
+
+        /// <summary>VULN-14: سعر الوحدة وقت إضافة البند للسلة (snapshot) —
+        /// اختياري للتوافق؛ إن مُلئ تُبنى الفاتورة عليه لا على سعر المنتج
+        /// الحالي (تعديل سعر أثناء بناء سلة كان يفترس الزبون بصمت).
+        /// null = السلوك القديم (اقرأ السعر الحالي من Products).</summary>
+        public decimal? UnitPrice { get; set; }
     }
 
     public class DtoPaymentInfo

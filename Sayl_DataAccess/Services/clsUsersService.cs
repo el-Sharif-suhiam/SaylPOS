@@ -120,10 +120,17 @@ namespace Sayl.Core.Services
                 return saved ? Result.Ok("تم إضافة المستخدم بنجاح.") : Result.Fail("فشل حفظ المستخدم.");
             }
 
+        // VULN-43: كان بلا سياسة كلمة مرور إطلاقًا (يقبل "a") — كود ميت لكنه
+        // لغم مفخخ لأول من يوصله (مسار "فرض تغيير" مستقبلي مثلًا). الآن
+        // يخضع لنفس سياسة الإضافة/الإعادة/التغيير — يظل بلا مستدعٍ لكنه آمن.
         public async Task<Result> UpdatePasswordAsync(int userId, string newPassword)
             {
                 if (string.IsNullOrWhiteSpace(newPassword))
                     return Result.Fail("كلمة المرور الجديدة غير صالحة.");
+
+                string? policyError = ValidatePasswordPolicy(newPassword);
+                if (policyError != null)
+                    return Result.Fail(policyError);
 
                 var user = await _dbContext.Users.FindAsync(userId);
                 if (user == null)
