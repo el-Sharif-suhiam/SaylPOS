@@ -18,7 +18,7 @@ namespace Sayl.Core.Services
 
         private static readonly string[] ValidTypes = { "stock", "service", "manufactured" };
 
-        public async Task<List<DtoProduct>> GetProductsListAsync(string search = "", string? type = null, bool includeInactive = false)
+        public async Task<List<DtoProduct>> GetProductsListAsync(string search = "", string? type = null, bool includeInactive = false, int take = 0)
         {
             var query = _dbContext.Products.AsQueryable();
 
@@ -29,7 +29,19 @@ namespace Sayl.Core.Services
                 query = query.Where(p => p.Type == type.ToLower());
 
             if (!string.IsNullOrWhiteSpace(search))
-                query = query.Where(p => p.Name.Contains(search) || (p.Barcode != null && p.Barcode.Contains(search)));
+            {
+                // VULN-28: أحرف البدل % و _ تُهرَّب قبل Contains — كانت تقلب
+                // البحث إلى LIKE '%\%%' فتطابق كل الكتالوج (DoS بحث الكاشير
+                // مع استعلامات النقل الكامل أدناه).
+                string like = search.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
+                query = query.Where(p => p.Name.Contains(like) || (p.Barcode != null && p.Barcode.Contains(like)));
+            }
+
+            // VULN-38: حد اختياري على مستوى SQL — كان الاستدعاء الحي في POS
+            // يجلب الكتالوج كاملًا ثم Take(8) في الذاكرة (نقل كامل عبر السلك
+            // كل 250ms من الكتابة الحية). الاستدعاءات الأخرى بلا حد = سلوكها كما كان.
+            if (take > 0)
+                query = query.Take(take);
 
             return await query
                 .OrderBy(p => p.Name)

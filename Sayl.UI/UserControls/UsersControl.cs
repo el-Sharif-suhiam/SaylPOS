@@ -135,7 +135,8 @@ namespace Sayl.UI.UserControls
                 using (var scope = Program.Services.CreateScope())
                 {
                     var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
-                    result = await usersService.ChangeRoleAsync(user.UserId, newRole.RoleId);
+                    result = await usersService.ChangeRoleAsync(user.UserId, newRole.RoleId,
+                        actorUserId: SessionState.CurrentUser?.UserId ?? 0); // VULN-26: بوابة خدمية
                 }
 
                 UiHelpers.ShowResult(cmb, result);

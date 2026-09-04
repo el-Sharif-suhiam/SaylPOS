@@ -106,9 +106,11 @@ namespace Sayl.UI.Forms
             using (var scope = Program.Services.CreateScope())
             {
                 var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
+                // VULN-26: نمرر الفاعل — الخدمة تفحص الصلاحية بنفسها
+                int actorId = SessionState.CurrentUser?.UserId ?? 0;
                 result = _existing == null
-                    ? await partyService.AddNewPartyWithRoleAsync(dto)
-                    : await partyService.UpdatePartyAsync(dto);
+                    ? await partyService.AddNewPartyWithRoleAsync(dto, actorUserId: actorId)
+                    : await partyService.UpdatePartyAsync(dto, actorUserId: actorId);
             }
 
             if (!result.IsSuccess)

@@ -67,6 +67,8 @@ namespace Sayl.Core.Services
             });
         }
 
+        // VULN-26: المصروف يعدل ربح الفترة مباشرة — الإضافة/التعديل الآن
+        // يطلبان محاسبًا فأعلى (الحذف كان وحده محروسًا).
         public async Task<Result<int>> AddNewExpenseAsync(DtoExpense dtoExpense)
         {
             if (string.IsNullOrWhiteSpace(dtoExpense.Description))
@@ -74,6 +76,10 @@ namespace Sayl.Core.Services
 
             if (dtoExpense.Amount <= 0)
                 return Result<int>.Fail("مبلغ المصروف يجب أن يكون أكبر من صفر.");
+
+            int creatorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
+            if (!clsPermissions.HasAtLeast(creatorRole, clsPermissions.Accountant))
+                return Result<int>.Fail("إضافة مصروف يتطلب صلاحية محاسب أو أعلى.");
 
             if (dtoExpense.UserId.HasValue)
             {
@@ -109,6 +115,11 @@ namespace Sayl.Core.Services
             var expense = await _dbContext.Expenses.FindAsync(dtoExpense.ExpenseId);
             if (expense == null)
                 return Result.Fail("المصروف غير موجود.");
+
+            // VULN-26: تعديل المصروف = تعديل الربح — محاسب فأعلى
+            int editorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
+            if (!clsPermissions.HasAtLeast(editorRole, clsPermissions.Accountant))
+                return Result.Fail("تعديل المصروفات يتطلب صلاحية محاسب أو أعلى.");
 
             if (!string.IsNullOrWhiteSpace(dtoExpense.Description))
                 expense.Description = clsValidation.ValidateString(dtoExpense.Description, "Description", 255);
@@ -152,6 +163,16 @@ namespace Sayl.Core.Services
             bool saved = (await _dbContext.SaveChangesAsync()) > 0;
 
             return saved ? Result.Ok("تم حذف المصروف بنجاح.") : Result.Fail("فشل حذف المصروف.");
+        }
+
+        /// <summary>قيمة دور المستخدم (VULN-26 — بوابات المصروفات الخدمية).</summary>
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return 0;
+            var user = await _dbContext.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+            return user?.Role.RoleValue ?? 0;
         }
     }
 }

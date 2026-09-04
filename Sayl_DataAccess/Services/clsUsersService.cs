@@ -134,8 +134,24 @@ namespace Sayl.Core.Services
                 return Result.Ok("تم تغيير كلمة المرور بنجاح.");
             }
 
-        public async Task<Result> ChangeRoleAsync(int userId, byte newRoleId)
+        // VULN-26: تغيير الأدوار كان بلا حارس خدمي — الشاشة الأدمنية وحدها تحجب.
+        // إسناد صلاحية 100 لمستخدم = ترقية ذاتية محتملة من أي عميل خدمة.
+        public async Task<Result> ChangeRoleAsync(int userId, byte newRoleId, int? actorUserId = null)
             {
+                // بوابة الأدمن: من يغيّر الأدوار يجب أن يكون أدمن فأعلى
+                if (actorUserId.HasValue)
+                {
+                    var actor = await _dbContext.Users.Include(u => u.Role)
+                        .FirstOrDefaultAsync(u => u.UserId == actorUserId.Value);
+                    if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Admin))
+                        return Result.Fail("تغيير أدوار المستخدمين يتطلب صلاحية مدير.");
+                }
+                else
+                {
+                    // بلا فاعل = استدعاء قديم غير موثوق — نرفض (الواجهة تمرره دائمًا الآن)
+                    return Result.Fail("تغيير الدور يتطلب تحديد المستخدم الفاعل.");
+                }
+
                 bool roleExists = await _dbContext.Roles.AnyAsync(r => r.RoleId == newRoleId);
                 if (!roleExists)
                     return Result.Fail("الدور الجديد غير موجود.");

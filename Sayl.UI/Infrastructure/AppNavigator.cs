@@ -13,7 +13,12 @@ namespace Sayl.UI.Infrastructure
             Show(initial);
         }
 
-        /// <summary>عرض نافذة جديدة وإخفاء الحالية (الإغلاق يبقى حدثًا عند إغلاق النافذة الحالية فقط).</summary>
+        /// <summary>عرض نافذة جديدة وإخفاء الحالية (الإغلاق يبقى حدثًا عند إغلاق النافذة الحالية فقط).
+        /// VULN-39: النافذة السابقة كانت تُخفى فقط فتبقى بذاكرتها كاملة
+        /// (MainForm محمولة الجداول) لكل دورة دخول/خروج — تسريب بطيء على
+        /// جهاز كاشير مشترك. الآن: LoginForm المرجعة تُتلف (كشف الدخول لا
+        /// يخفي عمدًا أبدًا — إن أُخفيت فلموتها آمن)، والنماذج الكبيرة
+        /// تُخفى وتُتلف عند إغلاق بديلتها.</summary>
         public void Show(Form next)
         {
             var previous = _current;
@@ -21,7 +26,13 @@ namespace Sayl.UI.Infrastructure
 
             next.FormClosed += OnCurrentFormClosed;
             next.Show();
-            previous?.Hide();
+
+            if (previous != null && !ReferenceEquals(previous, next))
+            {
+                // إخفاء أولًا (قطع المرئية) ثم تلف — النموذج القديم لن يعود
+                previous.Hide();
+                previous.Dispose();
+            }
         }
 
         private void OnCurrentFormClosed(object? sender, FormClosedEventArgs e)

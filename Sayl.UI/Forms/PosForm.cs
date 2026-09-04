@@ -518,8 +518,9 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
-                var matches = (await productService.GetProductsListAsync(term))
-                    .Take(8)
+                // VULN-38: الحد يُدفع إلى SQL (take: 8) — كان الكتالوج
+                // يُنقل كاملًا عبر السلك ثم يُقص في الذاكرة كل ضغطة بحث حية.
+                var matches = (await productService.GetProductsListAsync(term, take: 8))
                     .Select(p => new SearchItem
                     {
                         Product = p,

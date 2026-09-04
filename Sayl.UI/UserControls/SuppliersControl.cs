@@ -151,7 +151,7 @@ namespace Sayl.UI.UserControls
             using (var scope = Program.Services.CreateScope())
             {
                 var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
-                result = await partyService.ActivatePartyAsync(party.PartyId);
+                result = await partyService.ActivatePartyAsync(party.PartyId, SessionState.CurrentUser?.UserId ?? 0); // VULN-26: بوابة خدمية
             }
 
             UiHelpers.ShowResult(this, result);
@@ -214,7 +214,7 @@ namespace Sayl.UI.UserControls
             using (var scope = Program.Services.CreateScope())
             {
                 var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
-                result = await partyService.DeactivatePartyAsync(party.PartyId);
+                result = await partyService.DeactivatePartyAsync(party.PartyId, SessionState.CurrentUser?.UserId ?? 0); // VULN-26: بوابة خدمية
             }
 
             UiHelpers.ShowResult(this, result);

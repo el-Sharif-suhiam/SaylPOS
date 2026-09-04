@@ -204,7 +204,11 @@ namespace Sayl.UI.Forms
             using (var scope = Program.Services.CreateScope())
             {
                 var partyService = scope.ServiceProvider.GetRequiredService<clsPartyService>();
-                result = await partyService.AddNewPartyWithRoleAsync(dto);
+                // VULN-26: إضافة سريعة من POS — مسموحة للكاشير للعميل النقدي فقط
+                // (الخدمة تفحص fromPosQuickAdd وترفض أي نوع آخر بلا صلاحية)
+                result = await partyService.AddNewPartyWithRoleAsync(dto,
+                    actorUserId: SessionState.CurrentUser?.UserId ?? 0,
+                    fromPosQuickAdd: true);
             }
 
             if (!result.IsSuccess)
