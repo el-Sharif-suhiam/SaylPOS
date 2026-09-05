@@ -187,7 +187,7 @@ namespace Sayl.UI.Forms
                 foreach (var inv in _invoices)
                 {
                     _grid.Rows.Add(inv.InvoiceId,
-                        inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
+                        inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                         inv.PartyName ?? "عميل مجهول",
                         inv.ItemsCount,
                         UiHelpers.Money(inv.NetAmount));

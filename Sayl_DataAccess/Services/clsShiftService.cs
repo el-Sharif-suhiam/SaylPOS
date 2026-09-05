@@ -191,7 +191,7 @@ namespace Sayl.Core.Services
             if (assignment.EffectiveTo != null)
                 return Result.Fail("التعيين منتهٍ بالفعل.");
 
-            assignment.EffectiveTo = DateOnly.FromDateTime(DateTime.Today);
+            assignment.EffectiveTo = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم إنهاء تعيين الشفت.");
         }

@@ -1,4 +1,4 @@
-﻿using Common.DTOs.RequestModels;
+using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -137,7 +137,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.Now,
+                    CreatedAt = DateTime.UtcNow,
                     TotalAmount = -returnedGross,
                     DiscountAmount = -returnedDiscount,
                     TaxAmount = -returnedTax,
@@ -283,7 +283,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.Now,
+                    CreatedAt = DateTime.UtcNow,
                     TotalAmount = -returnedGrossSup,
                     DiscountAmount = -returnedDiscountSup,
                     TaxAmount = -returnedTaxSup,
@@ -385,13 +385,13 @@ namespace Sayl.Core.Services
                         Quantity = quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
             }
 
             inventory.QuantityAvailable += quantity;
-            inventory.UpdatedAt = DateTime.Now;
+            inventory.UpdatedAt = DateTime.UtcNow;
         }
 
         private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
@@ -425,13 +425,13 @@ namespace Sayl.Core.Services
                         Quantity = -quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
             }
 
             inventory.QuantityAvailable -= quantity;
-            inventory.UpdatedAt = DateTime.Now;
+            inventory.UpdatedAt = DateTime.UtcNow;
         }
 
         // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —
@@ -463,10 +463,10 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = cashRefund,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.Now),
+                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
                     PaymentMethod = "cash",
                     Notes = $"استرداد نقدي عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
             }
 
@@ -501,10 +501,10 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = cashRefund,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.Now),
+                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
                     PaymentMethod = "cash",
                     Notes = $"استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
             }
 

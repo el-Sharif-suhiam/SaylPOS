@@ -187,7 +187,7 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var reportService = scope.ServiceProvider.GetRequiredService<clsReportService>();
-                var result = await reportService.GetDashboardSummaryAsync(DateOnly.FromDateTime(DateTime.Today));
+                var result = await reportService.GetDashboardSummaryAsync(AppClock.Today);
 
                 if (!result.IsSuccess || result.Data == null)
                 {
@@ -235,7 +235,7 @@ namespace Sayl.UI.UserControls
                 _ => TrendPeriod.Year
             };
 
-            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+            DateOnly today = AppClock.Today;
             DateOnly from = today.AddDays(-(int)period + 1);
             var groupBy = period switch
             {

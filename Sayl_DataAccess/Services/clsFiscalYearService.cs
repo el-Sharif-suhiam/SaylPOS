@@ -34,7 +34,7 @@ namespace Sayl.Core.Services
                 return d;
 
             // الافتراضي: بداية السنة الميلادية الجارية عند أول تشغيل
-            var today = DateOnly.FromDateTime(DateTime.Today);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
             return new DateOnly(today.Year, 1, 1);
         }
 
@@ -110,7 +110,7 @@ namespace Sayl.Core.Services
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
                           && i.CreatedAt >= fys.ToDateTime(TimeOnly.MinValue)
-                          && i.CreatedAt < DateTime.Now)
+                          && i.CreatedAt < DateTime.UtcNow)
                 .Select(i => new { i.InvoiceId, i.NetAmount })
                 .ToListAsync();
 
@@ -141,7 +141,7 @@ namespace Sayl.Core.Services
             if (newYearStart <= current)
                 return Result.Fail($"تاريخ السنة الجديدة يجب أن يكون بعد {current:yyyy-MM-dd} (بداية السنة الحالية).");
 
-            if (newYearStart > DateOnly.FromDateTime(DateTime.Today))
+            if (newYearStart > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
                 return Result.Fail("لا يمكن بدء سنة مالية في المستقبل.");
 
             var readiness = await GetCloseReadinessAsync();
@@ -149,7 +149,7 @@ namespace Sayl.Core.Services
                 return Result.Fail("فحوصات الجاهزية لم تكتمل:\n- " + string.Join("\n- ", readiness.Errors));
 
             await _settings.SetAsync(KeyFiscalYearStart, newYearStart.ToString("yyyy-MM-dd"));
-            await _settings.SetAsync(KeyLastCloseDate, DateTime.Today.ToString("yyyy-MM-dd"));
+            await _settings.SetAsync(KeyLastCloseDate, DateTime.UtcNow.AddHours(3).ToString("yyyy-MM-dd"));
 
             clsAudit.Log(_dbContext, userId, "CloseFiscalYear",
                 $"إغلاق السنة المالية: من {current:yyyy-MM-dd} إلى {newYearStart:yyyy-MM-dd} — ديون محمولة: {readiness.OldDebtCarried:N2}");

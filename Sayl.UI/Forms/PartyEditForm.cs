@@ -98,8 +98,8 @@ namespace Sayl.UI.Forms
                 AddressLine1 = _txtAddress.Text?.Trim(),
                 Notes = _txtNotes.Text?.Trim(),
                 IsActive = _existing?.IsActive ?? true,
-                CreatedAt = _existing?.CreatedAt ?? DateTime.Now,
-                UpdatedAt = DateTime.Now
+                CreatedAt = _existing?.CreatedAt ?? DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             };
 
             Result result;

@@ -201,7 +201,7 @@ namespace Sayl.UI.Forms
                 lblResign.Visible = resigned;
                 _dtpResignDate.Visible = resigned;
                 if (resigned && _existing?.ResignDate == null)
-                    _dtpResignDate.Value = DateTime.Today; // افتراضي: اليوم — قابل للتعديل
+                    _dtpResignDate.Value = AppClock.NowLocal.Date; // افتراضي: اليوم — قابل للتعديل
             };
             y += 8; // الحقل مخفي عادة — لا يستهلك الصف الكامل
 

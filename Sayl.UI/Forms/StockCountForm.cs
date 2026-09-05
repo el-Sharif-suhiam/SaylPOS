@@ -367,7 +367,7 @@ namespace Sayl.UI.Forms
                 catch { }
 
                 string title = _sessionOpen ? "قائمة الجرد (للعد الفعلي)" : "قائمة الجرد",
-                       period = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                       period = Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"),
                        user = SessionState.CurrentUser?.UserName ?? "", path = save.FileName;
                 await Task.Run(() =>
                     PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
@@ -395,7 +395,7 @@ namespace Sayl.UI.Forms
 
             try
             {
-                ExcelService.ExportTable("قائمة الجرد", DateTime.Now.ToString("yyyy-MM-dd HH:mm"), headers, rows, save.FileName);
+                ExcelService.ExportTable("قائمة الجرد", Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"), headers, rows, save.FileName);
                 UiHelpers.ShowInfo(this, $"تم إنشاء الملف:\n{save.FileName}");
             }
             catch (Exception ex)

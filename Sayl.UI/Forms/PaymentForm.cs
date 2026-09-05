@@ -268,7 +268,7 @@ namespace Sayl.UI.Forms
                 payments.Add(new DtoPaymentInfo
                 {
                     Amount = value,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.Today),
+                    PaymentDate = AppClock.Today,
                     Method = methodValue
                 });
             }

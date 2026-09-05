@@ -87,7 +87,7 @@ namespace Sayl.Core.Services
             if (periodTo < periodFrom)
                 return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
 
-            if (periodTo > DateOnly.FromDateTime(DateTime.Today))
+            if (periodTo > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
                 return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
 
             var employees = await _dbContext.Employees
@@ -163,7 +163,7 @@ namespace Sayl.Core.Services
                     Additions = 0,
                     Net = Math.Round(gross, 2),
                     Status = enPayrollStatus.pending,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 };
 
                 _dbContext.PayrollRecords.Add(record);
@@ -292,13 +292,13 @@ namespace Sayl.Core.Services
                     Category = SalaryExpenseCategory,
                     Notes = $"كشف راتب #{record.PayrollId}",
                     UserId = actorUserId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 };
                 _dbContext.Expenses.Add(expense);
                 await _dbContext.SaveChangesAsync(); // لاستخراج ExpenseId
 
                 record.Status = enPayrollStatus.paid;
-                record.PaidAt = DateTime.Now;
+                record.PaidAt = DateTime.UtcNow;
                 record.ExpenseId = expense.ExpenseId;
 
                 clsAudit.Log(_dbContext, actorUserId, "PayPayroll",

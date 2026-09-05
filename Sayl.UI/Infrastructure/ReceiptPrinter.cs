@@ -134,7 +134,7 @@ namespace Sayl.UI.Infrastructure
                 if (!string.IsNullOrWhiteSpace(vatNumber)) Line($"الرقم الضريبي: {vatNumber}");
                 bytes.AddRange(new byte[] { 0x1B, 0x61, 0x00 });    // محاذاة يمين
                 Divider();
-                Line($"فاتورة: {invoice.InvoiceId}    {invoice.CreatedAt:yyyy-MM-dd HH:mm}");
+                Line($"فاتورة: {invoice.InvoiceId}    {Sayl.UI.Infrastructure.AppClock.ToLocal(invoice.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}");
                 Line($"الكاشير: {invoice.CashierName}");
                 if (!string.IsNullOrWhiteSpace(invoice.PartyName)) Line($"العميل: {invoice.PartyName}");
                 Divider();

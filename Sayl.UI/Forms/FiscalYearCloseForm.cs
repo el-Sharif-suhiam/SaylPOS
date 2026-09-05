@@ -296,7 +296,7 @@ namespace Sayl.UI.Forms
                 if (r.IsSuccess)
                 {
                     _backupFile = r.Data;
-                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, AppClock.NowLocal.Date.ToString("yyyy-MM-dd"));
                 }
                 UiHelpers.ShowResult(this, r);
             }
@@ -316,7 +316,7 @@ namespace Sayl.UI.Forms
             btn.Enabled = false;
             try
             {
-                var today = DateOnly.FromDateTime(DateTime.Today);
+                var today = AppClock.Today;
 
                 using var scope = Program.Services.CreateScope();
                 var reportService = scope.ServiceProvider.GetRequiredService<clsReportService>();
@@ -401,7 +401,7 @@ namespace Sayl.UI.Forms
                 Width = 160,
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "yyyy-MM-dd",
-                Value = DateTime.Today,
+                Value = AppClock.NowLocal.Date,
                 RightToLeftLayout = false
             };
             row.Controls.Add(_dtpNewYear);

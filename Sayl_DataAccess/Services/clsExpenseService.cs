@@ -1,4 +1,4 @@
-﻿using Common.DTOs;
+using Common.DTOs;
 using Common.Results;
 using Common.Utils;
 using Microsoft.EntityFrameworkCore;
@@ -96,7 +96,7 @@ namespace Sayl.Core.Services
                 Category = string.IsNullOrWhiteSpace(dtoExpense.Category) ? null : dtoExpense.Category,
                 Notes = string.IsNullOrWhiteSpace(dtoExpense.Notes) ? null : dtoExpense.Notes,
                 UserId = dtoExpense.UserId,
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             };
 
             _dbContext.Expenses.Add(expense);

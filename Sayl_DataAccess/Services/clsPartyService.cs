@@ -1,4 +1,4 @@
-﻿using Common.DTOs;
+using Common.DTOs;
 using Common.Exceptions;
 using Common.Results;
 using Common.Utils;
@@ -114,7 +114,7 @@ namespace Sayl.Core.Services
              if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
                  party.Notes = dtoParty.Notes;
 
-             party.UpdatedAt = DateTime.Now;
+             party.UpdatedAt = DateTime.UtcNow;
              await _dbContext.SaveChangesAsync();
              return Result.Ok("تم تحديث الطرف بنجاح.");
          }

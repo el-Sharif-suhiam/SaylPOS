@@ -183,7 +183,7 @@ namespace Sayl.UI.Forms
                 _lblHeader.Text =
                     $"فاتورة رقم: {inv.InvoiceId}    النوع: {TranslateType(inv.Type)}    الحالة: {TranslateStatus(inv.Status)}    الدفع: {TranslatePayment(inv.PaymentStatus)}\n" +
                     $"العميل: {inv.PartyName ?? "عميل مجهول"}    {(string.IsNullOrWhiteSpace(inv.PartyPhone) ? "" : $"جوال: {inv.PartyPhone}    ")}الكاشير: {inv.CashierName}\n" +
-                    $"التاريخ: {inv.CreatedAt:yyyy-MM-dd HH:mm}";
+                    $"التاريخ: {Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}";
 
                 _gridItems.Rows.Clear();
                 foreach (var item in inv.Items)

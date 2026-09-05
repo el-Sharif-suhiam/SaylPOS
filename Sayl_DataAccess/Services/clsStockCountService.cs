@@ -59,7 +59,7 @@ namespace Sayl.Core.Services
                     BookQuantity = p.Book,
                     UnitCost = p.CostPrice,
                     CountedBy = userId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
             }
 

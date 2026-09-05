@@ -329,7 +329,7 @@ namespace Sayl.UI.Infrastructure
                                 c2.Item().Text(typeLabel).FontSize(17).Bold().FontColor("#FFFFFF");
                                 c2.Item().PaddingTop(2).Text($"رقم الفاتورة: {inv.InvoiceId}")
                                     .FontSize(10f).FontColor(Sky);
-                                c2.Item().Text(inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-")
+                                c2.Item().Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-")
                                     .FontSize(9f).FontColor(MutedGrey);
                             });
                         });
@@ -587,7 +587,7 @@ namespace Sayl.UI.Infrastructure
                         col.Item().Row(r =>
                         {
                             r.RelativeItem().Text($"{TranslateType(inv.Type)} رقم: {inv.InvoiceId}").FontSize(9.5f).Bold();
-                            r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt?.ToString("dd/MM/yyyy") ?? "-").FontSize(8);
+                            r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("dd/MM/yyyy") : "-").FontSize(8);
                         });
                         col.Item().Row(r =>
                         {
@@ -755,7 +755,7 @@ namespace Sayl.UI.Infrastructure
                             r.ConstantItem(180).AlignLeft().Column(c2 =>
                             {
                                 c2.Item().Text("سيل POS").FontSize(9).Bold().FontColor("#93C5FD");
-                                c2.Item().Text(DateTime.Now.ToString("yyyy-MM-dd HH:mm"))
+                                c2.Item().Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
                                     .FontSize(8.5f).FontColor("#94A3B8");
                             });
                         });

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Common.DTOs.ViewModel;
 using System;
@@ -218,9 +218,9 @@ namespace Sayl.Core.Services
             // قفل الحساب بعد المحاولات الفاشلة المتكررة
             lock (_failedLogins)
             {
-                if (_failedLogins.TryGetValue(username, out var state) && state.LockUntil > DateTime.Now)
+                if (_failedLogins.TryGetValue(username, out var state) && state.LockUntil > DateTime.UtcNow)
                 {
-                    int remaining = (int)Math.Ceiling((state.LockUntil - DateTime.Now).TotalMinutes);
+                    int remaining = (int)Math.Ceiling((state.LockUntil - DateTime.UtcNow).TotalMinutes);
                     return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {remaining} دقيقة.");
                 }
             }
@@ -268,7 +268,7 @@ namespace Sayl.Core.Services
                     UserId = user.UserId,
                     Action = "Login",
                     Details = $"تسجيل دخول المستخدم '{user.Username}'",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
                 await _dbContext.SaveChangesAsync();
             }
@@ -294,7 +294,7 @@ namespace Sayl.Core.Services
             {
                 var (count, _) = _failedLogins.TryGetValue(username, out var s) ? s : (0, DateTime.MinValue);
                 count++;
-                var lockUntil = count >= MaxLoginAttempts ? DateTime.Now.AddMinutes(LockMinutes) : DateTime.MinValue;
+                var lockUntil = count >= MaxLoginAttempts ? DateTime.UtcNow.AddMinutes(LockMinutes) : DateTime.MinValue;
                 _failedLogins[username] = (count >= MaxLoginAttempts ? 0 : count, lockUntil);
             }
         }
@@ -311,7 +311,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "Logout",
                 Details = $"تسجيل خروج المستخدم '{user.Username}'",
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 
@@ -346,7 +346,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "ChangePassword",
                 Details = $"المستخدم '{user.Username}' غيّر كلمة مروره.",
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 
@@ -373,7 +373,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = "ResetPassword",
                 Details = $"تم إعادة تعيين كلمة مرور المستخدم '{user.Username}' بواسطة مسؤول.",
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 

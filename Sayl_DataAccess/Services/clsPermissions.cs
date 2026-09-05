@@ -26,7 +26,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = action,
                 Details = details,
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             });
         }
     }

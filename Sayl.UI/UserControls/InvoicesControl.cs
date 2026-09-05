@@ -74,7 +74,7 @@ namespace Sayl.UI.UserControls
                             ? "سداد"
                             : "";
                         rowIndex = Grid.Rows.Add(inv.InvoiceId,
-                            inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
+                            inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                             inv.PartyName ?? "-",
                             inv.UserName ?? "-",
                             TranslateStatus(inv.Status),
@@ -88,7 +88,7 @@ namespace Sayl.UI.UserControls
                     else
                     {
                         rowIndex = Grid.Rows.Add(inv.InvoiceId,
-                            inv.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "-",
+                            inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                             inv.PartyName ?? "-",
                             inv.UserName ?? "-",
                             TranslateStatus(inv.Status),

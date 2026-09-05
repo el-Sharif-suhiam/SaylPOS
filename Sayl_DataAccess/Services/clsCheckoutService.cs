@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Common.DTOs;
 using Common.Results;
 using Sayl.Core.Data;
@@ -369,7 +369,7 @@ namespace Sayl.Core.Services
                 TaxAmount = tax,
                 NetAmount = net,
                 Notes = request.Notes,
-                CreatedAt = DateTime.Now
+                CreatedAt = DateTime.UtcNow
             };
 
             _dbContext.Invoices.Add(invoice);
@@ -452,7 +452,7 @@ namespace Sayl.Core.Services
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
                     // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
-                    DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+                    DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
                     var batches = await _dbContext.Batches
                         .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
                                  && (b.ExpiryDate == null || b.ExpiryDate >= today))
@@ -479,7 +479,7 @@ namespace Sayl.Core.Services
                             Quantity = -take,
                             SourceType = "Invoice",
                             SourceId = invoiceId,
-                            CreatedAt = DateTime.Now
+                            CreatedAt = DateTime.UtcNow
                         });
                     }
 
@@ -511,7 +511,7 @@ namespace Sayl.Core.Services
                 inv.QuantityAvailable -= item.Quantity;
                 inv.QuantityReserved -= item.Quantity; // تحرير الحجز (إن كان موجوداً)
                 if (inv.QuantityReserved < 0) inv.QuantityReserved = 0;
-                inv.UpdatedAt = DateTime.Now;
+                inv.UpdatedAt = DateTime.UtcNow;
             }
         }
 
@@ -550,7 +550,7 @@ namespace Sayl.Core.Services
                     PaymentDate = payment.PaymentDate,
                     PaymentMethod = payment.Method,
                     Notes = null,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
                 paid += payment.Amount;
             }

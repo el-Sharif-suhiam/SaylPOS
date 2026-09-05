@@ -738,7 +738,7 @@ namespace Sayl.Core.Services
             if (withinDays <= 0)
                 withinDays = 90;
 
-            DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
             DateOnly until = today.AddDays(withinDays);
 
             var result = await _dbContext.Batches

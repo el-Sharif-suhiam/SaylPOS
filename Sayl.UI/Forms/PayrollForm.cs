@@ -103,7 +103,7 @@ namespace Sayl.UI.Forms
             _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 140, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd", RightToLeftLayout = false };
 
             // افتراضي: الشهر الماضي كاملًا (فترة منتهية قابلة للتوليد فورًا)
-            var today = DateTime.Today;
+            var today = AppClock.NowLocal.Date;
             var firstOfThisMonth = new DateTime(today.Year, today.Month, 1);
             _dtpFrom.Value = firstOfThisMonth.AddMonths(-1);
             _dtpTo.Value = firstOfThisMonth.AddDays(-1);

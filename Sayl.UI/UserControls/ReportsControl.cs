@@ -94,12 +94,12 @@ namespace Sayl.UI.UserControls
 
             var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _lblFrom = lblFrom;
-            _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = DateTime.Today.AddMonths(-1), RightToLeftLayout = false };
+            _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date.AddMonths(-1), RightToLeftLayout = false };
             _dtpFrom.ValueChanged += async (_, _) => await RunReportAsync();
 
             var lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _lblTo = lblTo;
-            _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = DateTime.Today, RightToLeftLayout = false };
+            _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date, RightToLeftLayout = false };
             _dtpTo.ValueChanged += async (_, _) => await RunReportAsync();
 
             _btnRefresh = AppTheme.MakeButton("عرض", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 42);

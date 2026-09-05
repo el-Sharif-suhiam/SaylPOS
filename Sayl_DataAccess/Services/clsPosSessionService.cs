@@ -1,4 +1,4 @@
-﻿using Common.DTOs.ViewModel;
+using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -64,7 +64,7 @@ namespace Sayl.Core.Services
             {
                 UserId = userId,
                 OpeningAmount = openingAmount,
-                StartedAt = DateTime.Now,
+                StartedAt = DateTime.UtcNow,
                 Status = enPosSessionStatusType.open
             };
 
@@ -172,7 +172,7 @@ namespace Sayl.Core.Services
 
                 session.ExpectedAmount = expected;
                 session.ClosingAmount = closingAmount;
-                session.ClosedAt = DateTime.Now;
+                session.ClosedAt = DateTime.UtcNow;
                 session.Status = enPosSessionStatusType.closed;
 
                 await _dbContext.SaveChangesAsync();

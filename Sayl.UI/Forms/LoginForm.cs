@@ -262,9 +262,19 @@ namespace Sayl.UI.Forms
             btnClose.Bounds = new Rectangle(ClientSize.Width - 60, 16, 44, 44);
             btnClose.Click += (_, _) => Close();
 
-            // ── أسفل النافذة: حالة الاتصال ثم سطر الحقوق ──
-            // _lblConnectionStatus يبدأ بـ «جارٍ التحقق...» ويُحدَّث من
-            // LoadUsersAsync (أخضر عند النجاح/أحمر عند الفشل).
+            // ── أسفل النافذة: ساعة البرنامج + حالة الاتصال ثم سطر الحقوق ──
+            // 🕐 VULN-45: الساعة تُعرض من اللحظة الأولى — «توقيت البرنامج»
+            // الموحد (UTC+3) الذي ستُخزن به كل الجلسات والفواتير.
+            var lblClock = new Label
+            {
+                Bounds = new Rectangle(0, 560, 560, 24),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.FromArgb(191, 219, 254),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            AppClockLabel.Attach(lblClock);
+            Controls.Add(lblClock);
+
             _lblConnectionStatus = new Label
             {
                 Text = "جارٍ التحقق من الاتصال بقاعدة البيانات...",

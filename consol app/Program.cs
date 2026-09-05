@@ -566,6 +566,17 @@ namespace consol_app
                 }
             }
 
+            // VULN-45 (ب): كل طابع جديد يُخزن UTC — والفرق بين
+            // طابع الفاتورة والآن-UTC لا يتجاوز دقائق معدودة (ليس 3 ساعات).
+            if (_saleInvoiceId > 0)
+            {
+                var stamp = await VerifyAsync(vdb =>
+                    vdb.Invoices.Where(i => i.InvoiceId == _saleInvoiceId).Select(i => i.CreatedAt).FirstAsync());
+                double gapMinutes = Math.Abs((DateTime.UtcNow - (stamp ?? DateTime.UtcNow)).TotalMinutes);
+                Check("VULN-45 stamps stored as UTC", gapMinutes < 5,
+                    $"gap={gapMinutes:0.0}min (لو ~180 = ما زال محليًا!)");
+            }
+
             // VULN-03 (الحل ب): الاسترداد النسبي — فاتورة بخصم وضريبة يُرد
             // ما دُفع فعلًا لا الخام: بيع 100 بخصم 10% وضريبة 10% => صافي 99.
             // إرجاع نصف البضاعة => استرداد 49.50 (نصف الصافي) لا 50 الخام.

@@ -1,4 +1,4 @@
-﻿using Common.DTOs.RequestModels;
+using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
 using Microsoft.EntityFrameworkCore;
@@ -57,7 +57,7 @@ namespace Sayl.Core.Services
                         BatchNumber = request.BatchNumber.Trim(),
                         ExpiryDate = request.ExpiryDate,
                         BatchQuantity = request.Quantity,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     };
                     _dbContext.Batches.Add(batch);
                     // فهرس UQ_Batches_Product_Batch يمنع التكرار المتوازي — نلتقطه ونزيد الدفعة الموجودة
@@ -111,7 +111,7 @@ namespace Sayl.Core.Services
                     Quantity = request.Quantity,
                     SourceType = request.InvoiceId.HasValue ? "Invoice" : "StockReceive",
                     SourceId = request.InvoiceId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 await _dbContext.SaveChangesAsync();
@@ -165,7 +165,7 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المخزون المتاح غير كافٍ للمنتج {product.Name}.");
 
                 // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
-                DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+                DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
                 var batches = await _dbContext.Batches
                     .Where(b => b.ProductId == productId && b.BatchQuantity > 0
                              && (b.ExpiryDate == null || b.ExpiryDate >= today))
@@ -190,7 +190,7 @@ namespace Sayl.Core.Services
                         Quantity = -take,
                         SourceType = invoiceId.HasValue ? "Invoice" : "StockSale",
                         SourceId = invoiceId,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
 
@@ -198,7 +198,7 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المخزون غير كافٍ لتغطية الطلب للمنتج {product.Name}.");
 
                 inventory.QuantityAvailable -= quantity;
-                inventory.UpdatedAt = DateTime.Now;
+                inventory.UpdatedAt = DateTime.UtcNow;
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -268,7 +268,7 @@ namespace Sayl.Core.Services
                                 BatchNumber = request.BatchNumber.Trim(),
                                 ExpiryDate = request.ExpiryDate,
                                 BatchQuantity = request.Quantity,
-                                CreatedAt = DateTime.Now
+                                CreatedAt = DateTime.UtcNow
                             };
                             _dbContext.Batches.Add(batch);
                             // التقاط الدفعة المتنافسة (فهرس فريد) وتحويلها إلى زيادة
@@ -308,7 +308,7 @@ namespace Sayl.Core.Services
                         Quantity = request.Quantity,
                         SourceType = "ManualAdjustment",
                         SourceId = null,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
                 else
@@ -343,14 +343,14 @@ namespace Sayl.Core.Services
                         Quantity = -request.Quantity,
                         SourceType = "ManualAdjustment",
                         SourceId = null,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     });
                 }
 
                 if (!request.IsIncrease)
                 {
-                    inventory.UpdatedAt = DateTime.Now;
-                    inventory.LastCountedAt = DateTime.Now;
+                    inventory.UpdatedAt = DateTime.UtcNow;
+                    inventory.LastCountedAt = DateTime.UtcNow;
                 }
 
                 _dbContext.SystemLogs.Add(new SystemLog
@@ -358,7 +358,7 @@ namespace Sayl.Core.Services
                     UserId = request.UserId,
                     Action = "StockAdjustment",
                     Details = $"تسوية مخزون للمنتج '{product.Name}': {(request.IsIncrease ? "زيادة" : "نقصان")} {request.Quantity}. السبب: {request.Reason}",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 await _dbContext.SaveChangesAsync();
@@ -406,7 +406,7 @@ namespace Sayl.Core.Services
                         BatchNumber = request.TargetBatchNumber.Trim(),
                         ExpiryDate = request.TargetExpiryDate ?? sourceBatch.ExpiryDate,
                         BatchQuantity = request.Quantity,
-                        CreatedAt = DateTime.Now
+                        CreatedAt = DateTime.UtcNow
                     };
                     _dbContext.Batches.Add(targetBatch);
                     // التقاط دفعة هدف مُنشأة بالتوازي (فهرس فريد) وتحويلها إلى زيادة
@@ -457,7 +457,7 @@ namespace Sayl.Core.Services
                     Quantity = -request.Quantity,
                     SourceType = "BatchTransfer",
                     SourceId = targetBatch.BatchId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 _dbContext.StockMovements.Add(new StockMovement
@@ -468,7 +468,7 @@ namespace Sayl.Core.Services
                     Quantity = request.Quantity,
                     SourceType = "BatchTransfer",
                     SourceId = sourceBatch.BatchId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 _dbContext.SystemLogs.Add(new SystemLog
@@ -476,7 +476,7 @@ namespace Sayl.Core.Services
                     UserId = request.UserId,
                     Action = "BatchTransfer",
                     Details = $"نقل {request.Quantity} من الدفعة '{sourceBatch.BatchNumber}' إلى الدفعة '{targetBatch.BatchNumber}'.",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 await _dbContext.SaveChangesAsync();

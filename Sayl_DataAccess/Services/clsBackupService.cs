@@ -30,14 +30,14 @@ namespace Sayl.Core.Services
                 await EnsureSqlServiceCanWriteAsync(backupFolder);
 
                 string dbName = _dbContext.Database.GetDbConnection().Database;
-                string fileName = $"{dbName}_{DateTime.Now:yyyyMMdd_HHmmss}.bak";
+                string fileName = $"{dbName}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.bak";
                 string fullPath = Path.Combine(backupFolder, fileName);
 
                 string sql = "BACKUP DATABASE [" + dbName.Replace("]", "]]") + "] TO DISK = @path WITH INIT, NAME = @name";
                 var parameters = new[]
                 {
                     new SqlParameter("@path", fullPath),
-                    new SqlParameter("@name", $"Sayl automatic backup {DateTime.Now:yyyy-MM-dd HH:mm}")
+                    new SqlParameter("@name", $"Sayl automatic backup {DateTime.UtcNow:yyyy-MM-dd HH:mm}")
                 };
 
                 await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters);
@@ -220,14 +220,14 @@ namespace Sayl.Core.Services
                 await EnsureSqlServiceCanWriteAsync(folder);
 
                 string dbName = _dbContext.Database.GetDbConnection().Database;
-                string fileName = $"{dbName}_{DateTime.Now:yyyyMMdd_HHmmss}_{fileNameSuffix}.bak";
+                string fileName = $"{dbName}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{fileNameSuffix}.bak";
                 string fullPath = Path.Combine(folder, fileName);
 
                 string sql = "BACKUP DATABASE [" + dbName.Replace("]", "]]") + "] TO DISK = @path WITH INIT, NAME = @name";
                 var parameters = new[]
                 {
                     new SqlParameter("@path", fullPath),
-                    new SqlParameter("@name", $"Sayl {fileNameSuffix} backup {DateTime.Now:yyyy-MM-dd HH:mm}")
+                    new SqlParameter("@name", $"Sayl {fileNameSuffix} backup {DateTime.UtcNow:yyyy-MM-dd HH:mm}")
                 };
 
                 await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters);

@@ -215,7 +215,7 @@ namespace Sayl.UI.Forms
                     _gridShifts.Rows.Add(s.Name, s.StartTime.ToString("HH:mm"), s.EndTime.ToString("HH:mm"),
                         s.CrossesMidnight ? "نعم" : "", s.Notes ?? "");
 
-                var holidays = await shiftService.GetHolidaysAsync(DateTime.Today.Year);
+                var holidays = await shiftService.GetHolidaysAsync(AppClock.Today.Year);
                 _gridHolidays.Rows.Clear();
                 foreach (var h in holidays)
                     _gridHolidays.Rows.Add(h.Name, h.HolidayDate.ToString("yyyy-MM-dd"),
@@ -278,7 +278,7 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var shiftService = scope.ServiceProvider.GetRequiredService<clsShiftService>();
-                var holidays = await shiftService.GetHolidaysAsync(DateTime.Today.Year);
+                var holidays = await shiftService.GetHolidaysAsync(AppClock.Today.Year);
                 var result = await shiftService.DeleteHolidayAsync(holidays[idx].HolidayId);
                 UiHelpers.ShowResult(this, result);
                 if (result.IsSuccess)
@@ -342,8 +342,8 @@ namespace Sayl.UI.Forms
 
             _dtpStart = new DateTimePicker { Bounds = new Rectangle(235, 116, 175, 34), Format = DateTimePickerFormat.Time, ShowUpDown = true, RightToLeftLayout = false };
             _dtpEnd = new DateTimePicker { Bounds = new Rectangle(30, 116, 175, 34), Format = DateTimePickerFormat.Time, ShowUpDown = true, RightToLeftLayout = false };
-            _dtpStart.Value = DateTime.Today.AddHours(8);
-            _dtpEnd.Value = DateTime.Today.AddHours(16);
+            _dtpStart.Value = AppClock.NowLocal.Date.AddHours(8);
+            _dtpEnd.Value = AppClock.NowLocal.Date.AddHours(16);
 
             var lblHint = new Label
             {

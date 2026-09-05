@@ -1,4 +1,4 @@
-﻿using Common.DTOs;
+using Common.DTOs;
 using Common.Results;
 using Common.Utils;
 using Microsoft.EntityFrameworkCore;
@@ -160,7 +160,7 @@ namespace Sayl.Core.Services
                     CostPrice = dtoProduct.CostPrice,
                     ReorderLevel = dtoProduct.ReorderLevel,
                     IsActive = true,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 };
 
                 _dbContext.Products.Add(product);
@@ -173,7 +173,7 @@ namespace Sayl.Core.Services
                         ProductId = product.ProductId,
                         QuantityAvailable = 0,
                         QuantityReserved = 0,
-                        UpdatedAt = DateTime.Now
+                        UpdatedAt = DateTime.UtcNow
                     });
                     await _dbContext.SaveChangesAsync();
                 }

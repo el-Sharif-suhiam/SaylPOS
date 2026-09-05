@@ -217,7 +217,7 @@ namespace Sayl.UI.Forms
                     var shiftService = scope.ServiceProvider.GetRequiredService<clsShiftService>();
                     var shifts = await shiftService.GetShiftsListAsync();
                     result = await shiftService.AssignShiftAsync(_employeeId,
-                        shifts[_cmbShifts.SelectedIndex].ShiftId, days, DateOnly.FromDateTime(DateTime.Today));
+                        shifts[_cmbShifts.SelectedIndex].ShiftId, days, AppClock.Today);
                 }
 
                 UiHelpers.ShowResult(this, result);

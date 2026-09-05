@@ -42,7 +42,7 @@ namespace Sayl.Core.Services
                     Amount = amount,
                     Reason = reason.Trim(),
                     UserId = userId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 _dbContext.SystemLogs.Add(new SystemLog
@@ -50,7 +50,7 @@ namespace Sayl.Core.Services
                     UserId = userId,
                     Action = movementType == 'I' ? "CashIn" : "CashOut",
                     Details = $"مبلغ: {amount:N2} — السبب: {reason.Trim()} — جلسة #{sessionId}",
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow
                 });
 
                 await _dbContext.SaveChangesAsync();

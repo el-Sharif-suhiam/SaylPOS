@@ -17,7 +17,7 @@ namespace Sayl.UI.Infrastructure
             ws.RightToLeft = true;
 
             // ── الترويسة ──
-            ws.Cell(1, 1).Value = $"{title}    ({period})    — سيل POS    {DateTime.Now:yyyy-MM-dd HH:mm}";
+            ws.Cell(1, 1).Value = $"{title}    ({period})    — سيل POS    {Sayl.UI.Infrastructure.AppClock.NowLocal:yyyy-MM-dd HH:mm}";
             ws.Cell(1, 1).Style.Font.Bold = true;
             ws.Cell(1, 1).Style.Font.FontSize = 14;
             ws.Cell(1, 1).Style.Font.FontColor = XLColor.White;

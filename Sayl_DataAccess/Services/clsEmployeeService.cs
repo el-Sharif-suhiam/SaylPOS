@@ -1,4 +1,4 @@
-﻿using Common.DTOs;
+using Common.DTOs;
 using Common.Exceptions;
 using Common.Results;
 using Common.Utils;
@@ -158,7 +158,7 @@ namespace Sayl.Core.Services
                 if (newStatus == "resigned")
                 {
                     employee.Status = newStatus;
-                    employee.ResignDate ??= dtoEmployee.ResignDate ?? DateOnly.FromDateTime(DateTime.Today);
+                    employee.ResignDate ??= dtoEmployee.ResignDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
                 }
                 else
                 {

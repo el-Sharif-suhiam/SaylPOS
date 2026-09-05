@@ -55,7 +55,7 @@ namespace Sayl.UI.Forms
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
                 string lastBackup = await settings.GetAsync(clsSettingsService.KeyLastBackupDate);
-                if (lastBackup == DateTime.Today.ToString("yyyy-MM-dd"))
+                if (lastBackup == AppClock.NowLocal.Date.ToString("yyyy-MM-dd"))
                     return;
 
                 string folder = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
@@ -64,7 +64,7 @@ namespace Sayl.UI.Forms
                 var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
                 var result = await backupService.BackupAsync(folder);
                 if (result.IsSuccess)
-                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, AppClock.NowLocal.Date.ToString("yyyy-MM-dd"));
             }
             catch
             {
@@ -85,7 +85,7 @@ namespace Sayl.UI.Forms
                 var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
                 var result = await backupService.BackupAsync(folder);
                 if (result.IsSuccess)
-                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+                    await settings.SetAsync(clsSettingsService.KeyLastBackupDate, AppClock.NowLocal.Date.ToString("yyyy-MM-dd"));
             }
             catch
             {
@@ -350,7 +350,8 @@ namespace Sayl.UI.Forms
                 ColumnCount = 2
             };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 380));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
 
             _lblPageTitle = new Label
             {
@@ -371,9 +372,22 @@ namespace Sayl.UI.Forms
                 Margin = new Padding(24, 0, 0, 0)
             };
 
+            // 🕐 VULN-45 + طلب المالك: ساعة البرنامج الحية في رأس كل الأقسام —
+            // الأدمن يرى تاريخ ووقت البرنامج (UTC+3 الموحد) الذي تُخزن به
+            // كل الطواسب، لا ساعة جهاز قابلة للعبث أو اختلاف المناطق.
+            var lblClock = new Label
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = AppTheme.PrimaryDark,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold)
+            };
+            AppClockLabel.Attach(lblClock);
+
+            // RTL: العمود 0 يمين (العنوان)، 1 وسط (المستخدم)، 2 يسار (الساعة)
             header.Controls.Add(_lblPageTitle, 0, 0);
             header.Controls.Add(_lblUserInfo, 1, 0);
-
+            header.Controls.Add(lblClock, 2, 0);
             _hostPanel = new Panel
             {
                 Dock = DockStyle.Fill,

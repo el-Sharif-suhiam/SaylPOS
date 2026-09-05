@@ -34,7 +34,7 @@ namespace Sayl.UI.Forms
         // ── محرك الخمول والطفو ──
         private System.Windows.Forms.Timer? _idleTimer;    // يراقب صمت السلة
         private System.Windows.Forms.Timer? _floatTimer;   // حركة «التنفس» للترحيب
-        private DateTime _lastCartChange = DateTime.Now;
+        private DateTime _lastCartChange = DateTime.UtcNow;
         private readonly int _idleSeconds;                   // مهلة الخمول (قابلة للضبط)
         private float _floatPhase;                            // طور الموجة الجيبية
 
@@ -329,7 +329,7 @@ namespace Sayl.UI.Forms
             }
 
             _cart = new CartSnapshot(items, discount, tax, total, checkoutRequested);
-            _lastCartChange = DateTime.Now;
+            _lastCartChange = DateTime.UtcNow;
 
             // أول بند = إنهاء الترحيب فورًا (لا انتظار — استجابة الزبون مقدسة)
             if (items.Count > 0 && _welcomeLayer.Visible)

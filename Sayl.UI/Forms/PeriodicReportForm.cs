@@ -101,10 +101,10 @@ namespace Sayl.UI.Forms
             _cmbType.SelectedIndex = 1;
 
             var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
-            _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 120, Format = DateTimePickerFormat.Short, Value = new DateTime(DateTime.Today.Year, 1, 1) };
+            _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 120, Format = DateTimePickerFormat.Short, Value = new DateTime(AppClock.Today.Year, 1, 1) };
 
             var lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
-            _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 120, Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 120, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date };
 
             _btnGenerate = AppTheme.MakeButton("عرض التقرير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnGenerate.Dock = DockStyle.Right;
@@ -236,7 +236,7 @@ namespace Sayl.UI.Forms
                 return false;
             }
 
-            if (_dtpFrom.Value.Date > DateTime.Today.AddYears(1))
+            if (_dtpFrom.Value.Date > AppClock.NowLocal.Date.AddYears(1))
             {
                 if (!quiet) UiHelpers.ShowError(this, "تاريخ البداية في المستقبل غير مسموح به.");
                 return false;

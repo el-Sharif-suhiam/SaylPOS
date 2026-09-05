@@ -57,13 +57,13 @@ namespace Sayl.Core.Services
                 {
                     SettingKey = key,
                     SettingValue = value,
-                    UpdatedAt = DateTime.Now
+                    UpdatedAt = DateTime.UtcNow
                 });
             }
             else
             {
                 setting.SettingValue = value;
-                setting.UpdatedAt = DateTime.Now;
+                setting.UpdatedAt = DateTime.UtcNow;
             }
 
             await _dbContext.SaveChangesAsync();

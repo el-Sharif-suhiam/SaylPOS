@@ -282,12 +282,27 @@ namespace Sayl.UI.Forms
             btnLogout.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnLogout.Click += async (_, _) => await LogoutAsync();
 
+            // 🕐 VULN-45 + طلب المالك: ساعة البرنامج الحية — التاريخ والوقت
+            // من AppClock (UTC+3 ثابت) لا من ساعة الجهاز: الكاشير يرى «توقيت
+            // البرنامج» الرسمي الذي تُخزن به الفواتير، فلا لخبطة بين ما
+            // يُسجل وما يُعرض مهما عُبث بساعة ويندوز.
+            var lblClock = new Label
+            {
+                Dock = DockStyle.Right,
+                Width = 210,
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = Color.FromArgb(147, 197, 253), // Sky — مميزة على الكحلي
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold)
+            };
+            AppClockLabel.Attach(lblClock);
+
             // ترتيب الإرساء المعكوس: الأخير يُرسّى أولًا
             top.Controls.Add(_txtSearch.Parent!);
             top.Controls.Add(_lblSession);
             top.Controls.Add(lblBrand);
             top.Controls.Add(_logoMark);
             top.Controls.Add(btnLogout);
+            top.Controls.Add(lblClock); // الساعة: أول Right في RTL = أقصى اليمين فوق الشعار
 
             Controls.Add(top);
         }

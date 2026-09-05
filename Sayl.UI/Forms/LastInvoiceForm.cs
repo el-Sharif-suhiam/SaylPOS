@@ -141,7 +141,7 @@ namespace Sayl.UI.Forms
                     $"فاتورة رقم: {inv.InvoiceId}    {InvoiceDetailsForm.TranslateType(inv.Type)}    " +
                     $"{InvoiceDetailsForm.TranslatePayment(inv.PaymentStatus)}\n" +
                     $"العميل: {inv.PartyName ?? "عميل نقدي"}    الكاشير: {inv.CashierName}    " +
-                    $"التاريخ: {inv.CreatedAt:yyyy-MM-dd HH:mm}\n" +
+                    $"التاريخ: {Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}\n" +
                     $"الصافي: {UiHelpers.Money(inv.NetAmount)}    المدفوع: {UiHelpers.Money(inv.PaidAmount)}" +
                     (inv.RemainingAmount > 0 ? $"    المتبقي: {UiHelpers.Money(inv.RemainingAmount)}" : "");
 

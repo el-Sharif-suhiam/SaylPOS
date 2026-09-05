@@ -247,7 +247,7 @@ namespace Sayl.UI.UserControls
                     if (result.IsSuccess)
                     {
                         var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                        await settings.SetAsync(clsSettingsService.KeyLastBackupDate, DateTime.Today.ToString("yyyy-MM-dd"));
+                        await settings.SetAsync(clsSettingsService.KeyLastBackupDate, AppClock.NowLocal.Date.ToString("yyyy-MM-dd"));
                     }
                 }
 

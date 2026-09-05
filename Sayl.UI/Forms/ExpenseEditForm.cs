@@ -49,7 +49,7 @@ namespace Sayl.UI.Forms
             _txtAmount = new TextBox { Bounds = new Rectangle(30, 152, 185, 36), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center, Text = _existing?.Amount.ToString("0.##") ?? "" };
 
             var lblDate = new Label { Text = "التاريخ", Bounds = new Rectangle(225, 128, 185, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _dtpDate = new DateTimePicker { Bounds = new Rectangle(225, 152, 185, 36), Format = DateTimePickerFormat.Short, Value = _existing?.ExpenseDate.ToDateTime(TimeOnly.MinValue) ?? DateTime.Today };
+            _dtpDate = new DateTimePicker { Bounds = new Rectangle(225, 152, 185, 36), Format = DateTimePickerFormat.Short, Value = _existing?.ExpenseDate.ToDateTime(TimeOnly.MinValue) ?? AppClock.NowLocal.Date };
 
             var lblCategory = new Label { Text = "الفئة", Bounds = new Rectangle(30, 198, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbCategory = new ComboBox { Bounds = new Rectangle(30, 222, 380, 36), FlatStyle = FlatStyle.Flat };

@@ -181,7 +181,7 @@ namespace Sayl.UI.Forms
                 PartyType = 'S',
                 PartyId = _partyId,
                 Amount = amount,
-                PaymentDate = DateOnly.FromDateTime(DateTime.Today),
+                PaymentDate = AppClock.Today,
                 Method = method,
                 Notes = string.IsNullOrWhiteSpace(_txtNotes.Text) ? null : _txtNotes.Text.Trim()
             };

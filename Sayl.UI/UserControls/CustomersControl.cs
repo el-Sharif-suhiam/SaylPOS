@@ -127,7 +127,7 @@ namespace Sayl.UI.UserControls
                     PartyId = customer.PartyId,
                     Amount = form.PaymentsList.Sum(p => p.Amount),
                     Method = form.PaymentsList[0].Method,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.Today),
+                    PaymentDate = AppClock.Today,
                     Notes = $"تحصيل دفعة من الرصيد — {customer.Party!.Name}"
                 });
             }

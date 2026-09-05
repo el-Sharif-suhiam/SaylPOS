@@ -80,7 +80,7 @@ namespace Sayl.UI.Forms
             if (extra2.HasValue) Add(extra2.Value.Caption, extra2.Value.Value);
 
             Add("ملاحظات", party.Notes);
-            Add("تاريخ الإضافة", party.CreatedAt == default ? null : party.CreatedAt.ToString("yyyy-MM-dd"));
+            Add("تاريخ الإضافة", party.CreatedAt == default ? null : Sayl.UI.Infrastructure.AppClock.ToLocal(party.CreatedAt).ToString("yyyy-MM-dd"));
             if (row < 14)
                 Add("آخر تحديث", party.UpdatedAt?.ToString("yyyy-MM-dd"));
 

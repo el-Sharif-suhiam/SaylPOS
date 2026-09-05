@@ -773,7 +773,7 @@ namespace Sayl.UI.Forms
                     ? new DtoPaymentInfo
                     {
                         Amount = paid,
-                        PaymentDate = DateOnly.FromDateTime(DateTime.Today),
+                        PaymentDate = AppClock.Today,
                         Method = _cmbMethod.SelectedIndex == 1 ? "card" : "cash"
                     }
                     : null
