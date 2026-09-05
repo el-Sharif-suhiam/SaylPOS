@@ -76,7 +76,55 @@ namespace Sayl.Core.Services
                         throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
                 }
 
-                decimal total = 0;
+                // ══ VULN-03 (الحل ب): الاسترداد النسبي الدقيق ══
+                // الفاتورة الأصلية بُنيت: صافي = (إجمالي − خصم) + ضريبة.
+                // الاسترداد القديم كان بسعر البند الخام → خصم وضريبة يتسربان:
+                // خصم 10%: العميل دفع 90 ويُرد 100 (ربح وهمي 10)؛
+                // ضريبة 10%: دفع 110 ويُرد 100 (خسارة ضريبته بصمت).
+                //
+                // 📖 دقة المعادلة (المطلب: أدق تقريب ممكن):
+                //  1) النسبة = الصافي/الإجمالي تُحفظ decimal كاملة — بلا أي
+                //     تقريب وسيط (كل تقريب وسيط يضاعف الخطأ عبر البنود).
+                //  2) الاسترداد التراكمي يُحسب كسرًا كاملًا ثم يُقرَّب إلى
+                //     المنزلتين مرة واحدة أخيرة فقط.
+                //  3) حارس القسمة على صفر: فاتورة إجماليها صفر (هدية كاملة)
+                //     لا تُقسَّم — الاسترداد صفر لكل بنودها (صافيها صفر).
+                //
+                // مثال التحقق: إجمالي 100 خصم 10 ضريبة 0 → صافي 90.
+                // نسبة = 0.9. إرجاع بند 30×2: استرداد = 60×0.9 = 54.00
+                // — يطابق ما دفعه العميل عن هذه الوحدات فعلًا.
+                decimal invTotal = originalInvoice.TotalAmount;
+                decimal invNet = originalInvoice.NetAmount;
+                decimal netRatio = invTotal > 0 ? invNet / invTotal : 0m;
+
+                decimal rawRefund = 0m;
+                foreach (var g in GroupRequestItems(request.Items))
+                {
+                    var originalItem = originalInvoice.InvoiceItems
+                        .First(ii => ii.ProductId == g.ProductId);
+
+                    rawRefund += originalItem.ItemPrice * g.Quantity * netRatio;
+                }
+                // تقريب واحد نهائي — لا تقارب متسلسل يتراكم خطؤه
+                decimal total = Math.Round(rawRefund, 2, MidpointRounding.AwayFromZero);
+
+                // أثر هذا المرتجع على مستوى الفاتورة الأصلية — للتقرير والتدقيق:
+                // الخصم المسترد = نصيب البنود من الخصم (نسبة الخصم × القيمة الخام)
+                // الضريبة المستردة = نسبة الضريبة × (الخام المسترد − الخصم المسترد)
+                // (نفس ترتيب بناء الفاتورة الأصلية بالضبط — معادلة لا اجتهاد)
+                decimal returnedGross = GroupRequestItems(request.Items)
+                    .Sum(g => originalInvoice.InvoiceItems.First(ii => ii.ProductId == g.ProductId).ItemPrice * g.Quantity);
+                decimal discountRatio = invTotal > 0
+                    ? originalInvoice.DiscountAmount / invTotal
+                    : 0m;
+                decimal returnedDiscount = Math.Round(returnedGross * discountRatio, 2, MidpointRounding.AwayFromZero);
+                decimal afterDiscountPortion = returnedGross - returnedDiscount;
+                decimal taxBase = invTotal - originalInvoice.DiscountAmount; // قاعدة الضريبة الأصلية
+                decimal taxRatio = taxBase > 0
+                    ? originalInvoice.TaxAmount / taxBase
+                    : 0m;
+                decimal returnedTax = Math.Round(afterDiscountPortion * taxRatio, 2, MidpointRounding.AwayFromZero);
+
                 var returnInvoice = new Invoice
                 {
                     Type = enInvoicesType.customer_return,
@@ -89,21 +137,12 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.Now,
+                    TotalAmount = -returnedGross,
+                    DiscountAmount = -returnedDiscount,
+                    TaxAmount = -returnedTax,
+                    NetAmount = -total
                 };
-
-                foreach (var g in GroupRequestItems(request.Items))
-                {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    total += originalItem.ItemPrice * g.Quantity;
-                }
-
-                returnInvoice.TotalAmount = -total;
-                returnInvoice.DiscountAmount = 0;
-                returnInvoice.TaxAmount = 0;
-                returnInvoice.NetAmount = -total;
 
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
@@ -198,7 +237,40 @@ namespace Sayl.Core.Services
                         throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
                 }
 
-                decimal total = 0;
+                // ══ VULN-03 (الحل ب): الاسترداد النسبي الدقيق — مرتجع المورد ══
+                // فاتورة الشراء الأصلية بُنيت بنفس المعادلة (خصم → ضريبة على الباقي).
+                // استرداد المورد القديم كان بالتكلفة الخام — نفس تسرب الخصم/الضريبة
+                // لكن معكوسًا: التاجر يسترد من المورد أكثر مما دفع له (خصم) أو
+                // أقل (ضريبة شراء) — فساد ميزانية المورد بالطريقتين.
+                // المعادلة مطابقة لمرتجع العميل أعلاه (نسبة الصافي/الإجمالي
+                // بلا تقريب وسيط، تقريب نهائي واحد) — راجع التعليق الكامل هناك.
+                decimal invTotalSup = originalInvoice.TotalAmount;
+                decimal invNetSup = originalInvoice.NetAmount;
+                decimal netRatioSup = invTotalSup > 0 ? invNetSup / invTotalSup : 0m;
+
+                decimal rawRefundSup = 0m;
+                foreach (var g in GroupRequestItems(request.Items))
+                {
+                    var originalItem = originalInvoice.InvoiceItems
+                        .First(ii => ii.ProductId == g.ProductId);
+
+                    rawRefundSup += originalItem.ItemPrice * g.Quantity * netRatioSup;
+                }
+                decimal total = Math.Round(rawRefundSup, 2, MidpointRounding.AwayFromZero);
+
+                // التفصيل التدقيقي: نصيب البنود من الخصم والضريبة الأصلية
+                decimal returnedGrossSup = GroupRequestItems(request.Items)
+                    .Sum(g => originalInvoice.InvoiceItems.First(ii => ii.ProductId == g.ProductId).ItemPrice * g.Quantity);
+                decimal discountRatioSup = invTotalSup > 0
+                    ? originalInvoice.DiscountAmount / invTotalSup
+                    : 0m;
+                decimal returnedDiscountSup = Math.Round(returnedGrossSup * discountRatioSup, 2, MidpointRounding.AwayFromZero);
+                decimal taxBaseSup = invTotalSup - originalInvoice.DiscountAmount;
+                decimal taxRatioSup = taxBaseSup > 0
+                    ? originalInvoice.TaxAmount / taxBaseSup
+                    : 0m;
+                decimal returnedTaxSup = Math.Round((returnedGrossSup - returnedDiscountSup) * taxRatioSup, 2, MidpointRounding.AwayFromZero);
+
                 var returnInvoice = new Invoice
                 {
                     Type = enInvoicesType.supplier_return,
@@ -211,21 +283,12 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.Now,
+                    TotalAmount = -returnedGrossSup,
+                    DiscountAmount = -returnedDiscountSup,
+                    TaxAmount = -returnedTaxSup,
+                    NetAmount = -total
                 };
-
-                foreach (var g in GroupRequestItems(request.Items))
-                {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    total += originalItem.ItemPrice * g.Quantity;
-                }
-
-                returnInvoice.TotalAmount = -total;
-                returnInvoice.DiscountAmount = 0;
-                returnInvoice.TaxAmount = 0;
-                returnInvoice.NetAmount = -total;
 
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
@@ -373,6 +436,15 @@ namespace Sayl.Core.Services
 
         // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —
         // تقرير Z لليوم يرى المرتجع الذي دُفع اليوم، لا يُحمَّل على جلسة مجمدة.
+        //
+        // 📖 لماذا نقد = min(الاسترداد، المدفوع) هو الترتيب الصحيح؟ (إثبات موثق)
+        //   فاتورة صافي 100: دفع العميل 40 نقدًا + 60 دينًا، ثم رجّع نصف البضاعة.
+        //   الاسترداد 50 → نقد 40 (كل ما دخل الدرج مقابل هذه البضاعة فعلًا)
+        //   + 10 تخفض الدين. النتيجة: العميل استعاد نقده كاملًا،
+        //   ودينه 50 = قيمة البضاعة التي أبقاها بالضبط.
+        //   المساران البديلان كلاهما يكسر التوازن: ردّ 50 نقدًا يخرج من
+        //   الدرج 10 لم تدخله، وخفض الدين كامل الـ50 يتركه مدينًا 10 على
+        //   بضاعة ردّها. (تحقق صريح بعد شكّ ظاهري: المعادلة سليمة دائمًا.)
         private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
             decimal paidSoFar = await _dbContext.Payments

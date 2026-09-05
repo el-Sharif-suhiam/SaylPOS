@@ -566,6 +566,118 @@ namespace consol_app
                 }
             }
 
+            // VULN-03 (الحل ب): الاسترداد النسبي — فاتورة بخصم وضريبة يُرد
+            // ما دُفع فعلًا لا الخام: بيع 100 بخصم 10% وضريبة 10% => صافي 99.
+            // إرجاع نصف البضاعة => استرداد 49.50 (نصف الصافي) لا 50 الخام.
+            {
+                var discSale = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+                {
+                    UserId = admin.UserId,
+                    SessionId = sessionId,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 10, UnitPrice = 10m } },
+                    DiscountPercent = 10m,          // خصم 10
+                    TaxPercent = 10m,                // ضريبة 10 على الباقي
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = 99m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                });
+                Check("VULN-03 probe sale (net 99: 100-10%+10% tax)", discSale.IsSuccess, discSale.Message);
+                if (discSale.IsSuccess)
+                {
+                    // صافي الفاتورة = 100 - 10 + 9 = 99 (تحقق المعادلة الأساسية)
+                    var netCheck = await VerifyAsync(vdb =>
+                        vdb.Invoices.Where(i => i.InvoiceId == discSale.Data).Select(i => i.NetAmount).FirstAsync());
+                    Check("VULN-03 sale net = 99.00", netCheck == 99m, $"net={netCheck}");
+
+                    // إرجاع نصف الكمية (5) => الاسترداد النسبي = 5×10×(99/100) = 49.50
+                    var halfRet = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+                    {
+                        OriginalInvoiceId = discSale.Data,
+                        UserId = admin.UserId,
+                        SessionId = sessionId,
+                        Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 5 } }
+                    });
+                    Check("VULN-03 proportional return executed", halfRet.IsSuccess, halfRet.Message);
+                    if (halfRet.IsSuccess)
+                    {
+                        var retNet = await VerifyAsync(vdb =>
+                            vdb.Invoices.Where(i => i.InvoiceId == halfRet.Data).Select(i => i.NetAmount).FirstAsync());
+                        Check("VULN-03 refund = 49.50 (ratio-applied)", retNet == -49.50m, $"retNet={retNet}");
+
+                        // التفصيل التدقيقي: خام 50، خصم مسترد 5، ضريبة مستردة 4.5 => صافي 49.50
+                        var (retGross, retDisc, retTax) = await VerifyAsync(vdb =>
+                            vdb.Invoices.Where(i => i.InvoiceId == halfRet.Data)
+                                .Select(i => new ValueTuple<decimal, decimal, decimal>(i.TotalAmount, i.DiscountAmount, i.TaxAmount)).FirstAsync());
+                        Check("VULN-03 breakdown gross/-5.00/-4.50",
+                            retGross == -50m && retDisc == -5m && retTax == -4.50m,
+                            $"gross={retGross} disc={retDisc} tax={retTax}");
+
+                        // الاسترداد النقدي = min(49.50, مدفوع 99) = 49.50 كاش (لا من رصيد)
+                        var refundCash = await VerifyAsync(async vdb =>
+                            await vdb.Payments.Where(p => p.InvoiceId == halfRet.Data && p.Type == Common.Enums.enPaymentType.outcome)
+                                .SumAsync(p => (decimal?)p.Amount) ?? 0m);
+                        Check("VULN-03 cash refund 49.50", refundCash == 49.50m, $"cash={refundCash}");
+                    }
+                }
+            }
+
+            // ══ إثبات سلامة تقسيم الاسترداد نقد/دين (تحقق بعد شك ظاهري) ══
+            // فاتورة صافي 99: العميل دفع 40 نقدًا والباقي 59 دينًا على عميل مسجل.
+            // إرجاع نصف البضاعة => استرداد نسبي 49.50 => نقد 40 (حد المدفوع)
+            // + 9.50 تخفض الدين. هذا هو التوازن الصحيح الوحيد: النقد المسترد
+            // لا يتجاوز ما دخل الدرج، والدين المتبقي = قيمة البضاعة المُبقاة.
+            // (المعادلة min(الاسترداد, المدفوع) — أُعيد التحقق فيها صراحة
+            //  بعد شكّ ظاهري أثناء VULN-03، فثبت أنها سليمة دائمًا — راجع
+            //  التعليق الموثق في ProcessCustomerRefundAsync.)
+            {
+                // عميل تجريبي بالدين: نستخدم customer 1 (أحمد — رصيده متاح)
+                var debtSale = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+                {
+                    UserId = admin.UserId,
+                    SessionId = sessionId,
+                    CustomerId = 1,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 10, UnitPrice = 10m } },
+                    DiscountPercent = 10m,
+                    TaxPercent = 10m,
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = 40m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                });
+                Check("cash-problem probe: partial credit sale (40 of 99)", debtSale.IsSuccess, debtSale.Message);
+                if (debtSale.IsSuccess)
+                {
+                    decimal balBefore = await VerifyAsync(vdb =>
+                        vdb.Customers.Where(c => c.PartyId == 1).Select(c => c.Balance ?? 0m).FirstAsync());
+
+                    var halfRet = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+                    {
+                        OriginalInvoiceId = debtSale.Data,
+                        UserId = admin.UserId,
+                        SessionId = sessionId,
+                        Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 5 } }
+                    });
+                    Check("cash-problem return executed", halfRet.IsSuccess, halfRet.Message);
+                    if (halfRet.IsSuccess)
+                    {
+                        // النقد المسترد = 40 فقط (min(49.50, 40)) — والـ 9.50 الباقية تخفض الدين
+                        var refundCash = await VerifyAsync(async vdb =>
+                            await vdb.Payments.Where(p => p.InvoiceId == halfRet.Data && p.Type == Common.Enums.enPaymentType.outcome)
+                                .SumAsync(p => (decimal?)p.Amount) ?? 0m);
+                        Check("cash-problem cash refund capped at 40", refundCash == 40m, $"cash={refundCash}");
+
+                        decimal balAfter = await VerifyAsync(vdb =>
+                            vdb.Customers.Where(c => c.PartyId == 1).Select(c => c.Balance ?? 0m).FirstAsync());
+                        // الرصيد كان 59 (دين) => يخفض 9.50 => 49.50
+                        Check("cash-problem debt reduced by 9.50", balAfter == balBefore - 9.50m,
+                            $"{balBefore}->{balAfter}");
+
+                        // تنظيف أثر الاختبار: إعادة الرصيد لما قبل الجولة (الدين التجريبي مسموح بقاؤه)
+                        using (var cs = Scope())
+                        {
+                            var cdb = Svc<Sayl.Core.Data.SaylDbContext>(cs);
+                            var cust = await cdb.Customers.FindAsync(1);
+                            if (cust != null) { cust.Balance = balBefore; await cdb.SaveChangesAsync(); }
+                        }
+                    }
+                }
+            }
+
             // VULN-06: خصم شراء يتجاوز الإجمالي → رصيد مورد سالب
             var badPurchase = await purchase.CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
             {
