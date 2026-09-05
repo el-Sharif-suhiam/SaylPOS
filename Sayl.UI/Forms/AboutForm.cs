@@ -100,20 +100,42 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════
         // تبويب 1: عن النظام — (محتوى النافذة القديمة كاملًا)
         // ═══════════════════════════════════════════════
+        // ═══════════════════════════════════════════════
+        // تبويب 1: عن النظام — محتوى مركزي مضبوط العرض
+        // 📖 درس جمالي: كبرت النافذة (لأجل تبويب التراخيص) فتبعثرت هذه
+        // البطاقات الصغيرة وسط فراغ. الحل الكلاسيكي: «عمود مضبوط يتوسط» —
+        // المحتوى داخل عمود TLP بعرض ثابت ~440px مثبت وسط الصفحة
+        // (عمودان جانبيان مرنان يمتصان الفضوة) — نفس إحساس النافذة
+        // الضيقة القديمة أناقةً، داخل إطار واسع.
+        // ═══════════════════════════════════════════════
         private TabPage BuildAboutPage()
         {
             var page = new TabPage("عن النظام") { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
 
+            // الحاضنة: ثلاثة أعمدة — مرن | عمود المحتوى 460px | مرن
+            var shell = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(12, 10, 12, 8)
+            };
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 460));
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            // عمود المحتوى الفعلي — كامل منطق الشاشة القديمة كما كان
             var body = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 BackColor = AppTheme.CardBg,
-                Padding = new Padding(16, 10, 16, 8)
+                Padding = new Padding(0)
             };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             body.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));  // الإصدار
-            body.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));  // الترخيص/التفعيل
+            body.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));  // التفعيل
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // الوصف
             body.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));  // المطور
             body.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));  // التواصل
@@ -206,7 +228,9 @@ namespace Sayl.UI.Forms
             body.Controls.Add(lblCreator, 0, 3);
             body.Controls.Add(socialHost, 0, 4);
 
-            page.Controls.Add(body);
+            // تثبيت العمود المركزي: العمود 1 من الحاضنة (RTL: وسط حقيقي)
+            shell.Controls.Add(body, 1, 0);
+            page.Controls.Add(shell);
             return page;
         }
 
