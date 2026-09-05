@@ -1,4 +1,4 @@
-/*
+﻿/*
 ===========================================================
 SaylDB
 Full SQL Server Script
@@ -11,9 +11,11 @@ Designed for:
 - Sales and inventory management system
 - Supports customers, suppliers, employees, users and roles
 - Tracks stock movements with batch/lot control
-NOTE: session SET options are configured first because
-filtered unique indexes (concurrency guards) require them,
-and sqlcmd/OLEDB sessions start with QUOTED_IDENTIFIER OFF.
+NOTE: - Fresh installs ONLY: a safety gate right after USE aborts
+        the whole script if any table already exists.
+      - No DROP statements exist in this file.
+      - Session SET options come first because filtered unique indexes
+        (concurrency guards) require them.
 ===========================================================
 */
 
@@ -42,28 +44,29 @@ USE SaylDB;
 GO
 
 -----------------------------------------------------------
--- 2) Drop existing objects if they already exist
---    (Useful while rebuilding during development)
+-- SAFETY GATE: fresh installs only. If ANY table already
+-- exists the script STOPS here - it never drops anything.
+-- (An earlier DROP-block version destroyed a live DB when
+--  run against it; this gate is absolute and runs FIRST.)
 -----------------------------------------------------------
-
--- Drop foreign keys first by dropping tables in dependency order
-IF OBJECT_ID('dbo.SystemLogs', 'U') IS NOT NULL DROP TABLE dbo.SystemLogs;
-IF OBJECT_ID('dbo.POSSessions', 'U') IS NOT NULL DROP TABLE dbo.POSSessions;
-IF OBJECT_ID('dbo.StockMovements', 'U') IS NOT NULL DROP TABLE dbo.StockMovements;
-IF OBJECT_ID('dbo.Payments', 'U') IS NOT NULL DROP TABLE dbo.Payments;
-IF OBJECT_ID('dbo.InvoiceItems', 'U') IS NOT NULL DROP TABLE dbo.InvoiceItems;
-IF OBJECT_ID('dbo.Invoices', 'U') IS NOT NULL DROP TABLE dbo.Invoices;
-IF OBJECT_ID('dbo.Inventory', 'U') IS NOT NULL DROP TABLE dbo.Inventory;
-IF OBJECT_ID('dbo.Batches', 'U') IS NOT NULL DROP TABLE dbo.Batches;
-IF OBJECT_ID('dbo.Products', 'U') IS NOT NULL DROP TABLE dbo.Products;
-IF OBJECT_ID('dbo.Users', 'U') IS NOT NULL DROP TABLE dbo.Users;
-IF OBJECT_ID('dbo.Roles', 'U') IS NOT NULL DROP TABLE dbo.Roles;
-IF OBJECT_ID('dbo.Employees', 'U') IS NOT NULL DROP TABLE dbo.Employees;
-IF OBJECT_ID('dbo.Suppliers', 'U') IS NOT NULL DROP TABLE dbo.Suppliers;
-IF OBJECT_ID('dbo.Customers', 'U') IS NOT NULL DROP TABLE dbo.Customers;
-IF OBJECT_ID('dbo.Parties', 'U') IS NOT NULL DROP TABLE dbo.Parties;
-IF OBJECT_ID('dbo.Expenses', 'U') IS NOT NULL DROP TABLE dbo.Expenses;
+IF OBJECT_ID('dbo.Parties', 'U') IS NOT NULL
+BEGIN
+    RAISERROR('SaylDB already contains schema objects. Fresh installs only - DROP the database manually if you really want to rebuild.', 16, 1);
+    SET NOEXEC ON;   -- disables execution for ALL remaining batches on this connection
+    RETURN;           -- stops this batch; NOEXEC keeps every later batch inert
+END
+IF OBJECT_ID('dbo.Users', 'U') IS NOT NULL
+BEGIN
+    RAISERROR('SaylDB already contains schema objects (Users). Fresh installs only.', 16, 1);
+    SET NOEXEC ON;
+    RETURN;
+END
 GO
+
+-----------------------------------------------------------
+-- 2) Schema tables (no DROP statements anywhere in this
+--    file - the safety gate above guarantees fresh-install)
+-----------------------------------------------------------
 
 -----------------------------------------------------------
 -- 3) Create Parties
@@ -169,9 +172,9 @@ CREATE TABLE Users
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
     CONSTRAINT UQ_Users_Username UNIQUE (Username),
-    CONSTRAINT UQ_Users_EmployeeId UNIQUE (EmployeeId),   -- حساب واحد لكل موظف
+    -- one account per employee (filtered: NULL = standalone account, unlimited)
     CONSTRAINT FK_Users_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees(EmployeeId),
-    CONSTRAINT FK_Users_RoleId FOREIGN KEY (RoleId) REFERENCES Roles(RoleId),
+    CONSTRAINT FK_Users_RoleId FOREIGN KEY (RoleId) REFERENCES Roles(RoleId)
 
 );
 GO
@@ -305,10 +308,16 @@ CREATE TABLE Payments
     Notes NVARCHAR(MAX) NULL,
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
+    -- Cash-drawer attribution (VULN-05): the POS session that physically
+    -- received/paid this payment. May differ from the invoice's session
+    -- (suspended resume in a later shift, return processed today for an
+    -- old sale). NULL = no session / pre-migration rows (session reports
+    -- fall back to the invoice's session for those).
+    SessionId INT NULL,
+
     CONSTRAINT CK_Payments_Type CHECK (Type IN ('income','outcome')),
     CONSTRAINT FK_Payments_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES Invoices(InvoiceId),
     CONSTRAINT FK_Payments_PartyId FOREIGN KEY (PartyId) REFERENCES Parties(PartyId),
-
     CONSTRAINT CK_Payments_PartyType CHECK (PartyType IN ('C','S')),
     CONSTRAINT CK_Payments_Amount CHECK (Amount > 0)
 
@@ -401,6 +410,9 @@ GO
 ALTER TABLE Invoices
     ADD CONSTRAINT FK_Invoices_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId);
 GO
+ALTER TABLE Payments
+    ADD CONSTRAINT FK_Payments_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId);
+GO
 -----------------------------------------------------------
 -- 19a) Create Settings
 --      App configuration (store info, VAT, receipt, backup)
@@ -482,7 +494,7 @@ CREATE TABLE OfficialHolidays
 GO
 -----------------------------------------------------------
 -- 23) Create PayrollRecords
---     Payroll per employee per period; paying creates an Expense (category 'رواتب')
+--     Payroll per employee per period; paying creates a linked Expense
 -----------------------------------------------------------
 CREATE TABLE PayrollRecords(
     PayrollId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -568,6 +580,8 @@ CREATE INDEX IX_StockCounts_ProductId ON StockCounts(ProductId);
 
 -- Users
 CREATE INDEX IX_Users_RoleId ON Users(RoleId);
+-- one account per linked employee (standalone NULL accounts excluded)
+CREATE UNIQUE INDEX UX_Users_OnePerEmployee ON Users(EmployeeId) WHERE EmployeeId IS NOT NULL;
 
 -- Products
 CREATE INDEX IX_Products_Type ON Products(Type);
@@ -599,6 +613,7 @@ CREATE INDEX IX_InvoiceItems_BatchId ON InvoiceItems(BatchId);
 CREATE INDEX IX_Payments_InvoiceId ON Payments(InvoiceId);
 CREATE INDEX IX_Payments_PartyType_PartyId ON Payments(PartyType, PartyId);
 CREATE INDEX IX_Payments_PaymentDate ON Payments(PaymentDate);
+CREATE INDEX IX_Payments_SessionId ON Payments(SessionId);
 
 -- StockMovements
 CREATE INDEX IX_StockMovements_ProductId ON StockMovements(ProductId);
@@ -631,3 +646,61 @@ CREATE INDEX IX_CashMovements_CreatedAt ON CashMovements(CreatedAt);
 CREATE UNIQUE INDEX UX_POSSessions_OneOpenPerUser
     ON POSSessions(UserId)
     WHERE Status = 'open';
+GO
+
+-----------------------------------------------------------
+-- Financial amount guards (VULN-02/06, defense-in-depth
+-- under the service-level validation):
+--   1) sale/purchase invoices can never have a negative net
+--      (return invoices are negative BY DESIGN and excluded);
+--   2) party balances can never go negative.
+-----------------------------------------------------------
+ALTER TABLE Invoices
+    ADD CONSTRAINT CK_Invoices_NonNegativeNet
+    CHECK ([Type] IN ('customer_return', 'supplier_return') OR NetAmount >= 0);
+GO
+
+ALTER TABLE Suppliers
+    ADD CONSTRAINT CK_Suppliers_NonNegativeBalance CHECK (Balance >= 0);
+GO
+
+ALTER TABLE Customers
+    ADD CONSTRAINT CK_Customers_NonNegativeBalance CHECK (Balance >= 0);
+GO
+-----------------------------------------------------------
+-- 25) Seed data (minimum for a fresh install to boot)
+--     Roles + starter accounts + one demo stock product
+--     (login: admin / cashier1 - passwords were set by the
+--      owner during installation; change them immediately)
+-----------------------------------------------------------
+
+-- Roles (permission values: 100 admin, 75 accountant, 50 cashier)
+INSERT INTO Roles (Name, RoleValue) VALUES
+(N'مدير النظام', 100),
+(N'كاشير', 50),
+(N'محاسب', 75);
+
+-- Starter accounts (BCrypt hashes; reset from inside the app)
+INSERT INTO Users (Username, PasswordHash, RoleId, IsActive, CreatedAt) VALUES
+(N'admin',   N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, GETUTCDATE()),
+(N'cashier1',N'$2a$11$WNoLkPsWn5BGq3pwwbZsy.BHCIlgru8PHsj1JNyqopT12/RQI9LIi', 2, 1, GETUTCDATE());
+
+-- Demo stock product (delete after real catalog import)
+INSERT INTO Products (Name, Barcode, Unit, Type, BasePrice, CostPrice, ReorderLevel, IsActive, CreatedAt)
+VALUES (N'منتج تجريبي', N'6281002123450', N'قطعة', 'stock', 12.50, 6.00, 5, 1, GETUTCDATE());
+
+-- Opening inventory for the demo product
+INSERT INTO Inventory (ProductId, QuantityAvailable, QuantityReserved, UpdatedAt)
+
+VALUES (SCOPE_IDENTITY(), 500, 0, GETUTCDATE());
+GO
+
+-----------------------------------------------------------
+-- Demo customer (harness settles test debt against party id 1)
+-----------------------------------------------------------
+INSERT INTO Parties (PartyType, Name, IsActive, CreatedAt)
+VALUES ('C', N'Demo Customer', 1, GETUTCDATE());
+
+INSERT INTO Customers (PartyId, Balance, CreditLimit)
+VALUES (SCOPE_IDENTITY(), 0, 0);
+GO

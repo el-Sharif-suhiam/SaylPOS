@@ -334,24 +334,27 @@ namespace Sayl.UI.Forms
         }
 
         // ═══ منطقة المحتوى: رأس علوي + مستضيف الأقسام ═══
-        // الرأس TLP بعمودين: (Percent 100 للعنوان | Absolute 380 للمستخدم)
-        // مع RTL ينعكس: العمود 0 يظهر يمينًا — العنوان يمين (كبير غامق)
-        // وبيانات المستخدم يسار (رمادي صغير). الهوامش Margin توزع النص.
+        // الرأس TLP بثلاثة أعمدة معلنة صراحة (ColumnCount=3 — علة سابقة:
+        // كان 2 مع ثلاثة أعمدة فعلية فانضغط عنوان القسم تحت الأعمدة الثابتة):
+        //   العمود0 (Percent 100): عنوان القسم — يأخذ كل ما تبقى فلا يُغطى أبدًا
+        //   العمود1 (Absolute 260): بيانات المستخدم
+        //   العمود2 (Absolute 205): ساعة البرنامج الحية
+        // RTL: العمود 0 يظهر يمينًا (العنوان)، 1 وسطًا (المستخدم)، 2 يسارًا (الساعة).
         // _hostPanel: الحاوية الحية — SelectSection يستبدل ابنها الوحيد.
         private void BuildContent(Panel contentArea)
         {
-            // رأس الصفحة: عنوان القسم يمينًا + بيانات المستخدم يسارًا
+            // رأس الصفحة: عنوان القسم يمينًا + بيانات المستخدم وسطًا + الساعة يسارًا
             // (مع RightToLeft.Yes تنعكس أعمدة الجدول: العمود الأول يظهر يمينًا)
             var header = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 Height = 76,
                 BackColor = AppTheme.CardBg,
-                ColumnCount = 2
+                ColumnCount = 3
             };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205));
 
             _lblPageTitle = new Label
             {
@@ -369,7 +372,7 @@ namespace Sayl.UI.Forms
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = AppTheme.TextMuted,
-                Margin = new Padding(24, 0, 0, 0)
+                Margin = new Padding(12, 0, 0, 0)
             };
 
             // 🕐 VULN-45 + طلب المالك: ساعة البرنامج الحية في رأس كل الأقسام —
