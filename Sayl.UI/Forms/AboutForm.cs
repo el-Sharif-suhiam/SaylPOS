@@ -24,8 +24,12 @@ namespace Sayl.UI.Forms
         {
             Text = "حول البرنامج";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(520, 600);
-            MinimumSize = new Size(460, 520);
+            // 📖 760×680: عرض أوسع لتبويب التراخيص — بطاقات المكونات بعمودين
+            // كاملين وبنود EULA تتنفس. (كانت 520×600 فانحشرت البطاقات في ~420px
+            // بعد خصم الرأس والتبويبات والزر.) الحواريات تُقص تلقائيًا على
+            // شاشات صغيرة (ClampToWorkingArea في DialogForm) فلا خطر كسر.
+            ClientSize = new Size(760, 680);
+            MinimumSize = new Size(620, 560);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
