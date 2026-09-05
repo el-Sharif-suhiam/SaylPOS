@@ -151,9 +151,9 @@ namespace Sayl.UI.Forms
 
             var lblDescription = new Label
             {
-                Text = "نظام متكامل للمبيعات وإدارة المخزون\nللمتاجر والصيدليات والمطاعم والأعمال الصغيرة.\n\nتشمل الباقة:\nنقطة بيع سريعة بباركود وشاشة زبون ثانية • إدارة مخزون بالدفعات والصلاحية (FEFO)\nفواتير بيع وشراء ومرتجعات وخصومات وسداد الديون • كشوف رواتب وشفتات وإجازات\nتقارير أرباح ورسوم بيانية مع تصدير PDF / Excel • نسخ احتياطي واستعادة داخل البرنامج",
+                Text = "نظام متكامل للمبيعات وإدارة المخزون\nللمتاجر والصيدليات والمطاعم والأعمال الصغيرة.\n\nمبني على .NET 10 و SQL Server",
                 Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.TopCenter,
+                TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextPrimary,
                 Padding = new Padding(8, 6, 8, 0)
             };
@@ -207,115 +207,246 @@ namespace Sayl.UI.Forms
         }
 
         // ═══════════════════════════════════════════════
-        // تبويب 2: التراخيص — نص الاتفاقية المعتمد من المالك
+        // ═══════════════════════════════════════════════
+        // تبويب 2: التراخيص — بطاقات بصرية بدل جدار نص
+        // 📖 درس هندسي (علة الانحشار): FlowLayoutPanel بـ Dock=Fill داخل
+        // Panel{AutoScroll} «يتقزم» بارتفاع المنطقة المرئية ولا يمتد
+        // للمحتوى — علة WinForms كلاسيكية. الحل الموثوق: عمود TLP
+        // بـ Dock=Top وارتفاعات محسوبة (نمط AddRow الموثق في كل النظام).
         // ═══════════════════════════════════════════════
         private TabPage BuildLicensePage()
         {
             var page = new TabPage("التراخيص") { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
 
-            // 📖 RichTextBox للعرض الأمثل:
-            //  • ScrollBars.Vertical: التمرير الطبيعي للنصوص الطويلة (بلا WordWrap أفقي مشوه).
-            //  • RightToLeft.Yes: البنود العربية محاذاة يمين حقيقية.
-            //  • ReadOnly + BorderStyle.None: «وثيقة» تُقرأ وتُنسخ — لا تُحرر.
-            //  • WordWrap=true مع ScrollBars عمودية: الأسطر تلتف عند حافة العرض
-            //    فلا قص أفقي ولا تمزيق كلمات.
-            var doc = new RichTextBox
+            var scroll = new Panel
             {
                 Dock = DockStyle.Fill,
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None,
                 BackColor = AppTheme.CardBg,
-                ForeColor = AppTheme.TextPrimary,
-                RightToLeft = RightToLeft.Yes,
-                WordWrap = true,
-                ScrollBars = RichTextBoxScrollBars.Vertical,
-                Font = new Font("Segoe UI", 9.75F),
-                DetectUrls = false,
-                Padding = new Padding(6, 8, 6, 8),
-                Text = LicenseText.TrimStart()
+                AutoScroll = true,
+                Padding = new Padding(16, 12, 16, 16)
             };
 
-            // 📖 ReadOnly=true يجعل RichTextBox يتجاهل BackColor من الـ initializer
-            // ويعرض SystemColors.Control (رمادي شاحب). إعادة الضبط بعد الإنشاء
-            // سلوك موثق: هنا يُحترم ويظهر خلفية الهوية البيضاء.
-            doc.BackColor = AppTheme.CardBg;
+            // عمود المحتوى: AutoSize (لا Dock!) — TLP بـ Dock=Top داخل
+            // Panel{AutoScroll} قصّ ارتفاعه عند أول layout مهما بلغ مجموع
+            // الصفوف (علة قيست حيًا: 12 صفًا بمجموع ~882px ظهرت بارتفاع
+            // 100px). AutoSize وحده يجعل الارتفاع يتبع المحتوى، والموقع
+            // الافتراضي (أعلى يسار) يثبته في رأس الممرر.
+            var col = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                BackColor = AppTheme.CardBg,
+                Padding = new Padding(0)
+            };
+            col.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            // تنظيم مسافة القراءة عن حواف التبويب
-            var host = new Panel { Dock = DockStyle.Fill, Padding = new Padding(14, 10, 14, 10), BackColor = AppTheme.CardBg };
-            host.Controls.Add(doc);
-            page.Controls.Add(host);
+            // 📖 مصنع الصفوف: Height محسوب لكل صف (Absolute) — البطاقات Dock=Top
+            void AddRow(Control c, int height, int gapAfter = 8)
+            {
+                col.RowStyles.Add(new RowStyle(SizeType.Absolute, height + gapAfter));
+                c.Dock = DockStyle.Top;
+                c.Height = height;
+                c.Margin = new Padding(0);
+                col.Controls.Add(c, 0, col.RowStyles.Count - 1);
+            }
+
+            // ── 1) بطاقة الحقوق الكحلية ──
+            var rightsCard = new Panel { BackColor = AppTheme.SidebarBg, Padding = new Padding(0) };
+            AppTheme.ApplyRoundedRegion(rightsCard, 14);
+            var rightsInner = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                BackColor = Color.Transparent, Padding = new Padding(18, 12, 18, 10)
+            };
+            rightsInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            rightsInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+            var lblRights = new Label
+            {
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = Color.White,
+                Text = "© 2026 م. الشريف اسحيم — جميع الحقوق محفوظة\r\n«سيل» علامة تجارية لمالكها",
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold)
+            };
+            var imgLogo = Brand.MakeLogo(56, AppTheme.SidebarBg);
+            imgLogo.Dock = DockStyle.Fill;
+            rightsInner.Controls.Add(lblRights, 0, 0);
+            rightsInner.Controls.Add(imgLogo, 1, 0);
+            rightsCard.Controls.Add(rightsInner);
+            AddRow(rightsCard, 96, 14);
+
+            // ── 2) مقدمة ──
+            AddRow(MakeText("هذا البرنامج منتج تجاري مغلق المصدر — شراؤك للنسخة يمنحك «رخصة استخدام» غير حصرية وغير قابلة للتحويل، وفق البنود التالية:", bold: false), 42, 6);
+
+            // ── 3) بنود الاتفاقية الخمسة ──
+            AddRow(MakeEulaCard("١", "طبيعة الترخيص",
+                "منتج تجاري مغلق المصدر. لا يعني شراؤك للنسخة تملّكك للبرنامج، وإنما حصولك على «رخصة استخدام» غير حصرية وغير قابلة للتحويل."), 98);
+            AddRow(MakeEulaCard("٢", "نطاق الاستخدام",
+                "يُرخَّص استخدام النظام على الجهاز المُفعَّل فقط. يرتبط الترخيص بمعرّف عتاد الجهاز (HWID — بصمة إلكترونية تُستخرج من مكونات الجهاز المادية)، ولا يعمل النظام على أي جهاز آخر دون ترخيص جديد. لإصدار ترخيص بديل (عطل أو ترقية جهاز) تواصل مع مطور النظام."), 122);
+            AddRow(MakeEulaCard("٣", "القيود",
+                "يُمنع صراحةً: نسخ البرنامج لأغراض التوزيع أو البيع • استخلاص الشيفرة المصدرية أو فك التجميع • إزالة أو التحايل على آلية التفعيل أو إشعارات حقوق الملكية."), 98);
+            AddRow(MakeEulaCard("٤", "حماية البيانات",
+                "جميع بياناتك تُخزَّن محليًا على جهازك — لا شيء يُرسَل عبر الإنترنت ولا يطّلع المطور على أي بيانات تجارية لك. النظام ينشئ نسخًا احتياطية تلقائية، وتقع مسؤولية نسخ إضافية خارجية على المستخدم."), 122);
+            AddRow(MakeEulaCard("٥", "إخلاء المسؤولية",
+                "يُقدَّم النظام «كما هو» دون ضمانات صريحة أو ضمنية لملاءمته لغرض معين. المطور غير مسؤول عن أية أرباح فائتة أو فقدان بيانات بما لا يخالف حدود القوانين المحلية. حد المسؤولية لا يتجاوز قيمة الترخيص المدفوعة."), 122, 12);
+
+            // ── 4) عنوان قسم المكونات ──
+            AddRow(MakeSectionLabel("المكونات مفتوحة المصدر المستخدمة"), 30, 2);
+            AddRow(MakeText("النظام مبنٍ باستخدام مكونات بتراخيص مجانية تسمح بالاستخدام التجاري:", bold: false), 24, 6);
+
+            // ── 5) شبكة المكونات: 4 صفوف × عمودان (Absolute 58 لا AutoSize) ──
+            var grid = new TableLayoutPanel
+            {
+                ColumnCount = 2, RowCount = 4,
+                BackColor = AppTheme.CardBg, Margin = new Padding(0)
+            };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            for (int r = 0; r < 4; r++)
+                grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+
+            string[] components =
+            {
+                "QuestPDF 2026.8",      "توليد PDF — رخصة Community",
+                "ClosedXML 0.104",      "تصدير Excel — رخصة MIT",
+                "LiveChartsCore 2.0",   "الرسوم البيانية — MIT",
+                "EF Core 10",           "قاعدة البيانات — MIT",
+                "Microsoft.Extensions", "بنية التطبيق — MIT/Apache",
+                "BCrypt.Net 4.2",       "تشفير كلمات المرور — Apache",
+                "SQL Server Express",  "قاعدة بيانات المحل — مجاني",
+                ".NET Runtime 10",      "بيئة التشغيل — مجاني",
+            };
+            // 📖 خطوة 4 (زوجان لكل دورة) — خطوة 2 كانت تقرأ خارج الحدود
+            for (int i = 0; i + 3 < components.Length; i += 4)
+            {
+                int row = i / 4;
+                var right = MakeComponentCard(components[i], components[i + 1]);
+                right.Dock = DockStyle.Fill; right.Margin = new Padding(2);
+                grid.Controls.Add(right, 0, row);
+                var left = MakeComponentCard(components[i + 2], components[i + 3]);
+                left.Dock = DockStyle.Fill; left.Margin = new Padding(2);
+                grid.Controls.Add(left, 1, row);
+            }
+            AddRow(grid, 4 * 58, 10);
+
+            // ── 6) خلاصة GPL + الإصدار ──
+            AddRow(MakeText("لا يتضمن النظام أي مكوّن يفرض الكشف عن الشيفرة المصدرية (GPL / AGPL).", bold: true), 26, 2);
+            var lblVer = new Label
+            {
+                AutoSize = true, ForeColor = AppTheme.TextMuted,
+                Font = new Font("Segoe UI", 8.5F),
+                Text = "اتفاقية الإصدار 1.0 — 2026/09",
+                Margin = new Padding(0), Padding = new Padding(0)
+            };
+            AddRow(lblVer, 22, 0);
+
+            // عرض العمود يتبع أصل التمرير
+            void SyncWidth()
+            {
+                int w = Math.Max(scroll.ClientSize.Width - 34, 380);
+                col.Width = w;
+                grid.Width = w;
+            }
+            scroll.Resize += (_, _) => SyncWidth();
+            SyncWidth();
+
+            scroll.Controls.Add(col);
+            page.Controls.Add(scroll);
             return page;
         }
 
-        /// <summary>نص اتفاقية الترخيص — النسخة المعتمدة من المالك (بلا بند دعم، م. الشريف اسحيم، مكونات مختصرة).</summary>
-        private const string LicenseText = @"
-سيل (Sayl POS) — نظام نقاط البيع
-اتفاقية ترخيص المستخدم النهائي — EULA (ملخص)
-════════════════════════════════════════════════
+        // ── مصنع بطاقة بند EULA: رقم دائري كحلي + عنوان + نص ──
+        private Control MakeEulaCard(string number, string title, string body)
+        {
+            var card = new Panel
+            {
+                BackColor = AppTheme.FieldBg,
+                Padding = new Padding(14, 10, 14, 10)
+            };
+            AppTheme.ApplyRoundedRegion(card, 10);
+            card.Paint += (s, e) =>
+                e.Graphics.DrawLine(new Pen(AppTheme.BorderColor), 0, card.Height - 1, card.Width, card.Height - 1);
 
-© 2026 م. الشريف اسحيم — جميع الحقوق محفوظة.
-«سيل» علامة تجارية لمالكها.
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                BackColor = Color.Transparent, Margin = new Padding(0)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-──────────────────────────────────────────────
-١ — طبيعة الترخيص
-──────────────────────────────────────────────
-هذا البرنامج منتج تجاري مغلق المصدر. لا يعني
-شراؤك للنسخة تملّكك للبرنامج، وإنما حصولك على
-«رخصة استخدام» غير حصرية وغير قابلة للتحويل.
+            var num = new Panel { Width = 36, Height = 36, BackColor = Color.Transparent, Dock = DockStyle.Fill };
+            num.Paint += (s, e) =>
+            {
+                using var brush = new SolidBrush(AppTheme.Primary);
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                e.Graphics.FillEllipse(brush, 2, 2, 32, 32);
+                TextRenderer.DrawText(e.Graphics, number,
+                    new Font("Segoe UI", 12F, FontStyle.Bold),
+                    new Rectangle(2, 2, 32, 32), Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            };
 
-٢ — نطاق الاستخدام
-──────────────────────────────────────────────
-• يُرخَّص استخدام النظام على الجهاز المُفعَّل فقط.
-• يرتبط الترخيص بمعرّف عتاد الجهاز (HWID — بصمة
-  إلكترونية تُستخرج من مكونات الجهاز المادية)،
-  ولا يعمل النظام على أي جهاز آخر دون ترخيص جديد.
-• لإصدار ترخيص بديل (عطل / ترقية جهاز) تواصل
-  مع مطور النظام.
+            var text = new Label
+            {
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopRight,
+                ForeColor = AppTheme.TextPrimary, Font = new Font("Segoe UI", 9.25F),
+                Text = title + "\r\n" + body, Padding = new Padding(6, 2, 8, 0)
+            };
 
-٣ — القيود
-──────────────────────────────────────────────
-يُمنع صراحةً:
-  • نسخ البرنامج لأغراض التوزيع أو البيع.
-  • استخلاص الشيفرة المصدرية أو فك التجميع.
-  • إزالة أو التحايل على آلية التفعيل أو إشعارات
-    حقوق الملكية.
+            layout.Controls.Add(text, 1, 0);
+            layout.Controls.Add(num, 0, 0);
+            card.Controls.Add(layout);
+            return card;
+        }
 
-٤ — حماية البيانات
-──────────────────────────────────────────────
-جميع بياناتك تُخزَّن محليًا على جهازك — لا شيء
-يُرسَل عبر الإنترنت ولا يطّلع المطور على أي بيانات
-تجارية لك. النظام ينشئ نسخًا احتياطية تلقائية،
-وتقع مسؤولية نسخ إضافية خارجية على المستخدم.
+        // ── مصنع بطاقة مكوّن: اسم غامق + الرخصة بالأخضر ──
+        private Control MakeComponentCard(string name, string license)
+        {
+            var card = new Panel
+            {
+                BackColor = Color.White,
+                Padding = new Padding(10, 7, 10, 7)
+            };
+            AppTheme.ApplyRoundedRegion(card, 10);
+            card.Paint += (s, e) =>
+                e.Graphics.DrawRectangle(new Pen(AppTheme.BorderColor), 0, 0, card.Width - 1, card.Height - 1);
 
-٥ — إخلاء المسؤولية
-──────────────────────────────────────────────
-• يُقدَّم النظام «كما هو» دون ضمانات صريحة أو
-  ضمنية لملاءمته لغرض معين.
-• المطور غير مسؤول عن أية أرباح فائتة أو فقدان
-  بيانات بما لا يخالف حدود القوانين المحلية.
-• حد المسؤولية لا يتجاوز قيمة الترخيص المدفوعة.
+            var lblName = new Label
+            {
+                Dock = DockStyle.Top, Height = 20, TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = AppTheme.TextPrimary, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Text = name
+            };
+            var lblLic = new Label
+            {
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = AppTheme.SuccessDark, Font = new Font("Segoe UI", 8.25F, FontStyle.Bold),
+                Text = license
+            };
+            card.Controls.Add(lblLic);
+            card.Controls.Add(lblName);
+            return card;
+        }
 
-──────────────────────────────────────────────
-        المكونات مفتوحة المصدر
-──────────────────────────────────────────────
-النظام مبنٍ باستخدام مكونات مفتوحة المصدر
-بتراخيص مجانية تسمح بالاستخدام التجاري:
+        private Label MakeSectionLabel(string text) => new()
+        {
+            AutoSize = true,
+            ForeColor = AppTheme.PrimaryDark,
+            Font = new Font("Segoe UI", 11.5F, FontStyle.Bold),
+            Text = text,
+            Margin = new Padding(0, 2, 0, 0)
+        };
 
-  • QuestPDF 2026.8.0 — توليد PDF (رخصة Community)
-  • ClosedXML 0.104.2 — تصدير Excel (رخصة MIT)
-  • LiveChartsCore 2.0.5 — الرسوم البيانية (MIT)
-  • Entity Framework Core 10 — قاعدة البيانات (MIT)
-  • Microsoft.Extensions / System.* 10 (MIT / Apache)
-  • BCrypt.Net-Next 4.2.0 — تشفير كلمات المرور (Apache)
-  • SQL Server Express — قاعدة بيانات المحل
-    (ترخيص مايكروسوفت المجاني)
-  • .NET Runtime 10 — بيئة التشغيل (مايكروسوفت)
-
-لا يتضمن النظام أي مكوّن يفرض الكشف عن
-الشيفرة المصدرية (GPL / AGPL).
-
-الإصدار 1.0 — 2026/09
-";
+        private Label MakeText(string text, bool bold) => new()
+        {
+            AutoSize = true,
+            ForeColor = bold ? AppTheme.PrimaryDark : AppTheme.TextPrimary,
+            Font = new Font("Segoe UI", bold ? 9.75F : 9.25F, bold ? FontStyle.Bold : FontStyle.Regular),
+            Text = text,
+            Margin = new Padding(0),
+            MaximumSize = new Size(600, 0)
+        };
 
         private Button MakeSocialIcon(string tooltip, Image icon, string url)
         {
