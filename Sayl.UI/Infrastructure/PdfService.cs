@@ -530,17 +530,17 @@ namespace Sayl.UI.Infrastructure
         // ═════════════════════════════════════════════════
 
         /// <summary>
-        /// ┘è┘ê┘ä┘æ╪» ╪Ñ┘è╪╡╪º┘ä ┘ü╪º╪¬┘ê╪▒╪⌐ 80mm ╪¿╪╡┘ü╪¡╪⌐ ┘ê╪º╪¡╪»╪⌐ ┘à╪¬┘â┘è┘ü╪⌐: ╪º┘ä╪¬╪▒┘ê┘è╪│╪⌐ (╪º╪│┘à ╪º┘ä┘à╪¡┘ä ╪º┘ä╪ú┘é┘ê┘ë) ΓåÉ ╪º┘ä┘à╪╣╪▒┘æ┘ü╪º╪¬ ΓåÉ
-        /// ╪º┘ä┘â╪º╪┤┘è╪▒ ╪Ñ┘ä╪▓╪º┘à┘è ΓåÉ ╪º┘ä╪╣┘à┘è┘ä (┬½╪╣┘à┘è┘ä ┘å┘é╪»┘è┬╗ ╪╣┘å╪» ╪º┘ä╪║┘è╪º╪¿) ΓåÉ ╪¼╪»┘ê┘ä 4 ╪ú╪╣┘à╪»╪⌐ ΓåÉ ╪╣╪»┘æ╪º╪» ╪º┘ä╪ú╪│╪╖╪▒/╪º┘ä┘ê╪¡╪»╪º╪¬ ΓåÉ
-        /// ┘à┘ä╪«╪╡ ┘à╪º┘ä┘è (╪º┘ä╪╡┘ü╪▒ ┘è╪«╪¬┘ü┘è) ΓåÉ ╪º┘ä╪Ñ╪¼┘à╪º┘ä┘è ┘ç┘ê ╪º┘ä╪ú╪¿╪▒╪▓ ΓåÉ ╪º┘ä╪»┘ü╪╣/╪º┘ä╪¿╪º┘é┘è/╪º┘ä┘à╪¬╪¿┘é┘è ΓåÉ ╪¬╪░┘è┘è┘ä ╪¿╪º╪│┘à ╪º┘ä┘å╪╕╪º┘à.
-        /// ╪ú╪▒┘é╪º┘à ╪½╪º╪¿╪¬╪⌐ ╪º┘ä┘à╪¡╪º╪░╪º╪⌐╪î ┘ü╪º╪╡┘ä ┘à╪¬┘é╪╖╪╣ ┘à╪¬┘ê╪º┘ü┘é ╪¡╪▒╪º╪▒┘è╪º┘ï╪î ╪¡╪¬┘à┘è (┘å┘ü╪│ ╪º┘ä┘ü╪º╪¬┘ê╪▒╪⌐ = ┘å┘ü╪│ ╪º┘ä╪Ñ┘è╪╡╪º┘ä).
+        /// يولّد إيصال فاتورة 80mm بصفحة واحدة متكيفة: الترويسة (اسم المحل الأقوى) ← المعرّفات ←
+        /// الكاشير إلزامي ← العميل («عميل نقدي» عند الغياب) ← جدول 4 أعمدة ← عدّاد الأسطر/الوحدات ←
+        /// ملخص مالي (الصفر يختفي) ← الإجمالي هو الأبرز ← الدفع/الباقي/المتبقي ← تذييل باسم النظام.
+        /// أرقام ثابتة المحاذاة، فاصل متقطع متوافق حرارياً، حتمي (نفس الفاتورة = نفس الإيصال).
         /// </summary>
         public static void ExportInvoiceReceipt(InvoicePrintVM inv, string storeName, string storePhone,
             string vatNumber, string? receiptFooter, string filePath)
         {
             EnsureLicense();
 
-            // ╪¡╪│╪º╪¿ ╪º┘ä╪º╪▒╪¬┘ü╪º╪╣ ╪»┘è┘å╪º┘à┘è┘â┘è┘ï╪º ┘à╪╣ ┘ç╪º┘à╪┤ ╪º┘ä╪¬┘ü╪º┘ü ╪ú╪│┘à╪º╪í ╪º┘ä╪ú╪╡┘å╪º┘ü (╪╣┘à┘ê╪» ╪º┘ä╪╡┘å┘ü Γëê 20 ╪¡╪▒┘ü┘ï╪º/╪│╪╖╪▒)
+            // حساب الارتفاع ديناميكيًا مع هامش التفاف أسماء الأصناف (عمود الصنف ≈ 20 حرفًا/سطر)
             int itemsLines = inv.Items.Sum(i =>
                 Math.Max(1, (int)Math.Ceiling((i.ProductName?.Length ?? 0) / 20.0)));
             int paymentLines = 1 + (inv.RemainingAmount > 0 ? 1 : 0)
@@ -554,7 +554,7 @@ namespace Sayl.UI.Infrastructure
                 + paymentLines * 5.2
                 + (inv.Status != "completed" ? 5 : 0)
                 + 26;
-            // ┘ç╪º┘à╪┤ ╪ú┘à╪º┘å 15% ΓÇö ╪º┘ä┘ä┘ü╪º┘ü╪⌐ ╪º┘ä╪¡╪▒╪º╪▒┘è╪⌐ ╪¬╪¬╪¡┘à┘ä ╪º┘ä┘ê╪▒┘é ╪º┘ä╪▓╪º╪ª╪»╪î ┘ê╪º┘ä╪º╪│╪¬╪½┘å╪º╪í ╪ú╪║┘ä┘ë ┘à┘å ╪º┘ä┘ç╪º┘à╪┤
+            // هامش أمان 15% — اللفافة الحرارية تتحمل الورق الزائد، والاستثناء أغلى من الهامش
             heightMm = Math.Max(62, heightMm * 1.15);
 
             var document = QuestPDF.Fluent.Document.Create(container =>
@@ -570,60 +570,60 @@ namespace Sayl.UI.Infrastructure
 
                     page.Content().Column(col =>
                     {
-                        // ┘ü╪º╪╡┘ä ╪┤╪▒╪╖╪º╪¬ ┘å╪╡┘è ΓÇö ╪º┘ä╪¬┘ê╪º┘ü┘é ╪º┘ä╪ú┘à╪½┘ä ┘à╪╣ ╪º┘ä╪▒╪ñ┘ê╪│ ╪º┘ä╪¡╪▒╪º╪▒┘è╪⌐ ╪╣┘å╪» ╪Ñ╪╣╪º╪»╪⌐ ╪º┘ä╪╖╪¿╪º╪╣╪⌐ ┘â╪╡┘ê╪▒╪⌐
+                        // فاصل شرطات نصي — التوافق الأمثل مع الرؤوس الحرارية عند إعادة الطباعة كصورة
                         void Separator() => col.Item()
                             .PaddingVertical(1)
                             .AlignCenter().Text(new string('-', 64)).FontColor("#6B7280");
 
-                        // 1) ╪¬╪▒┘ê┘è╪│╪⌐ ╪º┘ä┘à╪¡┘ä ΓÇö ╪º┘ä╪º╪│┘à ┘ç┘ê ╪º┘ä╪ú┘é┘ê┘ë ╪¿╪╡╪▒┘è┘ï╪º
+                        // 1) ترويسة المحل — الاسم هو الأقوى بصريًا
                         col.Item().AlignCenter().Text(storeName).FontSize(15).Bold();
                         if (!string.IsNullOrWhiteSpace(storePhone))
-                            col.Item().AlignCenter().Text($"┘ç╪º╪¬┘ü: {storePhone}").FontSize(8);
+                            col.Item().AlignCenter().Text($"هاتف: {storePhone}").FontSize(8);
                         if (!string.IsNullOrWhiteSpace(vatNumber))
-                            col.Item().AlignCenter().Text($"╪º┘ä╪▒┘é┘à ╪º┘ä╪╢╪▒┘è╪¿┘è: {vatNumber}").FontSize(8);
+                            col.Item().AlignCenter().Text($"الرقم الضريبي: {vatNumber}").FontSize(8);
                         Separator();
 
-                        // 2) ┘à╪╣╪▒┘æ┘ü ╪º┘ä┘ü╪º╪¬┘ê╪▒╪⌐ + ╪┤╪º╪▒╪⌐ ╪º┘ä╪¡╪º┘ä╪⌐ ╪║┘è╪▒ ╪º┘ä┘à┘â╪¬┘à┘ä╪⌐ + ╪º┘ä┘à╪▒╪¬╪¼╪╣ ╪╣┘ä┘ë ┘ü╪º╪¬┘ê╪▒╪⌐ ╪ú╪╡┘ä┘è╪⌐
+                        // 2) معرّف الفاتورة + شارة الحالة غير المكتملة + المرتجع على فاتورة أصلية
                         if (inv.Status != "completed")
                             col.Item().AlignCenter().Text($"*** {TranslateStatus(inv.Status)} ***")
                                 .FontSize(8.5f).Bold();
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"{TranslateType(inv.Type)} ╪▒┘é┘à: {inv.InvoiceId}").FontSize(9.5f).Bold();
+                            r.RelativeItem().Text($"{TranslateType(inv.Type)} رقم: {inv.InvoiceId}").FontSize(9.5f).Bold();
                             r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("dd/MM/yyyy") : "-").FontSize(8);
                         });
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"╪º┘ä┘ê┘é╪¬: {inv.CreatedAt:HH:mm}").FontSize(8);
+                            r.RelativeItem().Text($"الوقت: {inv.CreatedAt:HH:mm}").FontSize(8);
                             if (inv.OriginalInvoiceId != null)
-                                r.ConstantItem(140).AlignLeft().Text($"┘à╪▒╪¬╪¼╪╣ ╪╣┘ä┘ë: #{inv.OriginalInvoiceId}").FontSize(7.5f);
+                                r.ConstantItem(140).AlignLeft().Text($"مرتجع على: #{inv.OriginalInvoiceId}").FontSize(7.5f);
                         });
 
-                        // 3) ╪º┘ä┘â╪º╪┤┘è╪▒ (╪Ñ┘ä╪▓╪º┘à┘è ┘ü┘ê┘é ╪º┘ä╪¿┘å┘ê╪») + ╪º┘ä╪╖╪▒┘ü (┘à┘ê╪▒╪» ┘ä┘ä╪┤╪▒╪º╪í╪î ╪╣┘à┘è┘ä ┘ä╪║┘è╪▒┘ç)
-                        col.Item().Text($"╪º┘ä┘â╪º╪┤┘è╪▒: {inv.CashierName}").FontSize(8);
+                        // 3) الكاشير (إلزامي فوق البنود) + الطرف (مورد للشراء، عميل لغيره)
+                        col.Item().Text($"الكاشير: {inv.CashierName}").FontSize(8);
                         col.Item().Text(inv.Type is "purchase" or "supplier_return"
-                            ? $"╪º┘ä┘à┘ê╪▒╪»: {inv.PartyName ?? "-"}"
-                            : $"╪º┘ä╪╣┘à┘è┘ä: {inv.PartyName ?? "╪╣┘à┘è┘ä ┘å┘é╪»┘è"}").FontSize(8);
+                            ? $"المورد: {inv.PartyName ?? "-"}"
+                            : $"العميل: {inv.PartyName ?? "عميل نقدي"}").FontSize(8);
                         if (!string.IsNullOrWhiteSpace(inv.Notes))
-                            col.Item().Text($"┘à┘ä╪º╪¡╪╕╪º╪¬: {inv.Notes}").FontSize(7.5f);
+                            col.Item().Text($"ملاحظات: {inv.Notes}").FontSize(7.5f);
                         Separator();
 
-                        // 4) ╪¼╪»┘ê┘ä ╪º┘ä╪¿┘å┘ê╪» ΓÇö 4 ╪ú╪╣┘à╪»╪⌐╪î ╪º┘ä╪ú╪▒┘é╪º┘à ╪½╪º╪¿╪¬╪⌐ ╪º┘ä┘à╪¡╪º╪░╪º╪⌐
+                        // 4) جدول البنود — 4 أعمدة، الأرقام ثابتة المحاذاة
                         col.Item().Table(table =>
                         {
                             table.ColumnsDefinition(c =>
                             {
-                                c.RelativeColumn(5);    // ╪º┘ä╪╡┘å┘ü
-                                c.RelativeColumn(1.6f); // ╪º┘ä┘â┘à┘è╪⌐
-                                c.RelativeColumn(2.2f); // ╪│╪╣╪▒ ╪º┘ä┘ê╪¡╪»╪⌐
-                                c.RelativeColumn(2.4f); // ╪º┘ä╪Ñ╪¼┘à╪º┘ä┘è
+                                c.RelativeColumn(5);    // الصنف
+                                c.RelativeColumn(1.6f); // الكمية
+                                c.RelativeColumn(2.2f); // سعر الوحدة
+                                c.RelativeColumn(2.4f); // الإجمالي
                             });
                             table.Header(h =>
                             {
-                                h.Cell().Text("╪º┘ä╪╡┘å┘ü").FontSize(8).Bold();
-                                h.Cell().AlignCenter().Text("┘â┘à┘è╪⌐").FontSize(8).Bold();
-                                h.Cell().AlignLeft().Text("╪│╪╣╪▒").FontSize(8).Bold();
-                                h.Cell().AlignLeft().Text("╪Ñ╪¼┘à╪º┘ä┘è").FontSize(8).Bold();
+                                h.Cell().Text("الصنف").FontSize(8).Bold();
+                                h.Cell().AlignCenter().Text("كمية").FontSize(8).Bold();
+                                h.Cell().AlignLeft().Text("سعر").FontSize(8).Bold();
+                                h.Cell().AlignLeft().Text("إجمالي").FontSize(8).Bold();
                             });
                             foreach (var item in inv.Items)
                             {
@@ -634,44 +634,44 @@ namespace Sayl.UI.Infrastructure
                             }
                         });
 
-                        // 5) ╪╣╪»┘æ╪º╪» ╪º┘ä╪ú╪│╪╖╪▒/╪º┘ä┘ê╪¡╪»╪º╪¬
+                        // 5) عدّاد الأسطر/الوحدات
                         int units = inv.Items.Sum(i => i.Quantity);
-                        col.Item().Text($"╪º┘ä╪¿┘å┘ê╪»: {inv.Items.Count} ╪ú╪│╪╖╪▒ / {units} ┘ê╪¡╪»╪⌐").FontSize(7.5f);
+                        col.Item().Text($"البنود: {inv.Items.Count} أسطر / {units} وحدة").FontSize(7.5f);
 
                         Separator();
 
-                        // 6) ╪º┘ä┘à┘ä╪«╪╡ ╪º┘ä┘à╪º┘ä┘è ΓÇö ╪º┘ä╪¡┘é┘ê┘ä ╪º┘ä╪╡┘ü╪▒┘è╪⌐ ╪¬╪«╪¬┘ü┘è
+                        // 6) الملخص المالي — الحقول الصفرية تختفي
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text("╪º┘ä┘à╪¼┘à┘ê╪╣").FontSize(9);
+                            r.RelativeItem().Text("المجموع").FontSize(9);
                             r.ConstantItem(52).AlignLeft().Text(Money(inv.TotalAmount)).FontSize(9);
                         });
                         if (inv.DiscountAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪º┘ä╪«╪╡┘à").FontSize(9);
+                                r.RelativeItem().Text("الخصم").FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.DiscountAmount)).FontSize(9);
                             });
                         if (inv.TaxAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪º┘ä╪╢╪▒┘è╪¿╪⌐").FontSize(9);
+                                r.RelativeItem().Text("الضريبة").FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.TaxAmount)).FontSize(9);
                             });
 
-                        // 7) ╪º┘ä╪Ñ╪¼┘à╪º┘ä┘è ΓÇö ╪º┘ä╪ú┘é┘ê┘ë ┘à╪º┘ä┘è┘ï╪º
+                        // 7) الإجمالي — الأقوى ماليًا
                         col.Item().PaddingTop(1).BorderTop(0.4f).BorderColor(Colors.Grey.Darken2);
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text("╪º┘ä╪Ñ╪¼┘à╪º┘ä┘è").FontSize(11).Bold();
+                            r.RelativeItem().Text("الإجمالي").FontSize(11).Bold();
                             r.ConstantItem(58).AlignLeft().Text(Money(inv.NetAmount)).FontSize(11).Bold();
                         });
 
-                        // 8) ╪º┘ä╪»┘ü╪╣ ΓÇö ╪º┘ä╪¿╪º┘é┘è/╪º┘ä┘à╪¬╪¿┘é┘è ╪╣┘å╪» ┘ê╪¼┘ê╪»┘ç┘à╪º ┘ü┘é╪╖
+                        // 8) الدفع — الباقي/المتبقي عند وجودهما فقط
                         if (inv.PaidAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪º┘ä┘à╪»┘ü┘ê╪╣").FontSize(9);
+                                r.RelativeItem().Text("المدفوع").FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.PaidAmount)).FontSize(9);
                             });
                         if (inv.Payments.Count > 0)
@@ -681,7 +681,7 @@ namespace Sayl.UI.Infrastructure
                                 .Select(g => $"{g.Key} {Money(g.Sum(x => x.Amount))}"));
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪╖╪▒┘è┘é╪⌐ ╪º┘ä╪»┘ü╪╣").FontSize(8);
+                                r.RelativeItem().Text("طريقة الدفع").FontSize(8);
                                 r.ConstantItem(52).AlignLeft().Text(methods).FontSize(8);
                             });
                         }
@@ -689,21 +689,21 @@ namespace Sayl.UI.Infrastructure
                         if (change > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪º┘ä╪¿╪º┘é┘è ┘ä┘ä╪╣┘à┘è┘ä").FontSize(9).Bold();
+                                r.RelativeItem().Text("الباقي للعميل").FontSize(9).Bold();
                                 r.ConstantItem(52).AlignLeft().Text(Money(change)).FontSize(9).Bold();
                             });
                         if (inv.RemainingAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("╪º┘ä┘à╪¬╪¿┘é┘è (╪»┘Ä┘è┘å)").FontSize(9).Bold();
+                                r.RelativeItem().Text("المتبقي (دَين)").FontSize(9).Bold();
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.RemainingAmount)).FontSize(9).Bold();
                             });
 
-                        // 9) ╪º┘ä╪¬╪░┘è┘è┘ä ΓÇö ┘å╪╡ ┘é╪º╪¿┘ä ┘ä┘ä╪╢╪¿╪╖ + ╪º╪│┘à ╪º┘ä┘å╪╕╪º┘à
+                        // 9) التذييل — نص قابل للضبط + اسم النظام
                         col.Item().PaddingTop(4).AlignCenter().Text(
-                                string.IsNullOrWhiteSpace(receiptFooter) ? "╪┤┘â╪▒┘ï╪º ┘ä╪¬╪╣╪º┘à┘ä┘â┘à ┘à╪╣┘å╪º" : receiptFooter!)
+                                string.IsNullOrWhiteSpace(receiptFooter) ? "شكرًا لتعاملكم معنا" : receiptFooter!)
                             .FontSize(9).Bold();
-                        col.Item().AlignCenter().Text("╪│┘è┘ä POS ΓÇö ┘å╪╕╪º┘à ┘å┘é╪º╪╖ ╪º┘ä╪¿┘è╪╣").FontSize(7.5f);
+                        col.Item().AlignCenter().Text("سيل POS — نظام نقاط البيع").FontSize(7.5f);
                     });
                 });
             });
@@ -712,16 +712,16 @@ namespace Sayl.UI.Infrastructure
         }
 
 
-        // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
-        // ┘à╪╡╪»┘æ╪▒ ╪¼╪»┘ê┘ä ╪╣╪º┘à ┘ä┘â┘ä ╪¬┘é╪º╪▒┘è╪▒ ╪º┘ä┘å╪╕╪º┘à (PDF) ΓÇö ╪¬╪▒┘ê┘è╪│╪⌐ ┘à┘ê╪¡╪»╪⌐ + RTL
-        // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+        // ═════════════════════════════════════════════════
+        // مصدّر جدول عام لكل تقارير النظام (PDF) — ترويسة موحدة + RTL
+        // ═════════════════════════════════════════════════
 
         /// <summary>
-        /// ┘è┘ê┘ä┘æ╪» PDF ╪º╪¡╪¬╪▒╪º┘ü┘è┘ï╪º ┘à┘ê╪¡┘æ╪» ╪º┘ä┘ç┘ê┘è╪⌐ ┘ä╪ú┘è ╪¬┘é╪▒┘è╪▒ ╪¼╪»┘ê┘ä┘è (A4):
-        /// ╪┤╪▒┘è╪╖ ╪¬╪▒┘ê┘è╪│╪⌐ ┘â╪¡┘ä┘è ╪¿╪º╪│┘à ╪º┘ä┘à╪¡┘ä ┘ê╪º┘ä╪¬╪º╪▒┘è╪« ΓåÉ ┘ä┘ê╪¡╪⌐ ╪╣┘å┘ê╪º┘å ╪º┘ä╪¬┘é╪▒┘è╪▒ ΓåÉ
-        /// ╪¼╪»┘ê┘ä ╪¿╪¡╪»┘ê╪» ┘ê╪ú┘å┘à╪º╪╖ ┘à╪¬┘å╪º┘ê╪¿╪⌐ ┘ê╪╡┘ü┘ê┘ü ╪▒┘é┘à┘è╪⌐ ╪¿┘à╪¡╪º╪░╪º╪⌐ ╪½╪º╪¿╪¬╪⌐ ΓåÉ
-        /// ╪│╪╖╪▒ ╪º┘ä╪│╪¼┘ä╪º╪¬ ΓåÉ ╪¬╪░┘è┘è┘ä ╪¬╪▒┘é┘è┘à ┘à╪╣ ╪º┘ä┘à╪│╪¬╪«╪»┘à.
-        /// (┘à┘å┘ü╪╡┘ä ╪╣┘å ╪º┘ä╪Ñ┘è╪╡╪º╪╣ ╪º┘ä╪¡╪▒╪º╪▒┘è╪⌐ 80mm ΓÇö ┘ä┘â┘ä ┘å┘ê╪╣ ┘ü┘ä╪│┘ü╪⌐ ╪╣╪▒╪╢┘ç.)
+        /// يولّد PDF موحّد الهوية لأي تقرير جدولي (A4): شريط ترويسة كحلي باسم المحل
+        /// والتاريخ ← لوحة عنوان سطرين (العنوان + الفترة يمينًا، المُعد يسارًا) ←
+        /// جدول داخل بطاقة مؤطرة بعمود نص أول عريض (2.6×) وأنفاس بين الخلايا ←
+        /// صف إجمالي كحلي ← سطر السجلات ← تذييل ترقيم.
+        /// (منفصل عن الإيصال الحراري 80mm — لكل نوع فلسفة عرضه.)
         /// </summary>
         public static void ExportTableReport(string storeName, string title, string period,
             string userName, string[] headers, List<string[]> rows, string filePath)
@@ -745,39 +745,51 @@ namespace Sayl.UI.Infrastructure
                 container.Page(page =>
                 {
                     page.Size(PageSizes.A4);
-                    // 📖 جماليات التقارير (طلب المالك): نفس فلسفة فاتورة A4 —
-                    // هوامش 40px مريحة وخط أساس 11 (كان 24/10): التقارير تُطبع
-                    // وتُقرأ على المكاتب لا على الشاشات.
-                    page.Margin(40);
+                    // 📖 طلب المالك: هوامش مخففة 32px (كانت 40) — كل بكسل من
+                    // العرض يذهب للبيانات: أسماء المنتجات الطويلة تحتاج العرض.
+                    page.Margin(32);
                     page.DefaultTextStyle(x => x.FontSize(11).FontFamily("Segoe UI").DirectionFromRightToLeft());
 
                     // ══ الترويسة: شريط كحلي بهوية سيل (اسم يمينه، تاريخ يساره) ══
                     page.Header().Column(col =>
                     {
-                        col.Item().Background("#002B54").PaddingVertical(14).PaddingHorizontal(18).Row(r =>
+                        col.Item().Background("#002B54").PaddingVertical(16).PaddingHorizontal(20).Row(r =>
                         {
                             r.RelativeItem().AlignRight().Text(storeName)
                                 .FontSize(20).Bold().FontColor("#FFFFFF");
-                            r.ConstantItem(190).AlignLeft().Column(c2 =>
+                            r.ConstantItem(200).AlignLeft().Column(c2 =>
                             {
                                 c2.Item().Text("سيل POS").FontSize(10).Bold().FontColor("#93C5FD");
-                                c2.Item().PaddingTop(2).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
+                                c2.Item().PaddingTop(3).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
                                     .FontSize(9.5f).FontColor("#94A3B8");
                             });
                         });
                         // شريط سماوي تمييز (نفس هوية فاتورة A4)
                         col.Item().Height(2.5f).Background("#93C5FD");
-                        // لوحة العنوان: اسم التقرير + الفترة على خلفية فاتحة — بتنفّس أكبر
-                        col.Item().Background("#E7EFFA").BorderBottom(1).BorderColor("#002B54").PaddingVertical(10).PaddingHorizontal(14).Row(r =>
+
+                        // ══ لوحة العنوان: تصميم سطرين — يمنع التلاصق نهائيًا ══
+                        // السطر الأول (يمين): اسم التقرير كبيرًا وحيدًا لا يجاوره شيء.
+                        // السطر الثاني (يسار): الفترة + المُنشئ — كل على سطره بعمود
+                        // جانبي مستقل بلا سباق عرض مع العنوان (طلب المالك:
+                        // العنوان والفترة والمصدر والمتجر كلها كانت متلاصقة).
+                        col.Item().Background("#E7EFFA").BorderBottom(1).BorderColor("#002B54")
+                            .PaddingVertical(12).PaddingHorizontal(16).Row(r =>
                         {
-                            r.RelativeItem().AlignRight().Text(title)
-                                .FontSize(15).Bold().FontColor("#00335F");
-                            r.ConstantItem(310).AlignLeft().Column(c2 =>
+                            // يمين: العنوان + تحته الفترة (تاريخ التقرير) — أسرة العنوان
+                            r.RelativeItem().AlignRight().Column(c2 =>
                             {
-                                c2.Item().Text(period).FontSize(10.5f).FontColor("#004080");
-                                if (!string.IsNullOrWhiteSpace(userName))
-                                    c2.Item().PaddingTop(2).Text($"أنشأه: {userName}").FontSize(9.5f).FontColor("#64748B");
+                                c2.Item().Text(title).FontSize(16).Bold().FontColor("#00335F");
+                                c2.Item().PaddingTop(4).Text(period).FontSize(10.5f).FontColor("#004080");
                             });
+                            // يسار: المُنشئ في شارة هادئة منفصلة تمامًا عن العنوان
+                            if (!string.IsNullOrWhiteSpace(userName))
+                            {
+                                r.ConstantItem(170).AlignLeft().Column(c2 =>
+                                {
+                                    c2.Item().Text("مُعد التقرير").FontSize(9f).FontColor("#64748B");
+                                    c2.Item().PaddingTop(2).Text(userName).FontSize(11.5f).Bold().FontColor("#00335F");
+                                });
+                            }
                         });
                     });
 
@@ -788,10 +800,15 @@ namespace Sayl.UI.Infrastructure
                         // يعطي «حدودًا» بصرية بدل جدول عائم وسط الورقة
                         col.Item().Border(1).BorderColor("#CBD5E1").Background("#FFFFFF").Padding(10).Table(table =>
                         {
+                            // 📖 عمود النص الأول (المنتج/الاسم) يأخذ نصيب الأسد:
+                            // وزن 2.6 مقابل 1 للأعمدة الرقمية القصيرة (طلب المالك:
+                            // أسماء المنتجات تُقص). الأعمدة الرقمية لا تحتاج العرض —
+                            // الأرقام قصيرة بطبيعتها.
                             table.ColumnsDefinition(c =>
                             {
-                                for (int i = 0; i < headers.Length; i++)
-                                    c.RelativeColumn(i == headers.Length - 1 && headers.Length > 3 ? 1.3f : 1f);
+                                c.RelativeColumn(2.6f);   // العمود الأول: النص (اسم المنتج)
+                                for (int i = 1; i < headers.Length; i++)
+                                    c.RelativeColumn(1f);
                             });
 
                             // رأس الجدول: كحلي بأعمدة متباعدة بفواصل بيضاء رفيعة
