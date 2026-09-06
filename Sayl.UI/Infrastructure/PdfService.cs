@@ -781,10 +781,12 @@ namespace Sayl.UI.Infrastructure
                         });
                     });
 
-                    // ══ المتن: الجدول ══
-                    page.Content().PaddingTop(14).Column(col =>
+                    // ══ المتن: الجدول داخل بطاقة مؤطرة — أنفاس بين كل عنصر ══
+                    page.Content().PaddingTop(16).Column(col =>
                     {
-                        col.Item().Table(table =>
+                        // بطاقة التقرير: إطار خارجي أنيق يضم الجدول كله —
+                        // يعطي «حدودًا» بصرية بدل جدول عائم وسط الورقة
+                        col.Item().Border(1).BorderColor("#CBD5E1").Background("#FFFFFF").Padding(10).Table(table =>
                         {
                             table.ColumnsDefinition(c =>
                             {
@@ -792,12 +794,13 @@ namespace Sayl.UI.Infrastructure
                                     c.RelativeColumn(i == headers.Length - 1 && headers.Length > 3 ? 1.3f : 1f);
                             });
 
-                            // رأس الجدول: شريط كحلي أكبر وأريح
+                            // رأس الجدول: كحلي بأعمدة متباعدة بفواصل بيضاء رفيعة
                             table.Header(h =>
                             {
                                 foreach (var head in headers)
-                                    h.Cell().Background("#0B3B69").PaddingVertical(7).PaddingHorizontal(8).BorderBottom(1)
-                                        .BorderColor("#002B54")
+                                    h.Cell().Background("#0B3B69")
+                                        .PaddingVertical(9).PaddingHorizontal(10)
+                                        .BorderBottom(2).BorderColor("#93C5FD")
                                         .AlignCenter().Text(head).FontSize(10.5f).Bold().FontColor("#FFFFFF");
                             });
 
@@ -808,11 +811,14 @@ namespace Sayl.UI.Infrastructure
                                 for (int i = 0; i < headers.Length; i++)
                                 {
                                     string value = i < row.Length ? row[i] ?? "" : "";
-                                    var cell = table.Cell().PaddingVertical(6).PaddingHorizontal(8).BorderBottom(1)
-                                        .BorderColor("#E2E8F0");
+                                    // 📖 مضاد التلاصق: 10px أفقي داخل كل خلية (كان 8) —
+                                    // عمودان متجاوران لا يلمس نصاهما أبدًا + حد سفلي
+                                    // أوضح (0.8) يفصل الصفوف بصريًا
+                                    var cell = table.Cell().PaddingVertical(7).PaddingHorizontal(10).BorderBottom(0.8f)
+                                        .BorderColor("#D8DEE7");
 
                                     if (isStriped)
-                                        cell.Background("#F8FAFC");
+                                        cell.Background("#F1F5F9");
 
                                     bool isNumeric = value.Length > 0 &&
                                         value.All(ch => char.IsDigit(ch) || ".,-−%() ".Contains(ch));
@@ -825,12 +831,13 @@ namespace Sayl.UI.Infrastructure
                             }
 
                             // صف الإجمالي: للتقارير المالية (آخر عمود أرقام) —
-                            // أبرز صف بالجدول: خلفية كحلية ونص أبيض
+                            // شريط كحلي ختامي بحد علوي سماوي فاصل
                             if (hasAmounts)
                             {
                                 table.Cell().ColumnSpan((uint)(headers.Length - 1))
-                                    .Background("#002B54").PaddingVertical(7).PaddingHorizontal(8)
-                                    .AlignRight().Text("الإجمالي").FontSize(11.5f).Bold()
+                                    .BorderTop(2).BorderColor("#93C5FD")
+                                    .Background("#002B54").PaddingVertical(9).PaddingHorizontal(10)
+                                    .AlignRight().Text("الإجمالي").FontSize(12).Bold()
                                     .FontColor("#FFFFFF");
 
                                 decimal total = 0;
@@ -838,14 +845,15 @@ namespace Sayl.UI.Infrastructure
                                     if (ParseMoneyCell(r[^1], out var v)) // VULN-41: ثقافتان
                                         total += v;
 
-                                table.Cell().Background("#002B54").PaddingVertical(7).PaddingHorizontal(8)
+                                table.Cell().BorderTop(2).BorderColor("#93C5FD")
+                                    .Background("#002B54").PaddingVertical(9).PaddingHorizontal(10)
                                     .AlignLeft().Text(total.ToString("N2"))
-                                    .FontSize(11.5f).Bold().FontColor("#93C5FD");
+                                    .FontSize(12).Bold().FontColor("#93C5FD");
                             }
                         });
 
-                        // سطر السجلات — بتباعد مريح عن الجدول
-                        col.Item().PaddingTop(12).Row(r =>
+                        // سطر السجلات — خارج البطاقة، بتباعد مريح
+                        col.Item().PaddingTop(14).Row(r =>
                         {
                             r.RelativeItem().AlignRight().Text($"عدد السجلات: {rows.Count}")
                                 .FontSize(10f).FontColor("#475569");
