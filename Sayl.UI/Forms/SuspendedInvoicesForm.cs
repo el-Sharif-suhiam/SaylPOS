@@ -58,7 +58,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "الفواتير المعلقة";
+            Text = AppLang.T("Suspended.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(760, 560);
             MinimumSize = new Size(560, 420);
@@ -84,7 +84,7 @@ namespace Sayl.UI.Forms
             var header = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             var lblTitle = new Label
             {
-                Text = "الفواتير المعلقة",
+                Text = AppLang.T("Suspended.Title"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -106,11 +106,11 @@ namespace Sayl.UI.Forms
             // ── جدول الفواتير (الصف المرن — يتمدد ويتمرر وحده) ──
             _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
             UiHelpers.StyleGrid(_grid);
-            _grid.Columns.Add("colId", "رقم الفاتورة");
-            _grid.Columns.Add("colDate", "التاريخ");
-            _grid.Columns.Add("colCustomer", "العميل");
-            _grid.Columns.Add("colItems", "البنود");
-            _grid.Columns.Add("colTotal", "الصافي");
+            _grid.Columns.Add("colId", AppLang.T("Suspended.Label.InvoiceNo"));
+            _grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
+            _grid.Columns.Add("colCustomer", AppLang.T("Common.Label.Customer"));
+            _grid.Columns.Add("colItems", AppLang.T("Suspended.Label.Items"));
+            _grid.Columns.Add("colTotal", AppLang.T("Common.Label.Net"));
             _grid.Columns["colId"].FillWeight = 14;
             _grid.Columns["colDate"].FillWeight = 22;
             _grid.Columns["colCustomer"].FillWeight = 30;
@@ -139,17 +139,17 @@ namespace Sayl.UI.Forms
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
 
-            _btnResume = AppTheme.MakeButton("استكمال الفاتورة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 50);
+            _btnResume = AppTheme.MakeButton(AppLang.T("Suspended.Button.Resume"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 50);
             _btnResume.Dock = DockStyle.Fill;
             _btnResume.Margin = new Padding(0, 6, 4, 6);
             _btnResume.Click += async (_, _) => await ResumeAsync();
 
-            _btnCancelInvoice = AppTheme.MakeButton("إلغاء الفاتورة", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 50);
+            _btnCancelInvoice = AppTheme.MakeButton(AppLang.T("Suspended.Button.CancelInvoice"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 50);
             _btnCancelInvoice.Dock = DockStyle.Fill;
             _btnCancelInvoice.Margin = new Padding(4, 6, 4, 6);
             _btnCancelInvoice.Click += async (_, _) => await CancelInvoiceAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 50);
             btnClose.Dock = DockStyle.Fill;
             btnClose.Margin = new Padding(4, 6, 0, 6);
@@ -188,19 +188,19 @@ namespace Sayl.UI.Forms
                 {
                     _grid.Rows.Add(inv.InvoiceId,
                         inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
-                        inv.PartyName ?? "عميل مجهول",
+                        inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
                         inv.ItemsCount,
                         UiHelpers.Money(inv.NetAmount));
                 }
 
                 // العداد + تلميح فراغ: القائمة الفارغة لا تترك الشاشة ميتة
-                _lblCount.Text = _invoices.Count > 0 ? $"{_invoices.Count} فاتورة معلقة" : "";
+                _lblCount.Text = _invoices.Count > 0 ? AppLang.T("Suspended.Count", _invoices.Count) : "";
                 if (_invoices.Count == 0)
-                    UiHelpers.ShowInfo(this, "لا توجد فواتير معلقة حاليًا.");
+                    UiHelpers.ShowInfo(this, AppLang.T("Suspended.Msg.None"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الفواتير المعلقة.");
+                UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.LoadFailed"));
             }
         }
 
@@ -208,7 +208,7 @@ namespace Sayl.UI.Forms
         {
             if (_grid.CurrentRow == null || _grid.CurrentRow.Index >= _invoices.Count)
             {
-                UiHelpers.ShowError(this, "اختر فاتورة من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
                 return;
             }
 
@@ -229,14 +229,14 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل استكمال الفاتورة." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Suspended.Resume.Failed") : result.Message);
                 return;
             }
 
             Changed = true;
 
             // اكتملت الفاتورة — سؤال واحد: هل يريد الكاشير طباعتها؟
-            if (ConfirmationDialog.Show(this, "طباعة الفاتورة", "هل تريد طباعة الفاتورة؟", dangerStyle: false))
+            if (ConfirmationDialog.Show(this, AppLang.T("Pos.Print.Title"), AppLang.T("Pos.Print.Ask"), dangerStyle: false))
                 await InvoicePrintHelper.PrintAsync(invoice.InvoiceId, this);
 
             await LoadInvoicesAsync();
@@ -246,13 +246,13 @@ namespace Sayl.UI.Forms
         {
             if (_grid.CurrentRow == null || _grid.CurrentRow.Index >= _invoices.Count)
             {
-                UiHelpers.ShowError(this, "اختر فاتورة من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
                 return;
             }
 
             var invoice = _invoices[_grid.CurrentRow.Index];
-            bool confirmed = ConfirmationDialog.Show(this, "إلغاء فاتورة معلقة",
-                $"سيتم إلغاء الفاتورة رقم {invoice.InvoiceId} وتحرير المخزون المحجوز. هل أنت متأكد؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Suspended.Cancel.Title"),
+                AppLang.T("Suspended.Cancel.Confirm", invoice.InvoiceId));
             if (!confirmed)
                 return;
 
@@ -264,7 +264,7 @@ namespace Sayl.UI.Forms
                     SessionState.CurrentUser?.UserId ?? 0);
             }
 
-            UiHelpers.ShowResult(this, result, "تم إلغاء الفاتورة.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Suspended.Cancel.Done"));
             if (result.IsSuccess)
             {
                 Changed = true;

@@ -134,5 +134,54 @@ namespace Sayl.UI.Infrastructure
             b.MouseLeave += (_, _) => { hovered = false; b.Invalidate(); };
             return b;
         }
+
+        /// <summary>
+        /// زر تبديل اللغة (عربي/English) — كبسولة بيضاء على خلفية كحلية أنيقة:
+        /// يعرض لغة الهدف («English» أو «عربي») — النقر يحفظ الاختيار ويعيد
+        /// تشغيل البرنامج. يوضع في زاوية أي نافذة (دائري 46px يطابق أزرار
+        /// «؟» و«×» في LoginForm). مصدر واحد لثلاث شاشات: الدخول/الرئيسية/POS.
+        /// </summary>
+        public static Button MakeLanguageSwitchButton(int diameter = 46)
+        {
+            bool toEnglish = !AppLang.IsEnglish;
+            var b = new Button
+            {
+                Size = new Size(diameter, diameter),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+
+            b.Paint += (_, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                var rect = new Rectangle(1, 1, b.Width - 3, b.Height - 3);
+                using var border = new Pen(Color.FromArgb(191, 219, 254), 1.6f);
+                g.DrawEllipse(border, rect);
+
+                string display = toEnglish ? "EN" : "ع";
+                using var font = new Font("Segoe UI", display == "EN" ? 10F : 12F, FontStyle.Bold);
+                TextRenderer.DrawText(g, display, font, rect, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPadding);
+            };
+            b.MouseEnter += (_, _) => b.Invalidate();
+            b.MouseLeave += (_, _) => b.Invalidate();
+            b.Click += (_, _) =>
+            {
+                var confirm = MessageBox.Show(
+                    AppLang.T("Lang.Msg.RestartBody"),
+                    AppLang.T("Lang.Msg.RestartTitle"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1,
+                    MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                if (confirm == DialogResult.Yes)
+                    AppLang.SwitchAndRestart(toEnglish ? AppLanguage.English : AppLanguage.Arabic);
+            };
+            return b;
+        }
     }
 }

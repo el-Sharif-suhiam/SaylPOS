@@ -37,6 +37,54 @@ namespace Sayl.UI.Infrastructure
         /// <summary>يُستدعى مرة واحدة في Program.Main قبل بناء أي نافذة.</summary>
         public static void Init(AppLanguage lang) => Current = lang;
 
+        /// <summary>قراءة اللغة المحفوظة — أولوية: ملف الإعداد المحلي الصالح
+        /// (بجانب بيانات المستخدم — %LocalAppData%\Sayl_POS\lang) ثم appsettings.
+        /// ملف LocalAppData هو المصدر الحقيقي لأن Program Files للقراءة —
+        /// appsettings يبقى القيمة الافتراضية للتركيب الأول فقط.</summary>
+        public static AppLanguage LoadSaved()
+        {
+            try
+            {
+                string file = SavedLangFile();
+                if (File.Exists(file))
+                {
+                    string code = File.ReadAllText(file).Trim();
+                    return code.Equals("en", StringComparison.OrdinalIgnoreCase)
+                        ? AppLanguage.English
+                        : AppLanguage.Arabic;
+                }
+            }
+            catch
+            {
+                // قراءة فاشلة = عربي (الأصل)
+            }
+            return AppLanguage.Arabic;
+        }
+
+        /// <summary>حفظ اختيار اللغة ثم إعادة تشغيل البرنامج.
+        /// Application.Restart آمنة هنا: تُطلق عملية جديدة بنفس مسار exe
+        /// وتغلق الحالية — الفورمات المفتوحة تُغلق عبر دورة الإغلاق الطبيعية.</summary>
+        public static void SwitchAndRestart(AppLanguage lang)
+        {
+            try
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Sayl_POS");
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(SavedLangFile(), lang == AppLanguage.English ? "en" : "ar");
+            }
+            catch
+            {
+                // فشل الحفظ: نكمل بالتبديل عبر سطر الأوامر — اللغة تسري لهذه الجلسة فقط
+            }
+            Application.Restart();
+        }
+
+        private static string SavedLangFile() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Sayl_POS", "lang.txt");
+
         /// <summary>ترجعة نصية للمفتاح — مع fallback عربي ثم المفتاح نفسه.</summary>
         public static string T(string key)
         {

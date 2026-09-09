@@ -23,7 +23,7 @@ namespace Sayl.UI.Forms
         {
             _userId = userId;
 
-            Text = "آخر فاتورة";
+            Text = AppLang.T("LastInvoice.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(760, 520);
             MinimumSize = new Size(560, 420);
@@ -59,15 +59,15 @@ namespace Sayl.UI.Forms
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = AppTheme.TextPrimary,
                 Padding = new Padding(10, 8, 10, 8),
-                Text = "جارٍ البحث عن آخر فاتورة..."
+                Text = AppLang.T("LastInvoice.Searching")
             };
 
             _grid = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_grid);
-            _grid.Columns.Add("colProduct", "المنتج");
-            _grid.Columns.Add("colQty", "الكمية");
-            _grid.Columns.Add("colPrice", "السعر");
-            _grid.Columns.Add("colTotal", "الإجمالي");
+            _grid.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            _grid.Columns.Add("colQty", AppLang.T("Common.Label.Qty"));
+            _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
+            _grid.Columns.Add("colTotal", AppLang.T("Common.Label.Total"));
             _grid.Columns["colProduct"].FillWeight = 46;
             _grid.Columns["colQty"].FillWeight = 16;
             _grid.Columns["colPrice"].FillWeight = 19;
@@ -75,13 +75,13 @@ namespace Sayl.UI.Forms
 
             var bottomBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 
-            _btnPrint = AppTheme.MakeButton("إعادة طباعة الإيصال", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 48);
+            _btnPrint = AppTheme.MakeButton(AppLang.T("LastInvoice.Button.Reprint"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 48);
             _btnPrint.Dock = DockStyle.Left;
             _btnPrint.Width = 190;
             _btnPrint.Enabled = false;
             _btnPrint.Click += async (_, _) => await PrintAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
             btnClose.Dock = DockStyle.Left;
             btnClose.Width = 110;
@@ -121,7 +121,7 @@ namespace Sayl.UI.Forms
 
                 if (invoiceId == null)
                 {
-                    _lblInfo.Text = "لا توجد فواتير بيع بعد.";
+                    _lblInfo.Text = AppLang.T("LastInvoice.Msg.None");
                     return;
                 }
 
@@ -132,18 +132,21 @@ namespace Sayl.UI.Forms
                 var r = await invoiceService.GetInvoiceForPrintAsync(invoiceId.Value);
                 if (!r.IsSuccess || r.Data == null)
                 {
-                    _lblInfo.Text = "تعذر تحميل الفاتورة.";
+                    _lblInfo.Text = AppLang.T("LastInvoice.Msg.LoadFailed");
                     return;
                 }
 
                 var inv = r.Data;
-                _lblInfo.Text =
-                    $"فاتورة رقم: {inv.InvoiceId}    {InvoiceDetailsForm.TranslateType(inv.Type)}    " +
-                    $"{InvoiceDetailsForm.TranslatePayment(inv.PaymentStatus)}\n" +
-                    $"العميل: {inv.PartyName ?? "عميل نقدي"}    الكاشير: {inv.CashierName}    " +
-                    $"التاريخ: {Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}\n" +
-                    $"الصافي: {UiHelpers.Money(inv.NetAmount)}    المدفوع: {UiHelpers.Money(inv.PaidAmount)}" +
-                    (inv.RemainingAmount > 0 ? $"    المتبقي: {UiHelpers.Money(inv.RemainingAmount)}" : "");
+                _lblInfo.Text = AppLang.T("LastInvoice.Info",
+                    inv.InvoiceId,
+                    InvoiceDetailsForm.TranslateType(inv.Type),
+                    InvoiceDetailsForm.TranslatePayment(inv.PaymentStatus),
+                    inv.PartyName ?? AppLang.T("Common.Party.WalkIn"),
+                    inv.CashierName,
+                    Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm"),
+                    UiHelpers.Money(inv.NetAmount),
+                    UiHelpers.Money(inv.PaidAmount),
+                    inv.RemainingAmount > 0 ? AppLang.T("LastInvoice.Remaining", UiHelpers.Money(inv.RemainingAmount)) : "");
 
                 _grid.Rows.Clear();
                 foreach (var item in inv.Items)
@@ -154,7 +157,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                _lblInfo.Text = "تعذر البحث عن آخر فاتورة.";
+                _lblInfo.Text = AppLang.T("LastInvoice.Msg.SearchFailed");
             }
         }
 

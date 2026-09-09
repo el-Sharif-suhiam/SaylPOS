@@ -104,7 +104,7 @@ namespace Sayl.UI.UserControls
         {
             var chk = new CheckBox
             {
-                Text = "عرض المعطّلين",
+                Text = AppLang.T("Section.ShowInactive"),
                 Dock = DockStyle.Left,
                 Width = 150,
                 Height = 44,
@@ -145,7 +145,7 @@ namespace Sayl.UI.UserControls
                 Width = 320,
                 Font = AppTheme.FontBody
             };
-            TxtSearch.PlaceholderText = "بحث... ثم Enter";
+            TxtSearch.PlaceholderText = AppLang.T("Section.Search.Placeholder");
             TxtSearch.KeyDown += (_, args) =>
             {
                 if (args.KeyCode == Keys.Enter)

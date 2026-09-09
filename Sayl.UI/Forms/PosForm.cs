@@ -206,7 +206,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "سيل — نقاط البيع";
+            Text = AppLang.T("Pos.Form.Title");
             WindowState = FormWindowState.Maximized;
             MinimumSize = new Size(1024, 640);
             StartPosition = FormStartPosition.CenterScreen;
@@ -231,7 +231,7 @@ namespace Sayl.UI.Forms
 
             _lblSession = new Label
             {
-                Text = "جارٍ فتح الجلسة...",
+                Text = AppLang.T("Pos.Session.Opening"),
                 Dock = DockStyle.Left,
                 Width = 170,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -246,7 +246,7 @@ namespace Sayl.UI.Forms
 
             var lblBrand = new Label
             {
-                Text = "سيل | نقاط البيع",
+                Text = AppLang.T("Pos.Brand"),
                 Dock = DockStyle.Left,
                 Width = 165,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -270,17 +270,20 @@ namespace Sayl.UI.Forms
             //    يضيف المنتج المطابق فورًا للسلة.
             //  • PlaceholderText: النص الإرشادي الرمادي — غيّره بحرية.
             //  • Font بحجم 14: مقصود كبيرًا لقراءة سريعة خلف الكاشير.
-            _txtSearch.PlaceholderText = " اكتب اسم المنتج للبحث الفوري أو امسح الباركود ثم Enter ";
+            _txtSearch.PlaceholderText = AppLang.T("Pos.Search.Placeholder");
             _txtSearch.TextChanged += (_, _) => OnSearchTextChanged();
             _txtSearch.KeyDown += Search_KeyDown;
             searchHost.Controls.Add(_txtSearch);
 
-            var btnLogout = AppTheme.MakeButton("خروج", AppTheme.SidebarHover,
+            var btnLogout = AppTheme.MakeButton(AppLang.T("Pos.Button.Logout"), AppTheme.SidebarHover,
                 foreColor: Color.FromArgb(252, 165, 165), hoverColor: AppTheme.PrimaryDark, height: 50);
             btnLogout.Dock = DockStyle.Left;
             btnLogout.Width = 92;
             btnLogout.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnLogout.Click += async (_, _) => await LogoutAsync();
+
+            // زر تبديل اللغة — كبسولة صغيرة بجوار زر الخروج
+            var btnLang = AppTheme.MakeLanguageSwitchButton(44);
 
             // 🕐 VULN-45 + طلب المالك: ساعة البرنامج الحية — التاريخ والوقت
             // من AppClock (UTC+3 ثابت) لا من ساعة الجهاز: الكاشير يرى «توقيت
@@ -302,8 +305,8 @@ namespace Sayl.UI.Forms
             top.Controls.Add(lblBrand);
             top.Controls.Add(_logoMark);
             top.Controls.Add(btnLogout);
+            top.Controls.Add(btnLang); // زر اللغة يسار زر الخروج
             top.Controls.Add(lblClock); // الساعة: أول Right في RTL = أقصى اليمين فوق الشعار
-
             Controls.Add(top);
         }
 
@@ -398,8 +401,8 @@ namespace Sayl.UI.Forms
             var rect = new Rectangle(e.Bounds.X + 12, e.Bounds.Y + 5, e.Bounds.Width - 24, e.Bounds.Height - 10);
 
             string stockText = item.Product.Type == "stock"
-                ? $"متوفر: {item.Stock}"
-                : "غير مخزني";
+                ? AppLang.T("Pos.Search.InStock", item.Stock)
+                : AppLang.T("Pos.Search.NotStocked");
             var stockBrush = new SolidBrush(
                 item.Product.Type != "stock" ? AppTheme.TextMuted :
                 item.Stock <= 0 ? AppTheme.Danger :
@@ -465,7 +468,7 @@ namespace Sayl.UI.Forms
         /// <summary>تنبيه مسح غير معروف: رسالة حمراء مؤقتة + صوت تحذير، دون أي نافذة حوارية تعيق المسح.</summary>
         private void ShowScanNotFound(string scanned)
         {
-            ShowStockWarn($"المنتج غير موجود: {scanned}");
+            ShowStockWarn(AppLang.T("Pos.Search.NotFound", scanned));
             System.Media.SystemSounds.Exclamation.Play();
         }
 
@@ -699,7 +702,7 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label
             {
-                Text = "الفاتورة الحالية",
+                Text = AppLang.T("Pos.Cart.Title"),
                 Dock = DockStyle.Right,
                 Width = 160,
                 TextAlign = ContentAlignment.MiddleRight,
@@ -709,7 +712,7 @@ namespace Sayl.UI.Forms
 
             _lblItemsBadge = new Label
             {
-                Text = "لا توجد بنود",
+                Text = AppLang.T("Pos.Cart.Empty"),
                 Dock = DockStyle.Right,
                 Width = 130,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -761,16 +764,16 @@ namespace Sayl.UI.Forms
 
             _gridCart.Columns.Clear();
 
-            _gridCart.Columns.Add("colProduct", "المنتج");
+            _gridCart.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
 
             var cPrice = new DataGridViewCellStyle { Format = "N2", Alignment = DataGridViewContentAlignment.MiddleCenter };
-            _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colPrice", HeaderText = "السعر", DefaultCellStyle = cPrice, ReadOnly = true });
+            _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colPrice", HeaderText = AppLang.T("Common.Label.Price"), DefaultCellStyle = cPrice, ReadOnly = true });
 
             var colMinus = new DataGridViewButtonColumn { Name = "colMinus", HeaderText = " ", Text = "−", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 6 };
             colMinus.DefaultCellStyle.ForeColor = AppTheme.Primary;
             colMinus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
 
-            var colQty = new DataGridViewTextBoxColumn { Name = "colQty", HeaderText = "الكمية", ReadOnly = false, FillWeight = 10 };
+            var colQty = new DataGridViewTextBoxColumn { Name = "colQty", HeaderText = AppLang.T("Common.Label.Qty"), ReadOnly = false, FillWeight = 10 };
             colQty.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             colQty.DefaultCellStyle.Font = new Font("Segoe UI", 13F, FontStyle.Bold);
             colQty.DefaultCellStyle.BackColor = AppTheme.FieldBg;
@@ -779,10 +782,10 @@ namespace Sayl.UI.Forms
             colPlus.DefaultCellStyle.ForeColor = AppTheme.Success;
             colPlus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
 
-            var colTotal = new DataGridViewTextBoxColumn { Name = "colTotal", HeaderText = "الإجمالي", ReadOnly = true, FillWeight = 16 };
+            var colTotal = new DataGridViewTextBoxColumn { Name = "colTotal", HeaderText = AppLang.T("Common.Label.Total"), ReadOnly = true, FillWeight = 16 };
             colTotal.DefaultCellStyle = new DataGridViewCellStyle(cPrice) { Font = new Font("Segoe UI", 12F, FontStyle.Bold) };
 
-            var colDelete = new DataGridViewButtonColumn { Name = "colDelete", HeaderText = "حذف", Text = "حذف", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 8 };
+            var colDelete = new DataGridViewButtonColumn { Name = "colDelete", HeaderText = AppLang.T("Pos.Cart.Delete"), Text = AppLang.T("Pos.Cart.Delete"), UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 8 };
             colDelete.DefaultCellStyle.ForeColor = AppTheme.Danger;
 
             _gridCart.Columns.AddRange(new DataGridViewColumn[] { colMinus, colQty, colPlus, colTotal, colDelete });
@@ -829,7 +832,7 @@ namespace Sayl.UI.Forms
                 stock > 0 && qty > stock)
             {
                 qty = stock;
-                ShowStockWarn($"تم تقييد الكمية إلى المتاح من '{item.ProductName}' ({stock})");
+                ShowStockWarn(AppLang.T("Pos.Warn.QtyCapped", item.ProductName, stock));
             }
 
             item.Quantity = qty;
@@ -865,7 +868,7 @@ namespace Sayl.UI.Forms
                     if (_stockByProduct.TryGetValue(item.ProductId, out int stockPlus) &&
                         stockPlus > 0 && item.Quantity >= stockPlus)
                     {
-                        ShowStockWarn($"لا يمكن تجاوز المتاح من '{item.ProductName}' ({stockPlus})");
+                        ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", item.ProductName, stockPlus));
                         return;
                     }
                     item.Quantity++;
@@ -926,14 +929,14 @@ namespace Sayl.UI.Forms
             var customerCard = MakeCard(64);
             _lblCustomer = new Label
             {
-                Text = "عميل مجهول",
+                Text = AppLang.T("Pos.Customer.Unknown"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = AppTheme.TextPrimary,
                 Padding = new Padding(0, 0, 10, 0)
             };
-            var btnCustomer = AppTheme.MakeButton("عميل — F4", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
+            var btnCustomer = AppTheme.MakeButton(AppLang.T("Pos.Customer.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
             btnCustomer.Dock = DockStyle.Left;
             btnCustomer.Width = 128;
             btnCustomer.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
@@ -950,7 +953,7 @@ namespace Sayl.UI.Forms
 
             _lblSubtotal = new Label
             {
-                Text = "الإجمالي: 0.00",
+                Text = AppLang.T("Pos.Totals.Subtotal", UiHelpers.Money(0)),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
@@ -959,13 +962,13 @@ namespace Sayl.UI.Forms
             totals.SetColumnSpan(_lblSubtotal, 2);
             totals.Controls.Add(_lblSubtotal, 0, 0);
 
-            var lblDiscount = new Label { Text = "خصم %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
+            var lblDiscount = new Label { Text = AppLang.T("Pos.Totals.DiscountLabel"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
             _txtDiscount = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F) };
             _txtDiscount.TextChanged += (_, _) => RefreshTotals();
             totals.Controls.Add(lblDiscount, 0, 1);
             totals.Controls.Add(_txtDiscount, 1, 1);
 
-            var lblTax = new Label { Text = "ضريبة %", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
+            var lblTax = new Label { Text = AppLang.T("Pos.Totals.TaxLabel"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
             _txtTax = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F) };
             _txtTax.TextChanged += (_, _) => RefreshTotals();
             totals.Controls.Add(lblTax, 0, 2);
@@ -977,7 +980,7 @@ namespace Sayl.UI.Forms
             // 3) الصافي
             _lblNet = new Label
             {
-                Text = "الصافي: 0.00",
+                Text = AppLang.T("Pos.Totals.Net", UiHelpers.Money(0)),
                 Dock = DockStyle.Top,
                 Height = 58,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -988,24 +991,24 @@ namespace Sayl.UI.Forms
             AddRow(layout, _lblNet, 62);
 
             // 4) زر الدفع الكبير — F2 (اختصار الكاشير الأشهر عالميًا)
-            _btnPay = AppTheme.MakeButton("دفع الآن — F2", AppTheme.Success, hoverColor: AppTheme.SuccessDark, height: 78);
+            _btnPay = AppTheme.MakeButton(AppLang.T("Pos.Pay.Button"), AppTheme.Success, hoverColor: AppTheme.SuccessDark, height: 78);
             _btnPay.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
             _btnPay.Click += async (_, _) => await CheckoutAsync(suspend: false);
             AddRow(layout, _btnPay, 82);
 
             // 5) تعليق + مسح (صفان متجاوران) — F3 للتعليق
-            _btnSuspend = AppTheme.MakeButton("تعليق — F3", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
+            _btnSuspend = AppTheme.MakeButton(AppLang.T("Pos.Suspend.Button"), AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 54);
             _btnSuspend.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             _btnSuspend.Click += async (_, _) => await CheckoutAsync(suspend: true);
 
-            var btnClear = AppTheme.MakeButton("مسح السلة", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 54);
+            var btnClear = AppTheme.MakeButton(AppLang.T("Pos.Clear.Button"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 54);
             btnClear.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnClear.FlatAppearance.BorderSize = 1;
             btnClear.FlatAppearance.BorderColor = AppTheme.BorderColor;
             btnClear.Click += (_, _) =>
             {
                 if (_cart.Count == 0) return;
-                if (ConfirmationDialog.Show(this, "مسح السلة", "هل تريد مسح جميع بنود الفاتورة؟"))
+                if (ConfirmationDialog.Show(this, AppLang.T("Pos.Clear.Title"), AppLang.T("Pos.Clear.Confirm")))
                     ClearCart();
             };
             AddRow(layout, MakeTwoColumns(_btnSuspend, btnClear), 58);
@@ -1013,7 +1016,7 @@ namespace Sayl.UI.Forms
             // 6) عنوان قسم العمليات
             var lblOps = new Label
             {
-                Text = "── عمليات أخرى ──",
+                Text = AppLang.T("Pos.Ops.Title"),
                 Dock = DockStyle.Top,
                 Height = 26,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -1023,22 +1026,22 @@ namespace Sayl.UI.Forms
             AddRow(layout, lblOps, 30);
 
             // 7) عمليات 2×2
-            var btnReturn = AppTheme.MakeButton("مرتجع — F12", Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 52);
+            var btnReturn = AppTheme.MakeButton(AppLang.T("Pos.Return.Button"), Color.FromArgb(124, 58, 237), hoverColor: Color.FromArgb(91, 33, 182), height: 52);
             btnReturn.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnReturn.Margin = new Padding(0, 0, 4, 8);
             btnReturn.Click += (_, _) => ShowReturnForm();
 
-            var btnCash = AppTheme.MakeButton("قبض وصرف", AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 52);
+            var btnCash = AppTheme.MakeButton(AppLang.T("Pos.Cash.Button"), AppTheme.PrimaryLight, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 52);
             btnCash.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnCash.Margin = new Padding(4, 0, 0, 8);
             btnCash.Click += (_, _) => ShowCashMovement();
 
-            var btnSuspended = AppTheme.MakeButton("فواتير معلقة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 52);
+            var btnSuspended = AppTheme.MakeButton(AppLang.T("Pos.Suspended.Button"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 52);
             btnSuspended.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnSuspended.Margin = new Padding(0, 0, 4, 0);
             btnSuspended.Click += (_, _) => ShowSuspendedInvoices();
 
-            var btnCloseSession = AppTheme.MakeButton("إغلاق (Z)", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 52);
+            var btnCloseSession = AppTheme.MakeButton(AppLang.T("Pos.CloseSession.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 52);
             btnCloseSession.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             btnCloseSession.Margin = new Padding(4, 0, 0, 0);
             btnCloseSession.Click += async (_, _) => await CloseSessionFlowAsync();
@@ -1059,7 +1062,7 @@ namespace Sayl.UI.Forms
             AddRow(layout, opsGrid, 112);
 
             // 8) استلام المخزون (حسب الصلاحية)
-            var btnReceive = AppTheme.MakeButton("استلام مخزون", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 50);
+            var btnReceive = AppTheme.MakeButton(AppLang.T("Pos.ReceiveStock.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 50);
             btnReceive.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnReceive.Visible = SessionState.CanReceiveStock;
             btnReceive.Click += (_, _) =>
@@ -1159,7 +1162,7 @@ namespace Sayl.UI.Forms
                         _sessionId = opened.Data;
                 }
 
-                _lblSession.Text = _sessionId.HasValue ? $"الجلسة #{_sessionId.Value}" : "بدون جلسة";
+                _lblSession.Text = _sessionId.HasValue ? AppLang.T("Pos.Session.Id", _sessionId.Value) : AppLang.T("Pos.Session.None");
 
                 // نسبة الضريبة الافتراضية من الإعدادات
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
@@ -1168,7 +1171,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                _lblSession.Text = "بدون جلسة";
+                _lblSession.Text = AppLang.T("Pos.Session.None");
             }
         }
 
@@ -1208,7 +1211,7 @@ namespace Sayl.UI.Forms
                 if (_stockByProduct.TryGetValue(product.ProductId, out int stockAvail) &&
                     stockAvail > 0 && existing.Quantity >= stockAvail)
                 {
-                    ShowStockWarn($"لا يمكن تجاوز المتاح من '{product.Name}' ({stockAvail})");
+                    ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stockAvail));
                     return;
                 }
                 existing.Quantity++;
@@ -1227,7 +1230,7 @@ namespace Sayl.UI.Forms
             {
                 int inCart = _cart.First(i => i.ProductId == product.ProductId).Quantity;
                 if (inCart > stock)
-                    ShowStockWarn($"تنبيه: المتاح من '{product.Name}' هو {stock} فقط");
+                    ShowStockWarn(AppLang.T("Pos.Warn.LowStock", product.Name, stock));
             }
 
             RefreshCart();
@@ -1245,10 +1248,10 @@ namespace Sayl.UI.Forms
         {
             _gridCart.Rows.Clear();
             foreach (var item in _cart)
-                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity, "+", UiHelpers.Money(item.Total), "حذف");
+                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity, "+", UiHelpers.Money(item.Total), AppLang.T("Pos.Cart.Delete"));
 
             int totalUnits = _cart.Sum(i => i.Quantity);
-            _lblItemsBadge.Text = _cart.Count == 0 ? "لا توجد بنود" : $"{_cart.Count} بند • {totalUnits} قطعة";
+            _lblItemsBadge.Text = _cart.Count == 0 ? AppLang.T("Pos.Cart.Empty") : AppLang.T("Pos.Cart.ItemsBadge", _cart.Count, totalUnits);
             _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Accent;
 
             RefreshTotals();
@@ -1298,8 +1301,8 @@ namespace Sayl.UI.Forms
 
         private void RefreshTotals()
         {
-            _lblSubtotal.Text = $"الإجمالي: {UiHelpers.Money(Subtotal)}";
-            _lblNet.Text = $"الصافي: {UiHelpers.Money(NetTotal)}";
+            _lblSubtotal.Text = AppLang.T("Pos.Totals.Subtotal", UiHelpers.Money(Subtotal));
+            _lblNet.Text = AppLang.T("Pos.Totals.Net", UiHelpers.Money(NetTotal));
         }
 
         private void ClearCart()
@@ -1307,7 +1310,7 @@ namespace Sayl.UI.Forms
             _cart.Clear();
             _customerId = null;
             _customerName = null;
-            _lblCustomer.Text = "عميل مجهول";
+            _lblCustomer.Text = AppLang.T("Pos.Customer.Unknown");
             _txtDiscount.Text = "0";
             _txtTax.Text = "0";
             RefreshCart();
@@ -1350,7 +1353,7 @@ namespace Sayl.UI.Forms
 
             if (_cart.Count == 0)
             {
-                UiHelpers.ShowError(this, "السلة فارغة. أضف منتجات أولًا.");
+                UiHelpers.ShowError(this, AppLang.T("Pos.Msg.CartEmpty"));
                 return;
             }
 
@@ -1362,10 +1365,7 @@ namespace Sayl.UI.Forms
                 await OpenSessionAsync();
                 if (!_sessionId.HasValue)
                 {
-                    UiHelpers.ShowError(this,
-                        "لا توجد جلسة بيع مفتوحة وتعذر فتح واحدة.\n" +
-                        "أغلق البرنامج وأعد تشغيله أو راجع الاتصال بقاعدة البيانات — " +
-                        "البيع بلا جلسة يخرج كل النقد من تقارير التسوية.");
+                    UiHelpers.ShowError(this, AppLang.T("Pos.Msg.NoSession"));
                     _txtSearch.Focus();
                     return;
                 }
@@ -1375,8 +1375,8 @@ namespace Sayl.UI.Forms
 
             if (!suspend)
             {
-                bool confirmSale = ConfirmationDialog.Show(this, "إتمام البيع",
-                    $"الصافي المطلوب: {UiHelpers.Money(NetTotal)}. هل تريد إتمام عملية البيع؟", dangerStyle: false);
+                bool confirmSale = ConfirmationDialog.Show(this, AppLang.T("Pos.Checkout.Title"),
+                    AppLang.T("Pos.Checkout.Confirm", UiHelpers.Money(NetTotal)), dangerStyle: false);
                 if (!confirmSale)
                     return;
 
@@ -1395,8 +1395,8 @@ namespace Sayl.UI.Forms
             }
             else
             {
-                bool confirm = ConfirmationDialog.Show(this, "تعليق الفاتورة",
-                    "سيتم تعليق الفاتورة وحجز المخزون. هل أنت متأكد؟");
+                bool confirm = ConfirmationDialog.Show(this, AppLang.T("Pos.Suspend.Title"),
+                    AppLang.T("Pos.Suspend.Confirm"));
                 if (!confirm)
                     return;
             }
@@ -1429,14 +1429,14 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشلت عملية البيع." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Pos.Msg.SaleFailed") : result.Message);
                 _txtSearch.Focus();
                 return;
             }
 
             if (suspend)
             {
-                UiHelpers.ShowInfo(this, $"تم تعليق الفاتورة رقم {result.Data}.");
+                UiHelpers.ShowInfo(this, AppLang.T("Pos.Msg.Suspended", result.Data));
                 ClearCart();
                 await RefreshStockAsync();
                 return;
@@ -1450,8 +1450,8 @@ namespace Sayl.UI.Forms
 
             // اكتملت الفاتورة (دفع كامل أو دَين) — سؤال واحد بسيط: هل يريد الكاشير طباعتها؟
             // (يُسأل فقط لو لم تخرج حراريًا تلقائيًا — لا نكرر الطباعة مرتين)
-            if (!_autoPrintedThisSale && ConfirmationDialog.Show(this, "طباعة الفاتورة",
-                    "هل تريد طباعة الفاتورة؟", dangerStyle: false))
+            if (!_autoPrintedThisSale && ConfirmationDialog.Show(this, AppLang.T("Pos.Print.Title"),
+                    AppLang.T("Pos.Print.Ask"), dangerStyle: false))
             {
                 await InvoicePrintHelper.PrintAsync(result.Data, this);
             }
@@ -1527,7 +1527,7 @@ namespace Sayl.UI.Forms
         {
             if (!_sessionId.HasValue)
             {
-                UiHelpers.ShowError(this, "لا توجد جلسة مفتوحة.");
+                UiHelpers.ShowError(this, AppLang.T("Pos.Msg.NoOpenSession"));
                 return;
             }
 
@@ -1540,12 +1540,12 @@ namespace Sayl.UI.Forms
         {
             if (!_sessionId.HasValue)
             {
-                UiHelpers.ShowError(this, "لا توجد جلسة مفتوحة.");
+                UiHelpers.ShowError(this, AppLang.T("Pos.Msg.NoOpenSession"));
                 return;
             }
 
-            bool confirmed = ConfirmationDialog.Show(this, "إغلاق الجلسة",
-                "سيتم عرض تقرير الجلسة وطلب عدّ النقد. متابعة؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Pos.CloseSession.Title"),
+                AppLang.T("Pos.CloseSession.Confirm"));
             if (!confirmed)
                 return;
 
@@ -1571,8 +1571,8 @@ namespace Sayl.UI.Forms
 
         private async Task LogoutAsync()
         {
-            bool confirmed = ConfirmationDialog.Show(this, "تسجيل الخروج",
-                "هل أنت متأكد من رغبتك في تسجيل الخروج؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Main.Logout.Title"),
+                AppLang.T("Main.Logout.Msg"));
             if (!confirmed)
                 return;
 

@@ -42,7 +42,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "تسوية مخزون";
+            Text = AppLang.T("AdjustStock.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 540);
             BackColor = AppTheme.CardBg;
@@ -50,33 +50,33 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblTitle = new Label { Text = "تسوية مخزون يدوية", Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("AdjustStock.Title"), Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
             // قائمة المنتجات تُعبأ لاحقًا في LoadProductsAsync (نمط شائع:
             // البناء بلا بيانات، التحميل عند Load — لا تجميد لشاشة الافتتاح)
-            var lblProduct = new Label { Text = "المنتج *", Bounds = new Rectangle(30, 60, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblProduct = new Label { Text = AppLang.T("Common.Label.Product") + " *", Bounds = new Rectangle(30, 60, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbProduct = new ComboBox { Bounds = new Rectangle(30, 84, 400, 40), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
 
-            var lblQty = new Label { Text = "الكمية *", Bounds = new Rectangle(30, 134, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblQty = new Label { Text = AppLang.T("Common.Label.Qty") + " *", Bounds = new Rectangle(30, 134, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtQty = new TextBox { Bounds = new Rectangle(30, 158, 400, 40), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center };
 
             // زرا الخيار: زيادة يمين (230..430) ونقصان يسار (30..230) —
             // Checked=true على الزيادة = الافتراضي. لا مقبض Click — قراءة لاحقًا.
-            _rbIncrease = new RadioButton { Text = "زيادة (إضافة)", Bounds = new Rectangle(230, 208, 200, 28), Checked = true, ForeColor = AppTheme.TextPrimary };
-            _rbDecrease = new RadioButton { Text = "نقصان (خصم)", Bounds = new Rectangle(30, 208, 200, 28), ForeColor = AppTheme.TextPrimary };
+            _rbIncrease = new RadioButton { Text = AppLang.T("AdjustStock.Increase"), Bounds = new Rectangle(230, 208, 200, 28), Checked = true, ForeColor = AppTheme.TextPrimary };
+            _rbDecrease = new RadioButton { Text = AppLang.T("AdjustStock.Decrease"), Bounds = new Rectangle(30, 208, 200, 28), ForeColor = AppTheme.TextPrimary };
 
-            var lblBatch = new Label { Text = "رقم الدفعة (للزيادة فقط، اختياري)", Bounds = new Rectangle(30, 244, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblBatch = new Label { Text = AppLang.T("AdjustStock.Label.Batch"), Bounds = new Rectangle(30, 244, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtBatch = new TextBox { Bounds = new Rectangle(30, 268, 400, 40), Font = AppTheme.FontBody };
 
             // السبب Multiline 60px — التسوية عملية رقابية تستوثق (لماذا؟)
-            var lblReason = new Label { Text = "السبب *", Bounds = new Rectangle(30, 318, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblReason = new Label { Text = AppLang.T("CashMove.Label.Reason"), Bounds = new Rectangle(30, 318, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtReason = new TextBox { Bounds = new Rectangle(30, 342, 400, 60), Multiline = true, Font = AppTheme.FontBody };
 
-            var btnSave = AppTheme.MakeButton("تنفيذ التسوية", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnSave = AppTheme.MakeButton(AppLang.T("AdjustStock.Button.Execute"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnSave.Bounds = new Rectangle(30, 420, 240, 50);
             btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 420, 140, 50);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
 
@@ -102,7 +102,7 @@ namespace Sayl.UI.Forms
 
                 if (_products.Count == 0)
                 {
-                    UiHelpers.ShowError(this, "لا توجد منتجات مخزنية.");
+                    UiHelpers.ShowError(this, AppLang.T("AdjustStock.Msg.NoStockProducts"));
                     return;
                 }
 
@@ -115,7 +115,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المنتجات.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.LoadFailed"));
             }
         }
 
@@ -123,19 +123,19 @@ namespace Sayl.UI.Forms
         {
             if (_cmbProduct.SelectedIndex < 0 || _cmbProduct.SelectedIndex >= _products.Count)
             {
-                UiHelpers.ShowError(this, "اختر منتجًا.");
+                UiHelpers.ShowError(this, AppLang.T("AdjustStock.Msg.PickProduct"));
                 return;
             }
 
             if (!int.TryParse(_txtQty.Text?.Trim(), out int qty) || qty <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل كمية صحيحة أكبر من صفر.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.InvalidQty"));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_txtReason.Text))
             {
-                UiHelpers.ShowError(this, "سبب التسوية مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("AdjustStock.Msg.ReasonRequired"));
                 return;
             }
 
@@ -151,8 +151,10 @@ namespace Sayl.UI.Forms
                 UserId = SessionState.CurrentUser?.UserId ?? 0
             };
 
-            bool confirmed = ConfirmationDialog.Show(this, "تسوية مخزون",
-                $"سيتم {(request.IsIncrease ? "زيادة" : "خفض")} كمية المنتج بمقدار {qty}. هل أنت متأكد؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("AdjustStock.Confirm.Title"),
+                AppLang.T("AdjustStock.Confirm.Body",
+                    request.IsIncrease ? AppLang.T("AdjustStock.IncreaseWord") : AppLang.T("AdjustStock.DecreaseWord"),
+                    qty));
             if (!confirmed)
                 return;
 
@@ -163,7 +165,7 @@ namespace Sayl.UI.Forms
                 result = await stockService.AdjustStockAsync(request);
             }
 
-            UiHelpers.ShowResult(this, result, "تمت التسوية بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("AdjustStock.Msg.Done"));
             if (result.IsSuccess)
                 DialogResult = DialogResult.OK;
         }

@@ -30,7 +30,7 @@ namespace Sayl.UI.Forms
             _partyName = partyName;
             _remaining = remaining;
 
-            Text = "سداد دفعة";
+            Text = AppLang.T("SupplierPay.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(420, 430);
             BackColor = AppTheme.CardBg;
@@ -66,7 +66,7 @@ namespace Sayl.UI.Forms
         {
             var lblTitle = new Label
             {
-                Text = _invoiceId.HasValue ? $"سداد فاتورة شراء #{_invoiceId}" : "سداد رصيد مورد",
+                Text = _invoiceId.HasValue ? AppLang.T("SupplierPay.Title.Invoice", _invoiceId) : AppLang.T("SupplierPay.Title.Balance"),
                 Bounds = new Rectangle(0, 14, ClientSize.Width, 30),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -76,8 +76,8 @@ namespace Sayl.UI.Forms
             _lblInfo = new Label
             {
                 Text = _invoiceId.HasValue
-                    ? $"المورد: {_partyName}\nالمتبقي على الفاتورة: {UiHelpers.Money(_remaining)}"
-                    : $"المورد: {_partyName}\nالرصيد المستحق: {UiHelpers.Money(_remaining)}",
+                    ? AppLang.T("SupplierPay.Info.Invoice", _partyName, UiHelpers.Money(_remaining))
+                    : AppLang.T("SupplierPay.Info.Balance", _partyName, UiHelpers.Money(_remaining)),
                 Bounds = new Rectangle(30, 56, 360, 52),
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 10.5F),
@@ -86,7 +86,7 @@ namespace Sayl.UI.Forms
 
             var lblAmount = new Label
             {
-                Text = "المبلغ",
+                Text = AppLang.T("Common.Label.Amount"),
                 Bounds = new Rectangle(30, 118, 360, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -100,7 +100,7 @@ namespace Sayl.UI.Forms
 
             var lblMethod = new Label
             {
-                Text = "طريقة الدفع",
+                Text = AppLang.T("Common.Label.Method"),
                 Bounds = new Rectangle(30, 190, 360, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -112,12 +112,17 @@ namespace Sayl.UI.Forms
                 FlatStyle = FlatStyle.Flat,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            _cmbMethod.Items.AddRange(new object[] { "نقدي", "شبكة (بطاقة)", "تحويل بنكي" });
+            _cmbMethod.Items.AddRange(new object[]
+            {
+                AppLang.T("Common.Method.Cash"),
+                AppLang.T("Common.Method.Card"),
+                AppLang.T("Common.Method.BankTransfer")
+            });
             _cmbMethod.SelectedIndex = 0;
 
             var lblNotes = new Label
             {
-                Text = "ملاحظات",
+                Text = AppLang.T("Common.Label.Notes"),
                 Bounds = new Rectangle(30, 262, 360, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -128,12 +133,12 @@ namespace Sayl.UI.Forms
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
-            _btnSave = AppTheme.MakeButton("حفظ السداد", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
+            _btnSave = AppTheme.MakeButton(AppLang.T("SupplierPay.Button.Save"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
             _btnSave.Bounds = new Rectangle(110, 336, 280, 48);
             _btnSave.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             _btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Bounds = new Rectangle(30, 336, 70, 48);
             btnClose.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
@@ -155,14 +160,14 @@ namespace Sayl.UI.Forms
         {
             if (!decimal.TryParse(_txtAmount.Text?.Trim(), out decimal amount) || amount <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل مبلغًا صحيحًا أكبر من صفر.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.EnterValidAmountOverZero"));
                 _txtAmount.Focus();
                 return;
             }
 
             if (amount > _remaining)
             {
-                UiHelpers.ShowError(this, $"المبلغ أكبر من المتبقي ({UiHelpers.Money(_remaining)}).");
+                UiHelpers.ShowError(this, AppLang.T("SupplierPay.Msg.OverRemaining", UiHelpers.Money(_remaining)));
                 _txtAmount.Focus();
                 _txtAmount.SelectAll();
                 return;
@@ -207,7 +212,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الاتصال بقاعدة البيانات.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.DbConnectionFailed"));
             }
             finally
             {

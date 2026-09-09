@@ -73,13 +73,13 @@ namespace Sayl.UI.Controls
                 WrapContents = false
             };
 
-            var btnYes = AppTheme.MakeButton("تأكيد",
+            var btnYes = AppTheme.MakeButton(AppLang.T("Common.Button.Confirm"),
                 dangerStyle ? AppTheme.Danger : AppTheme.Primary,
                 hoverColor: dangerStyle ? Color.FromArgb(185, 28, 28) : AppTheme.PrimaryDark);
             btnYes.Size = new Size(140, 48);
             btnYes.DialogResult = DialogResult.Yes;
 
-            var btnCancel = AppTheme.MakeButton("إلغاء",
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"),
                 AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary,
                 hoverColor: AppTheme.BorderColor);

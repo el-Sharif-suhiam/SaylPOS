@@ -30,7 +30,7 @@ namespace Sayl.UI.Forms
         //    والافتراضي DateTime.Today — نفس فكرة حقن القيم في كل النوافذ.
         private void BuildUi()
         {
-            Text = _existing == null ? "إضافة مصروف" : "تعديل مصروف";
+            Text = _existing == null ? AppLang.T("Expense.AddTitle") : AppLang.T("Expense.EditTitle");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 420);
@@ -42,28 +42,36 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label { Text = Text, Bounds = new Rectangle(0, 16, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            var lblDesc = new Label { Text = "الوصف *", Bounds = new Rectangle(30, 58, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblDesc = new Label { Text = AppLang.T("Expense.Label.Description"), Bounds = new Rectangle(30, 58, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtDescription = new TextBox { Bounds = new Rectangle(30, 82, 380, 36), Font = AppTheme.FontBody, Text = _existing?.Description ?? "" };
 
-            var lblAmount = new Label { Text = "المبلغ *", Bounds = new Rectangle(30, 128, 185, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblAmount = new Label { Text = AppLang.T("Common.Label.Amount") + " *", Bounds = new Rectangle(30, 128, 185, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtAmount = new TextBox { Bounds = new Rectangle(30, 152, 185, 36), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center, Text = _existing?.Amount.ToString("0.##") ?? "" };
 
-            var lblDate = new Label { Text = "التاريخ", Bounds = new Rectangle(225, 128, 185, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblDate = new Label { Text = AppLang.T("Common.Label.Date"), Bounds = new Rectangle(225, 128, 185, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _dtpDate = new DateTimePicker { Bounds = new Rectangle(225, 152, 185, 36), Format = DateTimePickerFormat.Short, Value = _existing?.ExpenseDate.ToDateTime(TimeOnly.MinValue) ?? AppClock.NowLocal.Date };
 
-            var lblCategory = new Label { Text = "الفئة", Bounds = new Rectangle(30, 198, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblCategory = new Label { Text = AppLang.T("Expense.Label.Category"), Bounds = new Rectangle(30, 198, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbCategory = new ComboBox { Bounds = new Rectangle(30, 222, 380, 36), FlatStyle = FlatStyle.Flat };
-            _cmbCategory.Items.AddRange(new object[] { "إيجار", "رواتب", "كهرباء ومياه", "نقل", "صيانة", "أخرى" });
+            _cmbCategory.Items.AddRange(new object[]
+            {
+                AppLang.T("Expense.Category.Rent"),
+                AppLang.T("Expense.Category.Salaries"),
+                AppLang.T("Expense.Category.Utilities"),
+                AppLang.T("Expense.Category.Transport"),
+                AppLang.T("Expense.Category.Maintenance"),
+                AppLang.T("Expense.Category.Other")
+            });
             _cmbCategory.Text = _existing?.Category ?? "";
 
-            var lblNotes = new Label { Text = "ملاحظات", Bounds = new Rectangle(30, 268, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblNotes = new Label { Text = AppLang.T("Common.Label.Notes"), Bounds = new Rectangle(30, 268, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtNotes = new TextBox { Bounds = new Rectangle(30, 292, 380, 36), Font = AppTheme.FontBody, Text = _existing?.Notes ?? "" };
 
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(30, 344, 230, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(280, 344, 130, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -80,13 +88,13 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtDescription.Text))
             {
-                UiHelpers.ShowError(this, "الوصف مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("Expense.Msg.DescriptionRequired"));
                 return;
             }
 
             if (!decimal.TryParse(_txtAmount.Text?.Trim(), out decimal amount) || amount <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل مبلغًا صحيحًا أكبر من صفر.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.EnterValidAmountOverZero"));
                 return;
             }
 
@@ -108,7 +116,7 @@ namespace Sayl.UI.Forms
                 if (_existing == null)
                 {
                     var added = await expenseService.AddNewExpenseAsync(dto);
-                    result = added.IsSuccess ? Result.Ok("تم حفظ المصروف بنجاح.") : Result.Fail(added.Message);
+                    result = added.IsSuccess ? Result.Ok(AppLang.T("Expense.Msg.Added")) : Result.Fail(added.Message);
                 }
                 else
                 {
@@ -118,11 +126,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل الحفظ." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Expense.Msg.SaveFailed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowResult(this, result, "تم الحفظ بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Expense.Msg.Saved"));
             DialogResult = DialogResult.OK;
         }
     }

@@ -57,13 +57,13 @@ namespace Sayl.UI.Infrastructure
             }
             catch
             {
-                UiHelpers.ShowError(owner, "تعذر تحميل بيانات الفاتورة.");
+                UiHelpers.ShowError(owner, AppLang.T("InvoicePrint.Msg.LoadFailed"));
                 return;
             }
 
             if (invoice == null)
             {
-                UiHelpers.ShowError(owner, "الفاتورة غير موجودة.");
+                UiHelpers.ShowError(owner, AppLang.T("InvoicePrint.Msg.NotFound"));
                 return;
             }
 
@@ -98,7 +98,7 @@ namespace Sayl.UI.Infrastructure
             }
             catch
             {
-                UiHelpers.ShowError(owner, "تعذر توليد ملف PDF.");
+                UiHelpers.ShowError(owner, AppLang.T("InvoicePrint.Msg.PdfFailed"));
                 return;
             }
 
@@ -113,7 +113,7 @@ namespace Sayl.UI.Infrastructure
             }
             catch
             {
-                UiHelpers.ShowInfo(owner, $"الملف محفوظ في:\n{filePath}");
+                UiHelpers.ShowInfo(owner, AppLang.T("InvoicePrint.Msg.SavedAt", filePath));
             }
         }
 

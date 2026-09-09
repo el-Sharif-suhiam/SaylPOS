@@ -18,7 +18,9 @@ namespace Sayl.UI.UserControls
             _type = type;
         }
 
-        protected override string Title => _type == enInvoicesType.sale ? "فواتير البيع" : "فواتير الشراء";
+        protected override string Title => _type == enInvoicesType.sale
+            ? AppLang.T("Invoices.Section.Sales")
+            : AppLang.T("Invoices.Section.Purchases");
 
         protected override async Task LoadDataAsync()
         {
@@ -35,13 +37,13 @@ namespace Sayl.UI.UserControls
 
                 _invoices = result.Data;
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colId", "الرقم");
-                Grid.Columns.Add("colDate", "التاريخ");
-                Grid.Columns.Add("colParty", "الطرف");
-                Grid.Columns.Add("colUser", "المستخدم");
-                Grid.Columns.Add("colStatus", "الحالة");
-                Grid.Columns.Add("colPayStatus", "الدفع");
-                Grid.Columns.Add("colNet", "الصافي");
+                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+                Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
+                Grid.Columns.Add("colParty", AppLang.T("Invoices.Label.Party"));
+                Grid.Columns.Add("colUser", AppLang.T("Invoices.Label.User"));
+                Grid.Columns.Add("colStatus", AppLang.T("Invoices.Label.Status"));
+                Grid.Columns.Add("colPayStatus", AppLang.T("Invoices.Label.PayStatus"));
+                Grid.Columns.Add("colNet", AppLang.T("Common.Label.Net"));
                 Grid.Columns.Add("colView", "");
                 Grid.Columns["colId"].FillWeight = 8;
                 Grid.Columns["colDate"].FillWeight = 17;
@@ -71,7 +73,7 @@ namespace Sayl.UI.UserControls
                     if (_type == enInvoicesType.purchase)
                     {
                         string payAction = inv.Type == "purchase" && inv.Status == "completed" && inv.PaymentStatus != "paid"
-                            ? "سداد"
+                            ? AppLang.T("Invoices.Action.Pay")
                             : "";
                         rowIndex = Grid.Rows.Add(inv.InvoiceId,
                             inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
@@ -80,7 +82,7 @@ namespace Sayl.UI.UserControls
                             TranslateStatus(inv.Status),
                             TranslatePayment(inv.PaymentStatus),
                             UiHelpers.Money(inv.NetAmount),
-                            "تفاصيل",
+                            AppLang.T("Common.Button.Details"),
                             payAction);
                         if (payAction.Length > 0)
                             Grid.Rows[rowIndex].Cells["colPay"].Style.ForeColor = AppTheme.Success;
@@ -94,30 +96,30 @@ namespace Sayl.UI.UserControls
                             TranslateStatus(inv.Status),
                             TranslatePayment(inv.PaymentStatus),
                             UiHelpers.Money(inv.NetAmount),
-                            "تفاصيل");
+                            AppLang.T("Common.Button.Details"));
                     }
                     Grid.Rows[rowIndex].Cells["colView"].Style.ForeColor = AppTheme.Primary;
                 }
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الفواتير.");
+                UiHelpers.ShowError(this, AppLang.T("Invoices.Msg.LoadFailed"));
             }
         }
 
         private static string TranslateStatus(string status) => status switch
         {
-            "completed" => "مكتملة",
-            "suspended" => "معلقة",
-            "cancelled" => "ملغاة",
+            "completed" => AppLang.T("Common.Status.Completed"),
+            "suspended" => AppLang.T("Common.Status.Suspended"),
+            "cancelled" => AppLang.T("Common.Status.Cancelled"),
             _ => status
         };
 
         private static string TranslatePayment(string status) => status switch
         {
-            "paid" => "مدفوعة",
-            "partial" => "جزئية",
-            "unpaid" => "غير مدفوعة",
+            "paid" => AppLang.T("Common.Payment.Paid"),
+            "partial" => AppLang.T("Common.Payment.Partial"),
+            "unpaid" => AppLang.T("Common.Payment.Unpaid"),
             _ => status
         };
 
@@ -152,13 +154,13 @@ namespace Sayl.UI.UserControls
 
                     if (inv.Type != "purchase" || inv.Status != "completed")
                     {
-                        UiHelpers.ShowInfo(this, "السداد متاح لفواتير الشراء المكتملة فقط.");
+                        UiHelpers.ShowInfo(this, AppLang.T("Invoices.Msg.PayOnlyCompleted"));
                         return;
                     }
 
                     if (inv.PaymentStatus == "paid")
                     {
-                        UiHelpers.ShowInfo(this, "الفاتورة مسددة بالكامل.");
+                        UiHelpers.ShowInfo(this, AppLang.T("Invoices.Msg.AlreadyPaid"));
                         return;
                     }
 
@@ -186,7 +188,7 @@ namespace Sayl.UI.UserControls
 
             if (_type == enInvoicesType.purchase)
             {
-                AddToolbarButton("فاتورة شراء جديدة", AppTheme.Primary, AppTheme.PrimaryDark,
+                AddToolbarButton(AppLang.T("Invoices.Button.NewPurchase"), AppTheme.Primary, AppTheme.PrimaryDark,
                     (_, _) =>
                     {
                         using var form = new PurchaseForm();
@@ -196,7 +198,7 @@ namespace Sayl.UI.UserControls
                 AddToolbarGap(8);
             }
 
-            AddToolbarButton("تحديث", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
+            AddToolbarButton(AppLang.T("Invoices.Button.Refresh"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
         }
     }
 }
