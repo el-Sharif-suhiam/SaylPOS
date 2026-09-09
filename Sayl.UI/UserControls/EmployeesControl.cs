@@ -1,4 +1,5 @@
 using Common.DTOs;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
@@ -8,10 +9,15 @@ using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.UserControls
 {
-    /// <summary>قسم الموظفين: عرض/بحث/إضافة/تعديل + تعيين شفت + ربط حساب + كشوف رواتب.</summary>
+    /// <summary>
+    /// قسم الموظفين: عرض/بحث/إضافة/تعديل + تعيين شفت + ربط حساب + كشوف رواتب.
+    /// حماية الارتباط: موظف مربوط بحساب يوازي المشغّل أو يعلوه لا يُعدَّل
+    /// (إلا إن كان حسابه هو) — الطريق الثاني لبيانات الحسابات الحساسة.
+    /// </summary>
     internal class EmployeesControl : SectionListControl
     {
         private List<DtoEmployee> _employees = new();
+        private Dictionary<int, (string username, int roleValue)> _linkedUsers = new();
 
         protected override string Title => "الموظفون";
 
@@ -26,17 +32,18 @@ namespace Sayl.UI.UserControls
                 var service = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
                 _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
-                // اسم الحساب المرتبط لكل موظف (خريطة واحدة — لا استعلام لكل صف)
-                var userByEmp = new Dictionary<int, string>();
+                // خريطة الارتباط: (اسم الحساب + قيمة دوره) لكل موظف — تُستخدم
+                // للعرض ولحماية التحرير على موظفي الحسابات العليا
+                _linkedUsers = new Dictionary<int, (string, int)>();
                 using (var scope2 = Program.Services.CreateScope())
                 {
                     var db = scope2.ServiceProvider.GetRequiredService<Sayl.Core.Data.SaylDbContext>();
                     var links = await db.Users
                         .Where(u => u.EmployeeId != null)
-                        .Select(u => new { u.EmployeeId, u.Username })
+                        .Select(u => new { u.EmployeeId, u.Username, u.Role.RoleValue })
                         .ToListAsync();
                     foreach (var l in links)
-                        userByEmp[l.EmployeeId!.Value] = l.Username;
+                        _linkedUsers[l.EmployeeId!.Value] = (l.Username, l.RoleValue);
                 }
 
                 Grid.Columns.Clear();
@@ -61,7 +68,7 @@ namespace Sayl.UI.UserControls
                     int row = Grid.Rows.Add(e.Name, e.Position, e.Department ?? "-",
                         TranslateSalaryType(e.SalaryType), UiHelpers.Money(e.Salary ?? 0),
                         TranslateStatus(e.Status),
-                        userByEmp.TryGetValue(e.EmployeeId, out var uname) ? uname : "-");
+                        _linkedUsers.TryGetValue(e.EmployeeId, out var u) ? u.username : "-");
                     if (e.Status == "resigned")
                         Grid.Rows[row].Cells["colStatus"].Style.ForeColor = AppTheme.Danger;
                 }
@@ -70,6 +77,37 @@ namespace Sayl.UI.UserControls
             {
                 UiHelpers.ShowError(this, "تعذر تحميل الموظفين.");
             }
+        }
+
+        // ── حارس القسم: هل يحق للمشغّل تعديل موظف؟ ──
+        // موظف بلا حساب = كيان بلا سلطة — تعديل حر.
+        // مربوط بحساب يوازيني أو يعلوني = ممنوع (راجع مدير النظام).
+        // حسابه هو نفسه = مسموح (استثناءه الشخصي).
+        private bool CanEditEmployee(DtoEmployee emp)
+        {
+            if (!_linkedUsers.TryGetValue(emp.EmployeeId, out var link))
+                return true;
+
+            var me = SessionState.CurrentUser;
+            if (me != null && link.username == me.UserName)
+                return true;
+
+            return AppPermissions.Outranks(SessionState.CurrentRoleValue, link.roleValue);
+        }
+
+        private string? EmployeeGuardMessage(DtoEmployee emp)
+        {
+            if (!_linkedUsers.TryGetValue(emp.EmployeeId, out var link))
+                return null;
+
+            var me = SessionState.CurrentUser;
+            if (me != null && link.username == me.UserName)
+                return null;
+
+            if (!AppPermissions.Outranks(SessionState.CurrentRoleValue, link.roleValue))
+                return $"الموظف '{emp.Name}' مربوط بحساب '{link.username}' الذي يوازي دورك أو أعلى منه — لا يمكنك تعديله. راجع مدير النظام.";
+
+            return null;
         }
 
         internal static string TranslateSalaryType(Common.Enums.enSalaryType type) => type switch
@@ -103,7 +141,7 @@ namespace Sayl.UI.UserControls
             AddToolbarGap();
             AddToolbarButton("ربط حساب مستخدم", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => LinkAccount(), 150);
 
-            if (SessionState.IsAdmin)
+            if (SessionState.Can(Common.Utils.AppPermissions.Users))
             {
                 AddToolbarGap();
                 AddToolbarButton("الشفتات والإجازات", AppTheme.SidebarBg, AppTheme.SidebarHover,
@@ -132,6 +170,15 @@ namespace Sayl.UI.UserControls
                 UiHelpers.ShowError(this, "اختر موظفًا من القائمة.");
                 return;
             }
+
+            // حارس الارتباط: موظف الحساب الأعلى لا يُعدَّل من هنا
+            string? guard = EmployeeGuardMessage(emp);
+            if (guard != null)
+            {
+                UiHelpers.ShowError(this, guard);
+                return;
+            }
+
             EditEmployee(emp);
         }
 
@@ -141,6 +188,13 @@ namespace Sayl.UI.UserControls
             if (emp == null)
             {
                 UiHelpers.ShowError(this, "اختر موظفًا من القائمة.");
+                return;
+            }
+
+            string? guard = EmployeeGuardMessage(emp);
+            if (guard != null)
+            {
+                UiHelpers.ShowError(this, guard);
                 return;
             }
 
@@ -156,7 +210,8 @@ namespace Sayl.UI.UserControls
             form.ShowDialog(FindForm());
         }
 
-        /// <summary>ربط الموظف بحساب مستخدم (للموظفين بلا حساب) — LinkEmployeeAsync.</summary>
+        /// <summary>ربط الموظف بحساب مستخدم (للموظفين بلا حساب) — LinkEmployeeAsync.
+        /// الحارس: مربوط بحساب أعلى/موازٍ لا يُلمس — والقائمة تقترح الحرة فقط.</summary>
         private async void LinkAccount()
         {
             var emp = Selected();
@@ -172,15 +227,24 @@ namespace Sayl.UI.UserControls
                 return;
             }
 
+            string? guard = EmployeeGuardMessage(emp);
+            if (guard != null)
+            {
+                UiHelpers.ShowError(this, guard);
+                return;
+            }
+
             try
             {
-                // اختيار المستخدم غير المرتبط بموظف آخر
+                // اختيار المستخدم غير المرتبط بموظف آخر — وبأدوار يمكن للمشغّل إدارتها
                 List<Common.DTOs.ViewModel.UserVM> freeUsers;
                 using (var scope = Program.Services.CreateScope())
                 {
                     var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
                     var all = await usersService.GetUsersAsync();
-                    freeUsers = all.Where(u => u.Name == "No Employee" || string.IsNullOrWhiteSpace(u.Name)).ToList();
+                    int myValue = SessionState.CurrentRoleValue;
+                    freeUsers = all.Where(u => (u.Name == "No Employee" || string.IsNullOrWhiteSpace(u.Name))
+                        && AppPermissions.Outranks(myValue, u.RoleValue)).ToList();
                 }
 
                 if (freeUsers.Count == 0)
@@ -197,7 +261,8 @@ namespace Sayl.UI.UserControls
                 using (var scope = Program.Services.CreateScope())
                 {
                     var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
-                    result = await usersService.LinkEmployeeAsync(form.SelectedUserId.Value, emp.EmployeeId);
+                    result = await usersService.LinkEmployeeAsync(form.SelectedUserId.Value, emp.EmployeeId,
+                        actorUserId: SessionState.CurrentUser?.UserId);
                 }
 
                 UiHelpers.ShowResult(this, result);

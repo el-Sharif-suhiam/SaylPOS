@@ -78,8 +78,8 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("مبلغ المصروف يجب أن يكون أكبر من صفر.");
 
             int creatorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
-            if (!clsPermissions.HasAtLeast(creatorRole, clsPermissions.Accountant))
-                return Result<int>.Fail("إضافة مصروف يتطلب صلاحية محاسب أو أعلى.");
+            if (!AppPermissions.Has(creatorRole, AppPermissions.Expenses))
+                return Result<int>.Fail("إضافة مصروف يتطلب صلاحية شاشة المصروفات.");
 
             if (dtoExpense.UserId.HasValue)
             {
@@ -116,10 +116,10 @@ namespace Sayl.Core.Services
             if (expense == null)
                 return Result.Fail("المصروف غير موجود.");
 
-            // VULN-26: تعديل المصروف = تعديل الربح — محاسب فأعلى
+            // تعديل المصروف = تعديل الربح — شاشة المصروفات
             int editorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
-            if (!clsPermissions.HasAtLeast(editorRole, clsPermissions.Accountant))
-                return Result.Fail("تعديل المصروفات يتطلب صلاحية محاسب أو أعلى.");
+            if (!AppPermissions.Has(editorRole, AppPermissions.Expenses))
+                return Result.Fail("تعديل المصروفات يتطلب صلاحية شاشة المصروفات.");
 
             if (!string.IsNullOrWhiteSpace(dtoExpense.Description))
                 expense.Description = clsValidation.ValidateString(dtoExpense.Description, "Description", 255);
@@ -150,10 +150,10 @@ namespace Sayl.Core.Services
             if (expense.Category == clsPayrollService.SalaryExpenseCategory)
                 return Result.Fail("مصروف الرواتب يُدار من قسم الرواتب — احذفه بعكس صرف الكشف المرتبط.");
 
-            // حذف المصروفات يتطلب صلاحية محاسب فأعلى
+            // حذف المصروفات يتطلب شاشة المصروفات
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
-            if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Accountant))
-                return Result.Fail("حذف المصروفات يتطلب صلاحية محاسب أو أعلى.");
+            if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Expenses))
+                return Result.Fail("حذف المصروفات يتطلب صلاحية شاشة المصروفات.");
 
             _dbContext.Expenses.Remove(expense);
 

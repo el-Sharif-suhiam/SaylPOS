@@ -244,8 +244,8 @@ namespace Sayl.Core.Services
         public async Task<Result> DeactivateProductAsync(int productId, int actorUserId)
         {
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
-            if (actor == null || !clsPermissions.HasAtLeast(actor.Role.RoleValue, clsPermissions.Accountant))
-                return Result.Fail("تعطيل المنتجات يتطلب صلاحية محاسب أو أعلى.");
+            if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Products))
+                return Result.Fail("تعطيل المنتجات يتطلب صلاحية شاشة المنتجات.");
 
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)

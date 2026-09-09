@@ -78,8 +78,8 @@ namespace Sayl.UI.UserControls
             AddToolbarButton("تسوية مخزون", AppTheme.Warning, Color.FromArgb(180, 83, 9), (_, _) => AdjustStock(), 150);
             AddToolbarGap();
 
-            // الجرد الفعلي: أدمن ومحاسب — ركن الإغلاق السنوي
-            if (SessionState.IsAdmin || SessionState.IsAccountant)
+            // الجرد الفعلي: أصحاب شاشة المخزون — ركن الإغلاق السنوي
+            if (SessionState.Can(Common.Utils.AppPermissions.Inventory))
             {
                 AddToolbarButton("جرد فعلي", AppTheme.Primary, AppTheme.PrimaryDark,
                     (_, _) =>

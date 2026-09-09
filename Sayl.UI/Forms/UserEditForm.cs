@@ -1,6 +1,7 @@
 using Common.DTOs;
 using Common.DTOs.RequestModels;
 using Common.Results;
+using Common.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Infrastructure;
@@ -78,8 +79,10 @@ namespace Sayl.UI.Forms
 
             var lblRole = new Label { Text = "الدور *", Bounds = new Rectangle(30, 198, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbRole = new ComboBox { Bounds = new Rectangle(30, 222, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            // وصف الشاشات بدل الرقم الصم — قائمة الأدوار تصل مفلترة هرميًا
+            // من UsersControl (أدنى من المشغّل + الكاشير)
             foreach (var role in _roles)
-                _cmbRole.Items.Add($"{role.Name} ({role.RoleValue})");
+                _cmbRole.Items.Add($"{role.Name} — {AppPermissions.Describe(role.RoleValue)}");
             _cmbRole.SelectedIndex = _roles.Count > 0 ? 0 : -1;
 
             var lblEmployee = new Label { Text = "ربط بموظف (اختياري)", Bounds = new Rectangle(30, 268, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
@@ -141,7 +144,7 @@ namespace Sayl.UI.Forms
             using (var scope = Program.Services.CreateScope())
             {
                 var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
-                result = await usersService.AddNewUserAsync(request);
+                result = await usersService.AddNewUserAsync(request, actorUserId: SessionState.CurrentUser?.UserId);
             }
 
             if (!result.IsSuccess)

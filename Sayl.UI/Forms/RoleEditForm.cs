@@ -1,18 +1,26 @@
 using Common.DTOs;
 using Common.Results;
+using Common.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.Forms
 {
-    /// <summary>إضافة/تعديل دور (اسم + قيمة صلاحية رقمية).</summary>
+    /// <summary>
+    /// إضافة/تعديل دور — نظام البتات (انظر AppPermissions):
+    /// • checkboxes للشاشات المتاحة فقط (بلا شاشة الأدوار أبدًا — للمدير
+    ///   وحده، فسقف أي دور مخصص 3071 بنيويًا).
+    /// • عند التعديل تُفكّ القيمة الحالية إلى مربعات معلّمة.
+    /// • الأدوار الأساسية (مدير/كاشير/محاسب) لا تصل هنا (محمية خدميًا).
+    /// </summary>
     public class RoleEditForm : Form
     {
         private readonly DtoRole? _existing;
 
         private TextBox _txtName = null!;
-        private TextBox _txtValue = null!;
+        private CheckBox[] _screenChecks = null!;
+        private Label _lblSummary = null!;
 
         public RoleEditForm(DtoRole? existing)
         {
@@ -20,61 +28,118 @@ namespace Sayl.UI.Forms
             BuildUi();
         }
 
-        // 📖 «الإحداثيات اليدوية» — أصغر نموذج حواري (راجع EmployeeEditForm).
-        // RoleValue رقم واحد يفصل الأدوار (100 مدير / 75 محاسب / 50 كاشير)
-        // — التسمية تشرح ذلك داخل النافذة نفسها (لمن يفتحها من المستخدمين).
+        // 📖 شبكة checkboxes: صف لكل شاشة (بت واحد = خانة اختيار).
+        // عند التعديل: كل خانة تُعلَّم إذا Has(existing.RoleValue, bit).
+        // عند الحفظ: OR تراكمي يبني القناع (النقر المزدوج آمن بالبناء).
+        // الملخص الحي أسفل الشبكة يقرأ بصريًا ما يختاره المدير.
         private void BuildUi()
         {
             Text = _existing == null ? "إضافة دور" : "تعديل دور";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(400, 260);
+            ClientSize = new Size(460, 560);
             MaximizeBox = false;
             MinimizeBox = false;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
             BackColor = AppTheme.CardBg;
 
-            var lblTitle = new Label { Text = Text, Bounds = new Rectangle(0, 16, 400, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = Text, Bounds = new Rectangle(0, 16, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            var lblName = new Label { Text = "اسم الدور *", Bounds = new Rectangle(30, 58, 340, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtName = new TextBox { Bounds = new Rectangle(30, 82, 340, 36), Font = AppTheme.FontBody, Text = _existing?.Name ?? "" };
+            var lblName = new Label { Text = "اسم الدور *", Bounds = new Rectangle(30, 58, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            _txtName = new TextBox { Bounds = new Rectangle(30, 82, 400, 36), Font = AppTheme.FontBody, Text = _existing?.Name ?? "" };
 
-            var lblValue = new Label { Text = "قيمة الصلاحية * (100 مدير، 75 محاسب، 50 كاشير)", Bounds = new Rectangle(30, 128, 340, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtValue = new TextBox { Bounds = new Rectangle(30, 152, 340, 36), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center, Text = _existing?.RoleValue.ToString() ?? "" };
+            var lblScreens = new Label { Text = "شاشات هذا الدور * (من يُمنح الشاشة يُمنح كل ما فيها)", Bounds = new Rectangle(30, 126, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+
+            // شبكة الخانات — من كتالوج AppPermissions.EditableScreens (بلا الأدوار)
+            var screens = AppPermissions.EditableScreens;
+            _screenChecks = new CheckBox[screens.Length];
+            for (int i = 0; i < screens.Length; i++)
+            {
+                int y = 156 + i * 34;
+                _screenChecks[i] = new CheckBox
+                {
+                    Text = screens[i].Name,
+                    Tag = screens[i].Bit,
+                    Bounds = new Rectangle(150, y, 280, 30),
+                    TextAlign = ContentAlignment.MiddleRight,
+                    Checked = _existing != null && AppPermissions.Has(_existing.RoleValue, screens[i].Bit),
+                    FlatStyle = FlatStyle.Standard,
+                    ForeColor = AppTheme.TextPrimary,
+                    Font = new Font("Segoe UI", 10F)
+                };
+                _screenChecks[i].CheckedChanged += (_, _) => UpdateSummary();
+                Controls.Add(_screenChecks[i]);
+            }
+
+            // الملخص الحي: يعرض عدد الشاشات المختارة + قيمة القناع الرقمية
+            _lblSummary = new Label
+            {
+                Text = "",
+                Bounds = new Rectangle(30, 156 + screens.Length * 34 + 6, 400, 24),
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = AppTheme.PrimaryDark,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
+            };
 
             var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnOk.Bounds = new Rectangle(30, 200, 220, 50);
+            int btnY = 156 + screens.Length * 34 + 40;
+            btnOk.Bounds = new Rectangle(30, btnY, 260, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
             var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnCancel.Bounds = new Rectangle(270, 200, 100, 50);
+            btnCancel.Bounds = new Rectangle(310, btnY, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[] { lblTitle, lblName, _txtName, lblValue, _txtValue, btnOk, btnCancel });
+            Controls.AddRange(new Control[] { lblTitle, lblName, _txtName, lblScreens, _lblSummary, btnOk, btnCancel });
             AcceptButton = btnOk;
             CancelButton = btnCancel;
+
+            // ملخص أولي
+            UpdateSummary();
+        }
+
+        /// <summary>قيمة القناع الحالية من الخانات (OR تراكمي).</summary>
+        private int CurrentMask()
+        {
+            int mask = 0;
+            foreach (var chk in _screenChecks)
+                if (chk.Checked && chk.Tag is int bit)
+                    mask |= bit;
+            return mask;
+        }
+
+        private void UpdateSummary()
+        {
+            int mask = CurrentMask();
+            int count = _screenChecks.Count(c => c.Checked);
+            _lblSummary.Text = count == 0
+                ? "لم تختر أي شاشة بعد — الدور الفارغ ممنوع"
+                : $"مختار {count} من {_screenChecks.Length} شاشة — قيمة الصلاحيات: {mask}";
         }
 
         private async Task SaveAsync()
         {
-            if (string.IsNullOrWhiteSpace(_txtName.Text))
+            string name = _txtName.Text?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(name))
             {
                 UiHelpers.ShowError(this, "اسم الدور مطلوب.");
                 return;
             }
 
-            if (!int.TryParse(_txtValue.Text?.Trim(), out int roleValue) || roleValue < 0)
+            // منع الدور الفارغ: صلاحية واحدة على الأقل (الكاشير 0 دور هوية لا يُبنى هنا)
+            int mask = CurrentMask();
+            if (mask == 0)
             {
-                UiHelpers.ShowError(this, "أدخل قيمة صلاحية صحيحة.");
+                UiHelpers.ShowError(this, "يجب اختيار شاشة واحدة على الأقل لهذا الدور.");
                 return;
             }
 
             var dto = new DtoRole
             {
                 RoleId = _existing?.RoleId ?? 0,
-                Name = _txtName.Text.Trim(),
-                RoleValue = roleValue
+                Name = name,
+                RoleValue = mask
             };
 
             Result result;
@@ -83,12 +148,12 @@ namespace Sayl.UI.Forms
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
                 if (_existing == null)
                 {
-                    var added = await roleService.AddNewRoleAsync(dto);
+                    var added = await roleService.AddNewRoleAsync(dto, SessionState.CurrentUser?.UserId ?? 0);
                     result = added.IsSuccess ? Result.Ok("تم حفظ الدور بنجاح.") : Result.Fail(added.Message);
                 }
                 else
                 {
-                    result = await roleService.UpdateRoleAsync(dto);
+                    result = await roleService.UpdateRoleAsync(dto, SessionState.CurrentUser?.UserId ?? 0);
                 }
             }
 

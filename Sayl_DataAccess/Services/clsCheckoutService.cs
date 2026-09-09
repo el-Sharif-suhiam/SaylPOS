@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Common.DTOs;
 using Common.Results;
+using Common.Utils;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
 using Common.DTOs.RequestModels;
@@ -29,12 +30,13 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
             }
 
-            // صلاحية الخصم: خصم أكبر من حد الكاشير يتطلب دور محاسب فأعلى
+            // صلاحية الخصم: خصم أكبر من حد الكاشير يتطلب شاشة فواتير البيع (بت 16)
+            // — أوامر POS نفسها بلا فحص بت (الكاشير 0 لا يفتح شيئًا بالبت أصلًا)
             if (request.DiscountPercent > clsPermissions.MaxCashierDiscountPercent || request.DiscountAmount > 0)
             {
                 int actorRole = await GetUserRoleValueAsync(request.UserId);
-                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                    return Result<int>.Fail($"الخصم فوق {clsPermissions.MaxCashierDiscountPercent:0.#}% يتطلب صلاحية محاسب أو أعلى. راجع المدير.");
+                if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                    return Result<int>.Fail($"الخصم فوق {clsPermissions.MaxCashierDiscountPercent:0.#}% يتطلب صلاحية شاشة فواتير البيع. راجع المدير.");
             }
 
             if (request.CustomerId.HasValue)
@@ -177,8 +179,8 @@ namespace Sayl.Core.Services
             if (invoice.UserId != actorUserId)
             {
                 int actorRole = await GetUserRoleValueAsync(actorUserId);
-                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                    return Result.Fail("إكمال فاتورة معلقة لكاشير آخر يتطلب صلاحية محاسب أو أعلى.");
+                if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                    return Result.Fail("إكمال فاتورة معلقة لكاشير آخر يتطلب صلاحية شاشة فواتير البيع.");
             }
 
             // المعاملة تحتضن الانتقال الذري: فشل أي خطوة لاحقة يعيد الحالة suspended معها
@@ -253,8 +255,8 @@ namespace Sayl.Core.Services
             if (invoice.UserId != actorUserId)
             {
                 int actorRole = await GetUserRoleValueAsync(actorUserId);
-                if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                    return Result.Fail("إلغاء فاتورة معلقة لأجل كاشير آخر يتطلب صلاحية محاسب أو أعلى.");
+                if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                    return Result.Fail("إلغاء فاتورة معلقة لأجل كاشير آخر يتطلب صلاحية شاشة فواتير البيع.");
             }
 
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);

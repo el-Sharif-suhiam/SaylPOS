@@ -497,6 +497,7 @@ public partial class SaylDbContext : DbContext
 
             entity.Property(e => e.RoleId).ValueGeneratedOnAdd();
             entity.Property(e => e.Name).HasMaxLength(100);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
         });
 
         modelBuilder.Entity<StockMovement>(entity =>

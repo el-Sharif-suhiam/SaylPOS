@@ -1,40 +1,40 @@
-using Common.DTOs;
 using Common.DTOs.ViewModel;
+using Common.Utils;
 
 namespace Sayl.UI.Infrastructure
 {
     /// <summary>
-    /// حالة الجلسة: المستخدم المسجَّل حاليًا ودوره.
-    /// القيم مطابقة لبيانات الأدوار المزروعة: مدير النظام = 100، محاسب = 75، كاشير = 50.
+    /// حالة الجلسة — نظام البتات (انظر AppPermissions):
+    /// • القناع يُحمَّل مرة واحدة عند الدخول وكل الفحوصات بعدها في الذاكرة.
+    /// • الكاشير يُحدَّد بالهوية (قيمة 0) لا بالبت — شاشة الكاشير تُفتح به وحده.
+    /// • فحص الواجهة: Can(screenBit) — والإنفاذ الحقيقي في طبقة الخدمات.
     /// </summary>
     public static class SessionState
     {
-        private const int AdminRoleValue = 100;
-        private const int AccountantRoleValue = 75;
-        private const int CashierRoleValue = 50;
-
         public static UserVM? CurrentUser { get; private set; }
 
-        /// <summary>قيمة دور المستخدم الحالي (تُحلَّل من قائمة الأدوار عند تسجيل الدخول).</summary>
+        /// <summary>قناع بتات دور المستخدم الحالي (من قاعدة البيانات عند الدخول).</summary>
         public static int CurrentRoleValue { get; private set; }
 
         public static bool IsLoggedIn => CurrentUser != null;
-        public static bool IsAdmin => CurrentRoleValue >= AdminRoleValue;
-        public static bool IsAccountant => !IsAdmin && CurrentRoleValue >= AccountantRoleValue;
-        public static bool IsCashier => !IsAdmin && !IsAccountant && CurrentRoleValue >= CashierRoleValue;
 
-        /// <summary>
-        /// صلاحية can_receive_stock مسندة لدور الكاشير (حسب UI_TASK).
-        /// </summary>
+        /// <summary>مدير النظام (4095) — بالهوية لا بالمقارنة العددية.</summary>
+        public static bool IsAdmin => AppPermissions.IsAdmin(CurrentRoleValue);
+
+        /// <summary>الكاشير (0) — شاشة الكاشير فقط، يفتح POS مباشرة.</summary>
+        public static bool IsCashier => AppPermissions.IsCashier(CurrentRoleValue);
+
+        /// <summary>فحص شاشة: هل يملك القناع بتّها؟ (لوحة التحكم بلا بت — للجميع).</summary>
+        public static bool Can(int screenBit) => AppPermissions.Has(CurrentRoleValue, screenBit);
+
+        /// <summary>استلام المخزون — وظيفة كاشير داخل POS.</summary>
         public static bool CanReceiveStock => IsCashier;
 
-        /// <summary>تعيين المستخدم الحالي وحلّ قيمة دوره من قائمة الأدوار.</summary>
-        public static void SetUser(UserVM user, IEnumerable<DtoRole> roles)
+        /// <summary>تعيين المستخدم الحالي بقناع دوره (من UserVM المحمَّل عند الدخول).</summary>
+        public static void SetUser(UserVM user)
         {
             CurrentUser = user;
-            CurrentRoleValue = roles
-                .FirstOrDefault(r => string.Equals(r.Name, user.RoleName, StringComparison.Ordinal))
-                ?.RoleValue ?? 0;
+            CurrentRoleValue = user.RoleValue;
         }
 
         public static void Clear()

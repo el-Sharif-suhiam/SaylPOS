@@ -57,7 +57,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "staging\app\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
 Source: "staging\database\SaylDB.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\DataSeed.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
-Source: "staging\database\Upgrade_01_Production.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\xml\*"; DestDir: "{app}\Database\xml"; Flags: ignoreversion
 Source: "staging\redist\SQLEXPR_x64_ENU.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
 
@@ -1187,21 +1186,7 @@ begin
         Ok := True;
 
         if DatabaseExists(Conn) then
-        begin
-          AppendLog(Log, 'Database SaylDB exists - running production upgrade only.');
-          try
-            if ExecuteGoScript(Conn, DbDir + '\xml\Upgrade_01_Production.xml', N) then
-              AppendLog(Log, Format('Upgrade_01_Production.sql OK (%d batches).', [N]))
-            else
-            begin
-              AppendLog(Log, 'ERROR: cannot read Upgrade_01_Production envelope.');
-              Ok := False;
-            end;
-          except
-            AppendLog(Log, 'ERROR running Upgrade_01_Production.sql: ' + GetExceptionMessage);
-            Ok := False;
-          end;
-        end
+          AppendLog(Log, 'Database SaylDB already exists - keeping it as-is (fresh-install-only system).')
         else
         begin
           AppendLog(Log, 'Creating database SaylDB...');
@@ -1219,21 +1204,6 @@ begin
           except
             AppendLog(Log, 'ERROR creating schema: ' + GetExceptionMessage);
             Ok := False;
-          end;
-          if Ok then
-          begin
-            try
-              if ExecuteGoScript(Conn, DbDir + '\xml\Upgrade_01_Production.xml', N) then
-                AppendLog(Log, Format('Upgrade_01_Production.sql OK (%d batches).', [N]))
-              else
-              begin
-                AppendLog(Log, 'ERROR: cannot read Upgrade_01_Production envelope.');
-                Ok := False;
-              end;
-            except
-              AppendLog(Log, 'ERROR running Upgrade_01_Production.sql: ' + GetExceptionMessage);
-              Ok := False;
-            end;
           end;
         end;
 

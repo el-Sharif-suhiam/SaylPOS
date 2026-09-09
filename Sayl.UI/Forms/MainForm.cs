@@ -1,4 +1,5 @@
 using Common.Enums;
+using Common.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
 using Sayl.UI.Controls;
@@ -94,30 +95,50 @@ namespace Sayl.UI.Forms
         }
 
         // ─────────────────────────────────────────────────
-        // تعريف الأقسام
+        // تعريف الأقسام — نظام البتات (انظر AppPermissions):
+        // لوحة التحكم بلا بت (عرض فقط — للجميع)، وكل قسم إداري
+        // يُضاف بشرط فحص البت: SessionState.Can(bit).
+        // الشاشة بلا بت هنا = لا تظهر في الشريط إطلاقًا.
         // ─────────────────────────────────────────────────
         private void BuildSections()
         {
-            _sections["لوحة التحكم"] = () => new DashboardControl();
-            _sections["المنتجات"] = () => new ProductsControl();
-            _sections["المخزون"] = () => new InventoryControl();
-            _sections["العملاء"] = () => new CustomersControl();
-            _sections["الموردون"] = () => new SuppliersControl();
-            _sections["فواتير البيع"] = () => new InvoicesControl(enInvoicesType.sale);
-            _sections["فواتير الشراء"] = () => new InvoicesControl(enInvoicesType.purchase);
-            _sections["المصروفات"] = () => new ExpensesControl();
-            _sections["التقارير"] = () => new ReportsControl();
+            _sections["لوحة التحكم"] = () => new DashboardControl(); // بلا بت — للجميع
 
-            // الموظفون + رواتبهم: أدمن ومحاسب (إدارة الرواتب للمحاسب فأعلى بقرار المستخدم)
-            if (SessionState.IsAdmin || SessionState.IsAccountant)
+            if (SessionState.Can(AppPermissions.Products))
+                _sections["المنتجات"] = () => new ProductsControl();
+
+            if (SessionState.Can(AppPermissions.Inventory))
+                _sections["المخزون"] = () => new InventoryControl();
+
+            if (SessionState.Can(AppPermissions.Customers))
+                _sections["العملاء"] = () => new CustomersControl();
+
+            if (SessionState.Can(AppPermissions.Suppliers))
+                _sections["الموردون"] = () => new SuppliersControl();
+
+            if (SessionState.Can(AppPermissions.SalesInvoices))
+                _sections["فواتير البيع"] = () => new InvoicesControl(enInvoicesType.sale);
+
+            if (SessionState.Can(AppPermissions.PurchaseInvoices))
+                _sections["فواتير الشراء"] = () => new InvoicesControl(enInvoicesType.purchase);
+
+            if (SessionState.Can(AppPermissions.Expenses))
+                _sections["المصروفات"] = () => new ExpensesControl();
+
+            if (SessionState.Can(AppPermissions.Reports))
+                _sections["التقارير"] = () => new ReportsControl();
+
+            if (SessionState.Can(AppPermissions.Employees))
                 _sections["الموظفون والرواتب"] = () => new EmployeesControl();
 
-            if (SessionState.IsAdmin)
-            {
+            if (SessionState.Can(AppPermissions.Users))
                 _sections["المستخدمون"] = () => new UsersControl();
+
+            if (SessionState.Can(AppPermissions.Roles))
                 _sections["الأدوار والصلاحيات"] = () => new RolesControl();
+
+            if (SessionState.Can(AppPermissions.Settings))
                 _sections["الإعدادات"] = () => new SettingsControl();
-            }
         }
 
         // ═══════════════════════════════════════════════════════════════

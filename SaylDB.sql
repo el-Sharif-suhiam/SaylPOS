@@ -152,6 +152,7 @@ CREATE TABLE Roles
     RoleId TINYINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     Name NVARCHAR(100) NOT NULL,
     RoleValue INT NOT NULL,
+    IsActive BIT NOT NULL DEFAULT 1,
 
     CONSTRAINT UQ_Roles_Name UNIQUE (Name)
 );
@@ -674,11 +675,12 @@ GO
 --      owner during installation; change them immediately)
 -----------------------------------------------------------
 
--- Roles (permission values: 100 admin, 75 accountant, 50 cashier)
-INSERT INTO Roles (Name, RoleValue) VALUES
-(N'مدير النظام', 100),
-(N'كاشير', 50),
-(N'محاسب', 75);
+-- Roles (bitmask values — see AppPermissions.cs: admin=4095, cashier=0, accountant=508)
+-- Fixed roles are IsActive=1 and protected from edit/deactivate in the service layer.
+INSERT INTO Roles (Name, RoleValue, IsActive) VALUES
+(N'مدير النظام', 4095, 1),
+(N'كاشير', 0, 1),
+(N'محاسب', 508, 1);
 
 -- Starter accounts (BCrypt hashes; reset from inside the app)
 INSERT INTO Users (Username, PasswordHash, RoleId, IsActive, CreatedAt) VALUES

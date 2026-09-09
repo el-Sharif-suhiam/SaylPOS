@@ -30,14 +30,16 @@ namespace Sayl.Core.Services
              if (string.IsNullOrWhiteSpace(dtoParty.Name))
                  return Result<int>.Fail("الاسم مطلوب.");
 
-             // بوابة الخدمة: الإضافة الكاملة (كل الأنواع) والـ S/B من أي مكان
-             // تتطلب محاسبًا؛ الإضافة السريعة من POS مسموحة للعميل النقدي فقط.
-             if (!fromPosQuickAdd || dtoParty.PartyType != 'C')
-             {
-                 int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-                 if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                     return Result<int>.Fail("إضافة أطراف (عملاء/موردين) تتطلب صلاحية محاسب أو أعلى.");
-             }
+          // بوابة الخدمة: الإضافة الكاملة (كل الأنواع) والـ S/B من أي مكان
+          // تتطلب شاشة العملاء (عملاء) أو الموردين (موردين) حسب النوع؛
+          // الإضافة السريعة من POS مسموحة للعميل النقدي فقط (قراءة مشتركة).
+          if (!fromPosQuickAdd || dtoParty.PartyType != 'C')
+          {
+              int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
+              int required = dtoParty.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+              if (!AppPermissions.Has(actorRole, required))
+                  return Result<int>.Fail("إضافة هذا النوع من الأطراف تتطلب صلاحية شاشته المخصصة.");
+          }
 
              using var transaction = await _dbContext.Database.BeginTransactionAsync();
              try
@@ -86,8 +88,9 @@ namespace Sayl.Core.Services
                   return Result.Fail("الطرف غير موجود.");
 
               int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                  return Result.Fail("تعديل بيانات الأطراف يتطلب صلاحية محاسب أو أعلى.");
+              int required = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+              if (!AppPermissions.Has(actorRole, required))
+                  return Result.Fail("تعديل بيانات هذا الطرف يتطلب صلاحية شاشته المخصصة.");
 
              if (!string.IsNullOrWhiteSpace(dtoParty.Name))
                  party.Name = clsValidation.ValidateString(dtoParty.Name, "Name");
@@ -132,8 +135,9 @@ namespace Sayl.Core.Services
                   return Result.Fail("الطرف غير موجود.");
 
               int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                  return Result.Fail("تعطيل الأطراف يتطلب صلاحية محاسب أو أعلى.");
+              int requiredDeact = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+              if (!AppPermissions.Has(actorRole, requiredDeact))
+                  return Result.Fail("تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
 
               if (party.PartyType == 'C')
               {
@@ -161,8 +165,9 @@ namespace Sayl.Core.Services
                   return Result.Fail("الطرف غير موجود.");
 
               int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                  return Result.Fail("إعادة تفعيل الأطراف تتطلب صلاحية محاسب أو أعلى.");
+              int requiredAct = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+              if (!AppPermissions.Has(actorRole, requiredAct))
+                  return Result.Fail("إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");
 
               party.IsActive = true;
               await _dbContext.SaveChangesAsync();

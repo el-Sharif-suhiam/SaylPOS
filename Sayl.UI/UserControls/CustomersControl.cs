@@ -78,7 +78,7 @@ namespace Sayl.UI.UserControls
             AddToolbarGap();
             AddToolbarButton("تعطيل", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
 
-            if (SessionState.IsAdmin)
+            if (SessionState.Can(Common.Utils.AppPermissions.Customers))
             {
                 AddToolbarGap();
                 AddToolbarButton("إعادة تفعيل", AppTheme.Success, Color.FromArgb(21, 128, 61),

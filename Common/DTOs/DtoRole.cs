@@ -10,6 +10,9 @@ namespace Common.DTOs
 
         public string Name { get; set; } = null!;
 
+        /// <summary>قناع بتات الشاشات — انظر Common\Utils\AppPermissions.cs.</summary>
         public int RoleValue { get; set; }
+
+        public bool IsActive { get; set; }
     }
 }

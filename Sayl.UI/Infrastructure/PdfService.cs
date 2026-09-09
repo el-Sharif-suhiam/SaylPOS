@@ -45,7 +45,7 @@ namespace Sayl.UI.Infrastructure
                 container.Page(page =>
                 {
                     page.Size(PageSizes.A4);
-                    page.Margin(24);
+                    page.Margin(16);
                     page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Segoe UI").DirectionFromRightToLeft());
 
                     // ══ الترويسة (تتكرر بكل صفحة): شريط كحلي بهوية المحل + شريط سماوي تمييز ══
@@ -53,17 +53,32 @@ namespace Sayl.UI.Infrastructure
                     {
                         col.Item().Background(Navy).PaddingVertical(11).PaddingHorizontal(14).Row(r =>
                         {
-                            r.RelativeItem().Column(c2 =>
-                            {
-                                c2.Item().Text(storeName).FontSize(19).Bold().FontColor("#FFFFFF");
-                                c2.Item().Text($"التقرير الدوري — {report.ReportTypeName}")
-                                    .FontSize(9.5f).FontColor(Sky);
-                            });
+                            //r.RelativeItem().AlignRight().Column(c2 =>
+                            //{
+                            //    c2.Item().AlignRight().Text(storeName).FontSize(19).Bold().FontColor("#FFFFFF");
+                            //    c2.Item().AlignRight().Text($"التقرير الدوري — {report.ReportTypeName}")
+                            //        .FontSize(9.5f).FontColor(Sky);
+                            //});
+                            //r.ConstantItem(190).AlignLeft().Column(c2 =>
+                            //{
+                            //    c2.Item().AlignLeft().Text("سيل POS").FontSize(9.5f).Bold().FontColor(Sky);
+                            //    c2.Item().AlignLeft().Text($"من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
+                            //        .FontSize(8.5f).FontColor(MutedGrey);
+                            //});
+                            // الكتلة اليسرى: التاريخ والشعار — ثابتة العرض ومحاذاة لليسار
                             r.ConstantItem(190).AlignLeft().Column(c2 =>
                             {
-                                c2.Item().Text("سيل POS").FontSize(9.5f).Bold().FontColor(Sky);
-                                c2.Item().Text($"من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
+                                c2.Item().PaddingLeft(10).Text("سيل POS").FontSize(9.5f).Bold().FontColor(Sky);
+                                c2.Item().PaddingLeft(10).Text($"من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
                                     .FontSize(8.5f).FontColor(MutedGrey);
+                            });
+
+                            // الكتلة اليمنى: اسم المتجر ونوع التقرير — تتمدد وتأخذ الباقي مع محاذاة لليمين
+                            r.RelativeItem().AlignRight().Column(c2 =>
+                            {
+                                c2.Item().PaddingRight(10).AlignRight().Text(storeName).FontSize(19).Bold().FontColor("#FFFFFF");
+                                c2.Item().PaddingRight(10).AlignRight().Text($"التقرير الدوري — {report.ReportTypeName}")
+                                    .FontSize(9.5f).FontColor(Sky);
                             });
                         });
                         col.Item().Height(2.5f).Background(Sky);
@@ -717,10 +732,10 @@ namespace Sayl.UI.Infrastructure
         // ═════════════════════════════════════════════════
 
         /// <summary>
-        /// يولّد PDF موحّد الهوية لأي تقرير جدولي (A4): شريط ترويسة كحلي باسم المحل
-        /// والتاريخ ← لوحة عنوان سطرين (العنوان + الفترة يمينًا، المُعد يسارًا) ←
-        /// جدول داخل بطاقة مؤطرة بعمود نص أول عريض (2.6×) وأنفاس بين الخلايا ←
-        /// صف إجمالي كحلي ← سطر السجلات ← تذييل ترقيم.
+        /// يولّد PDF احترافيًا موحّد الهوية لأي تقرير جدولي (A4):
+        /// شريط ترويسة كحلي باسم المحل والتاريخ ← لوحة عنوان التقرير ←
+        /// جدول بحدود وأنماط متناوبة وصفوف رقمية بمحاذاة ثابتة ←
+        /// سطر السجلات ← تذييل ترقيم مع المستخدم.
         /// (منفصل عن الإيصال الحراري 80mm — لكل نوع فلسفة عرضه.)
         /// </summary>
         public static void ExportTableReport(string storeName, string title, string period,
@@ -745,51 +760,89 @@ namespace Sayl.UI.Infrastructure
                 container.Page(page =>
                 {
                     page.Size(PageSizes.A4);
-                    // 📖 طلب المالك: هوامش مخففة 32px (كانت 40) — كل بكسل من
-                    // العرض يذهب للبيانات: أسماء المنتجات الطويلة تحتاج العرض.
-                    page.Margin(32);
+                    // 📖 جماليات التقارير (طلب المالك): نفس فلسفة فاتورة A4 —
+                    // هوامش 40px مريحة وخط أساس 11 (كان 24/10): التقارير تُطبع
+                    // وتُقرأ على المكاتب لا على الشاشات.
+                    page.Margin(22);
                     page.DefaultTextStyle(x => x.FontSize(11).FontFamily("Segoe UI").DirectionFromRightToLeft());
 
                     // ══ الترويسة: شريط كحلي بهوية سيل (اسم يمينه، تاريخ يساره) ══
+                    //page.Header().Column(col =>
+                    //{
+                    //    col.Item().Background("#002B54").PaddingVertical(18).PaddingHorizontal(24).Row(r =>
+                    //    {
+                    //        r.RelativeItem().AlignRight().Text(storeName)
+                    //            .FontSize(20).Bold().FontColor("#FFFFFF");
+                    //        r.ConstantItem(200).AlignLeft().Column(c2 =>
+                    //        {
+                    //            c2.Item().Text("سيل POS").FontSize(10).Bold().FontColor("#93C5FD");
+                    //            c2.Item().PaddingTop(3).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
+                    //                .FontSize(9.5f).FontColor("#94A3B8");
+                    //        });
+                    //    });
                     page.Header().Column(col =>
                     {
-                        col.Item().Background("#002B54").PaddingVertical(16).PaddingHorizontal(20).Row(r =>
+                        col.Item().Background("#002B54").PaddingVertical(18).PaddingHorizontal(24).Row(r =>
                         {
-                            r.RelativeItem().AlignRight().Text(storeName)
-                                .FontSize(20).Bold().FontColor("#FFFFFF");
+                            // يسار: كتلة سيل والتاريخ — ثابتة العرض ومحاذاة لليسار
                             r.ConstantItem(200).AlignLeft().Column(c2 =>
                             {
-                                c2.Item().Text("سيل POS").FontSize(10).Bold().FontColor("#93C5FD");
-                                c2.Item().PaddingTop(3).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
+                                c2.Item().PaddingLeft(10).Text("سيل POS").FontSize(10).Bold().FontColor("#93C5FD");
+                                c2.Item().PaddingLeft(10).PaddingTop(3).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
                                     .FontSize(9.5f).FontColor("#94A3B8");
                             });
+
+                            // يمين: اسم المتجر — يتمدد ويحتل المساحة المتبقية مع محاذاة لليمين
+                            r.RelativeItem().AlignRight().PaddingRight(10).Text(storeName)
+                                .FontSize(20).Bold().FontColor("#FFFFFF");
                         });
-                        // شريط سماوي تمييز (نفس هوية فاتورة A4)
-                        col.Item().Height(2.5f).Background("#93C5FD");
+                    
+                    // شريط سماوي تمييز (نفس هوية فاتورة A4)
+                    col.Item().Height(2.5f).Background("#93C5FD");
 
                         // ══ لوحة العنوان: تصميم سطرين — يمنع التلاصق نهائيًا ══
                         // السطر الأول (يمين): اسم التقرير كبيرًا وحيدًا لا يجاوره شيء.
                         // السطر الثاني (يسار): الفترة + المُنشئ — كل على سطره بعمود
                         // جانبي مستقل بلا سباق عرض مع العنوان (طلب المالك:
                         // العنوان والفترة والمصدر والمتجر كلها كانت متلاصقة).
+                        //col.Item().Background("#E7EFFA").BorderBottom(1).BorderColor("#002B54")
+                        //    .PaddingVertical(12).PaddingHorizontal(16).Row(r =>
+                        //{
+                        //    // يمين: العنوان + تحته الفترة (تاريخ التقرير) — أسرة العنوان
+                        //    r.RelativeItem().AlignRight().Column(c2 =>
+                        //    {
+                        //        c2.Item().Text(title).FontSize(16).Bold().FontColor("#00335F");
+                        //        c2.Item().PaddingTop(4).Text(period).FontSize(10.5f).FontColor("#004080");
+                        //    });
+                        //    // يسار: المُنشئ في شارة هادئة منفصلة تمامًا عن العنوان
+                        //    if (!string.IsNullOrWhiteSpace(userName))
+                        //    {
+                        //        r.ConstantItem(170).AlignLeft().Column(c2 =>
+                        //        {
+                        //            c2.Item().Text("مُعد التقرير").FontSize(9f).FontColor("#64748B");
+                        //            c2.Item().PaddingTop(2).Text(userName).FontSize(11.5f).Bold().FontColor("#00335F");
+                        //        });
+                        //    }
+                        //});
                         col.Item().Background("#E7EFFA").BorderBottom(1).BorderColor("#002B54")
-                            .PaddingVertical(12).PaddingHorizontal(16).Row(r =>
+                        .PaddingVertical(12).PaddingHorizontal(16).Row(r =>
                         {
-                            // يمين: العنوان + تحته الفترة (تاريخ التقرير) — أسرة العنوان
-                            r.RelativeItem().AlignRight().Column(c2 =>
-                            {
-                                c2.Item().Text(title).FontSize(16).Bold().FontColor("#00335F");
-                                c2.Item().PaddingTop(4).Text(period).FontSize(10.5f).FontColor("#004080");
-                            });
-                            // يسار: المُنشئ في شارة هادئة منفصلة تمامًا عن العنوان
+                            // يسار: المُعد — ثابت العرض ومحاذاة لليسار
                             if (!string.IsNullOrWhiteSpace(userName))
                             {
                                 r.ConstantItem(170).AlignLeft().Column(c2 =>
                                 {
-                                    c2.Item().Text("مُعد التقرير").FontSize(9f).FontColor("#64748B");
-                                    c2.Item().PaddingTop(2).Text(userName).FontSize(11.5f).Bold().FontColor("#00335F");
+                                    c2.Item().PaddingLeft(10).Text("مُعد التقرير").FontSize(9f).FontColor("#64748B");
+                                    c2.Item().PaddingLeft(10).PaddingTop(2).Text(userName).FontSize(11.5f).Bold().FontColor("#00335F");
                                 });
                             }
+
+                            // يمين: العنوان والفترة — يتمدد ويحتل المساحة المتبقية مع محاذاة لليمين
+                            r.RelativeItem().AlignRight().Column(c2 =>
+                            {
+                                c2.Item().PaddingRight(10).AlignRight().Text(title).FontSize(16).Bold().FontColor("#00335F");
+                                c2.Item().PaddingRight(10).PaddingTop(6).AlignRight().Text(period).FontSize(10.5f).FontColor("#004080");
+                            });
                         });
                     });
 
@@ -816,7 +869,7 @@ namespace Sayl.UI.Infrastructure
                             {
                                 foreach (var head in headers)
                                     h.Cell().Background("#0B3B69")
-                                        .PaddingVertical(9).PaddingHorizontal(10)
+                                        .PaddingVertical(11).PaddingHorizontal(12)
                                         .BorderBottom(2).BorderColor("#93C5FD")
                                         .AlignCenter().Text(head).FontSize(10.5f).Bold().FontColor("#FFFFFF");
                             });
@@ -831,7 +884,7 @@ namespace Sayl.UI.Infrastructure
                                     // 📖 مضاد التلاصق: 10px أفقي داخل كل خلية (كان 8) —
                                     // عمودان متجاوران لا يلمس نصاهما أبدًا + حد سفلي
                                     // أوضح (0.8) يفصل الصفوف بصريًا
-                                    var cell = table.Cell().PaddingVertical(7).PaddingHorizontal(10).BorderBottom(0.8f)
+                                    var cell = table.Cell().PaddingVertical(9).PaddingHorizontal(12).BorderBottom(0.8f)
                                         .BorderColor("#D8DEE7");
 
                                     if (isStriped)
@@ -870,7 +923,7 @@ namespace Sayl.UI.Infrastructure
                         });
 
                         // سطر السجلات — خارج البطاقة، بتباعد مريح
-                        col.Item().PaddingTop(14).Row(r =>
+                        col.Item().PaddingTop(18).Row(r =>
                         {
                             r.RelativeItem().AlignRight().Text($"عدد السجلات: {rows.Count}")
                                 .FontSize(10f).FontColor("#475569");
@@ -882,7 +935,7 @@ namespace Sayl.UI.Infrastructure
                     // ══ التذييل: خط فاصل + ترقيم + سطر النظام ══
                     page.Footer().Column(col =>
                     {
-                        col.Item().PaddingBottom(4).LineHorizontal(0.5f).LineColor("#CBD5E1");
+                        col.Item().PaddingBottom(6).LineHorizontal(0.5f).LineColor("#CBD5E1");
                         col.Item().AlignCenter().Text(t =>
                         {
                             t.Span("صفحة ").FontSize(9.5f).FontColor("#64748B");

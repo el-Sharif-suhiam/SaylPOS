@@ -1,6 +1,7 @@
 using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -222,10 +223,10 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(request.Reason))
                 return Result.Fail("سبب التسوية مطلوب.");
 
-            // التسوية اليدوية للمخزون تتطلب صلاحية محاسب فأعلى
+            // التسوية اليدوية للمخزون تتطلب شاشة المخزون (بت 2)
             int actorRole = await GetUserRoleValueAsync(request.UserId);
-            if (!clsPermissions.HasAtLeast(actorRole, clsPermissions.Accountant))
-                return Result.Fail("تسوية المخزون تتطلب صلاحية محاسب أو أعلى.");
+            if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
+                return Result.Fail("تسوية المخزون تتطلب صلاحية شاشة المخزون.");
 
             var product = await _dbContext.Products.FindAsync(request.ProductId);
             if (product == null)

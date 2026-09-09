@@ -123,12 +123,11 @@ namespace Sayl.UI.Forms
             lblTagline.MouseDown += StartDrag;
 
             // ── البطاقة البيضاء: حاوية الحقول ──
-            // Bounds(40, 198, 480, 342): من اليسار 40، من الأعلى 198.
-            // ApplyRoundedRegion: يقصّ زوايا اللوحة دائريًا (18px) — Region
-            // حقيقي لا مجرد رسم، فالخلفية الداكنة تظهر من الزوايا.
+            // Bounds(40, 198, 480, 388): ارتفاع أكبر من السابق (342) —
+            // استوعبنا رابط «تغيير كلمة المرور» أسفل زر الدخول.
             var card = new Panel
             {
-                Bounds = new Rectangle(40, 198, 480, 342),
+                Bounds = new Rectangle(40, 198, 480, 388),
                 BackColor = AppTheme.CardBg
             };
             AppTheme.ApplyRoundedRegion(card, 18);
@@ -225,11 +224,28 @@ namespace Sayl.UI.Forms
             _btnLogin = AppTheme.MakeButton("دخول", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnLogin.Bounds = new Rectangle(24, 240, 432, 54);
 
-            // ── رسالة الخطأ: مخفية افتراضيًا (Visible=false) — تظهر عند فشل الدخول ──
+            // ── أسفل البطاقة: رابط تغيير كلمة المرور (الشكل القوي —
+            // المستخدم يدير سرّه بنفسه: اسم + القديمة + الجديدة).
+            // ⚠️ لا تحويل لـ ثانوي هنا: الإحداثيات كلها Bounds يدوية —
+            // أضفناه INSIDE البطاقة أسفل زر الدخول مع رفع ارتفاعها.
+            var lnkChangePassword = new Button
+            {
+                Text = "تغيير كلمة المرور",
+                Bounds = new Rectangle(24, 300, 432, 34),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = AppTheme.Primary,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Underline),
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            lnkChangePassword.FlatAppearance.BorderSize = 0;
+            lnkChangePassword.Click += (_, _) => OpenChangePasswordDialog();
+
             _lblError = new Label
             {
                 Text = "",
-                Bounds = new Rectangle(24, 304, 432, 48),
+                Bounds = new Rectangle(24, 342, 432, 48),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.Danger,
                 Visible = false
@@ -242,6 +258,7 @@ namespace Sayl.UI.Forms
             card.Controls.Add(lblPassCaption);
             card.Controls.Add(passPanel);
             card.Controls.Add(_btnLogin);
+            card.Controls.Add(lnkChangePassword);
             card.Controls.Add(_lblError);
 
             // ── الزرا الدائريان (MakeCircleButton): بلا إطار نظامي نحتاج أزرار زوايا ──
@@ -394,7 +411,7 @@ namespace Sayl.UI.Forms
 
                 if (result.IsSuccess && result.Data != null)
                 {
-                    SessionState.SetUser(result.Data, _roles);
+                    SessionState.SetUser(result.Data);
                     SetBusy(false);
                     LoginSucceeded?.Invoke(result.Data);
                     return;
@@ -412,6 +429,79 @@ namespace Sayl.UI.Forms
             {
                 SetBusy(false);
             }
+        }
+
+        // ─────────────────────────────────────────────────
+        // تغيير كلمة المرور الذاتي (الشكل القوي) — صندوق صغير بثلاثة
+        // حقول: اسم المستخدم + القديمة + الجديدة. خدمة ChangePasswordAsync
+        // تتولى: التحقق بالـ BCrypt + سياسة الكلمة + تقييد المحاولات
+        // (RegisterFailedLogin على القديمة الخاطئة) + سجل التدقيق.
+        // بعد النجاح: مسح حقل كلمة الدخول ليُدخل بالجديدة.
+        private void OpenChangePasswordDialog()
+        {
+            string presetUser = _cmbUsers.SelectedItem is ComboItem sel ? sel.User.UserName : "";
+
+            using var dlg = new Form
+            {
+                Text = "تغيير كلمة المرور",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(420, 300),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                RightToLeft = RightToLeft.Yes,
+                Font = AppTheme.FontBody,
+                BackColor = AppTheme.CardBg
+            };
+
+            var lblUser = new Label { Text = "اسم المستخدم *", Bounds = new Rectangle(30, 22, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var txtUser = new TextBox { Bounds = new Rectangle(30, 46, 360, 36), Font = AppTheme.FontBody, Text = presetUser };
+
+            var lblOld = new Label { Text = "كلمة المرور الحالية *", Bounds = new Rectangle(30, 92, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var txtOld = new TextBox { Bounds = new Rectangle(30, 116, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
+
+            var lblNew = new Label { Text = "كلمة المرور الجديدة * (8 أحرف على الأقل، حروف وأرقام)", Bounds = new Rectangle(30, 162, 360, 40), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var txtNew = new TextBox { Bounds = new Rectangle(30, 200, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
+
+            var btnOk = AppTheme.MakeButton("تغيير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            btnOk.Bounds = new Rectangle(30, 250, 220, 44);
+            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            btnCancel.Bounds = new Rectangle(270, 250, 120, 44);
+            btnCancel.DialogResult = DialogResult.Cancel;
+
+            var lblMsg = new Label { Text = "", Bounds = new Rectangle(30, 196, 360, 0), Visible = false }; //占位 — لا يُستخدم (الرسائل تظهر برسائل الحوار)
+
+            btnOk.Click += async (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(txtUser.Text) ||
+                    string.IsNullOrWhiteSpace(txtOld.Text) ||
+                    string.IsNullOrWhiteSpace(txtNew.Text))
+                {
+                    UiHelpers.ShowError(dlg, "جميع الحقول مطلوبة.");
+                    return;
+                }
+
+                Common.Results.Result result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
+                    result = await usersService.ChangePasswordAsync(txtUser.Text.Trim(), txtOld.Text, txtNew.Text);
+                }
+
+                UiHelpers.ShowResult(dlg, result, "تم تغيير كلمة المرور بنجاح.");
+                if (result.IsSuccess)
+                {
+                    dlg.DialogResult = DialogResult.OK;
+                    dlg.Close();
+                }
+            };
+
+            dlg.Controls.AddRange(new Control[] { lblUser, txtUser, lblOld, txtOld, lblNew, txtNew, btnOk, btnCancel, lblMsg });
+            dlg.AcceptButton = btnOk;
+            dlg.CancelButton = btnCancel;
+
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+                _txtPassword.Text = ""; // يُدخل بالكلمة الجديدة
         }
 
         // ─────────────────────────────────────────────────

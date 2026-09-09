@@ -1,6 +1,22 @@
 ﻿-- ====================================================
 -- Demo Data for SaylDB
 -- ====================================================
+-- ⚠️ يجب استدعاؤه بعد SaylDB.sql وعلى قاعدة SaylDB نفسها.
+-- (USE صريح بالأعلى — إرساله بلا -d كان ينفذ DELETEs على master)
+
+USE SaylDB;
+GO
+
+-- ⚠️ سكربت بذور يجب أن يعمل على أي مثيل بأي لغة/تنسيق جلسة:
+-- 1) QUOTED_IDENTIFIER ON — الفهارس الفارلة (UX_Users_OnePerEmployee)
+--    ترفض العمل بدونه، وsqlcmd يبدأ جلسته OFF.
+-- 2) LANGUAGE us_english + DATEFORMAT ymd — حتى تُقرأ '2026-01-01'
+--    و'08:00' و'24:00' حرفيًا لا عبر تنسيق لغة المثيل (عربية مثلًا
+--    تفسر اليوم/الشهر معكوسًا و'22:00' وقتًا غير صالح).
+SET QUOTED_IDENTIFIER ON;
+SET LANGUAGE us_english;
+SET DATEFORMAT ymd;
+GO
 
 -- Disable foreign key constraints (temporarily) to allow truncation
 -- Note: We'll insert in dependency order, but if needed we can use DELETE FROM in reverse order
@@ -92,10 +108,10 @@ VALUES
 SET IDENTITY_INSERT Employees ON;
 INSERT INTO Employees (EmployeeId, Name, Phone, Email, Salary, SalaryType, HireDate, Address, Status, Position, Department)
 VALUES
-(1, N'??????? ??????', '0501234567', 'a.salem@sayl.com', 4000.00, 'monthly', '2025-01-15', N'?????? - ?????', 'active', N'?????', N'????????'),
-(2, N'????? ????????', '0502345678', 'f.zah@sayl.com', 180.00, 'daily', '2025-03-01', N'?????? - ??????', 'active', N'????? ???', N'???????'),
-(3, N'???? ???????', '0503456789', 'k.o@sayl.com', 25.00, 'hourly', '2025-06-01', N'?????? - ?????', 'on_leave', N'?????', N'????????'),
-(4, N'???? ??????', '0504567890', 'm.h@sayl.com', 0.00, 'monthly', '2024-09-10', N'?????? - ??????', 'resigned', N'??????', N'???????');
+(1, N'عبدالله سالم', '0501234567', 'a.salem@sayl.com', 4000.00, 'monthly', '2025-01-15', N'الرياض - الملز', 'active', N'مدير', N'الإدارة'),
+(2, N'فاطمة الزهراني', '0502345678', 'f.zah@sayl.com', 180.00, 'daily', '2025-03-01', N'جدة - الروضة', 'active', N'كاشير أول', N'المبيعات'),
+(3, N'خالد العتيبي', '0503456789', 'k.o@sayl.com', 25.00, 'hourly', '2025-06-01', N'الرياض - العليا', 'on_leave', N'كاشير', N'المبيعات'),
+(4, N'محمد حسن', '0504567890', 'm.h@sayl.com', 0.00, 'monthly', '2024-09-10', N'الدمام - الشاطئ', 'resigned', N'حارس أمن', N'الأمن');
 SET IDENTITY_INSERT Employees OFF;
 
 -- ===============================================
@@ -104,9 +120,9 @@ SET IDENTITY_INSERT Employees OFF;
 SET IDENTITY_INSERT Shifts ON;
 INSERT INTO Shifts (ShiftId, Name, StartTime, EndTime, Notes)
 VALUES
-(1, N'??????', '08:00', '16:00', NULL),
-(2, N'??????', '16:00', '24:00', NULL),
-(3, N'?????', '22:00', '06:00', N'???? ??? ????');   -- night shift crosses midnight
+(1, N'صباحي', '08:00', '16:00', NULL),
+(2, N'مسائي', '16:00', '23:59', NULL),  -- نهاية النهاري: 24:00 غير صالحة في SQL Server (النطاق حتى 23:59:59)
+(3, N'ليلي', '22:00', '06:00', N'يعبر منتصف الليل');   -- night shift crosses midnight
 SET IDENTITY_INSERT Shifts OFF;
 
 INSERT INTO EmployeeShifts (EmployeeId, ShiftId, DaysOfWeek, EffectiveFrom, EffectiveTo)
@@ -118,37 +134,38 @@ VALUES
 SET IDENTITY_INSERT OfficialHolidays ON;
 INSERT INTO OfficialHolidays (HolidayId, Name, HolidayDate, DurationDays, IsAnnual)
 VALUES
-(1, N'??? ?????', '2026-02-22', 1, 1),
-(2, N'??? ??????', '2026-09-23', 1, 1),
-(3, N'??? ??????', '2026-07-15', 3, 0);
+(1, N'يوم التأسيس', '2026-02-22', 1, 1),
+(2, N'اليوم الوطني', '2026-09-23', 1, 1),
+(3, N'عيد الأضحى', '2026-07-15', 3, 0);
 SET IDENTITY_INSERT OfficialHolidays OFF;
 
 -- ===============================================
--- 6) Roles
+-- 6) Roles (bitmask — see Common\Utils\AppPermissions.cs)
+--    Fixed roles: admin=4095, cashier=0, accountant=508
 -- ===============================================
 SET IDENTITY_INSERT Roles ON;
-INSERT INTO Roles (RoleId, Name, RoleValue)
+INSERT INTO Roles (RoleId, Name, RoleValue, IsActive)
 VALUES
-(1, N'مدير النظام', 100),
-(2, N'كاشير', 50),
-(3, N'محاسب', 75);
+(1, N'مدير النظام', 4095, 1),
+(2, N'كاشير', 0, 1),
+(3, N'محاسب', 508, 1);
 SET IDENTITY_INSERT Roles OFF;
 
 -- ===============================================
 -- 7) Users (passwords hashed with BCrypt)
--- ===============================================
+--    السياسة: حسابان أساسيان فقط عند التثبيت —
+--    admin (مدير النظام) و cashier1 (كاشير).
+--    المحاسب دور جاهز بلا حساب؛ يُنشئ المدير حسابه
+--    من شاشة المستخدمين عند الحاجة (دور واحد لكل محل).
 -- Demo login credentials:
 --   admin    / Admin@123
 --   cashier1 / Cashier@123
---   manager  / Manager@123
---   cashier2 / Cashier2@123
+-- ===============================================
 SET IDENTITY_INSERT Users ON;
 INSERT INTO Users (UserId, Username, PasswordHash, EmployeeId, RoleId, CreatedAt)
 VALUES
-(1, N'admin', N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, '2025-02-01 08:00:00'),     -- عبدالله (مدير)
-(2, N'cashier1', N'$2a$11$qEzXqA3D4ohz3k8xNjKGyON9buLjMGPcWXmMqsbbf2tb0QSnX2SmW', 1, 2, '2025-02-01 09:00:00'),  -- عبدالله كاشير أيضاً (يمكن أن يكون نفس الشخص)
-(3, N'manager', N'$2a$11$BiA0Or/ByzEygzuHM15sXe5ilM10KpF6zdQy3ucTG9PYaukb99rbC', 2, 1, '2025-03-15 08:30:00'),    -- فاطمة مديرة
-(4, N'cashier2', N'$2a$11$7DlI/JCHdLeKtnURDN1muOW0IlkU5NQueLY2XepccKPanMCDjyGWm', 3, 2, '2025-06-01 10:00:00'); -- خالد (في إجازة لكن حسابه موجود)
+(1, N'admin', N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, '2025-02-01 08:00:00'),     -- مدير النظام الوحيد
+(2, N'cashier1', N'$2a$11$qEzXqA3D4ohz3k8xNjKGyON9buLjMGPcWXmMqsbbf2tb0QSnX2SmW', 2, 2, '2025-02-01 09:00:00'); -- الكاشير الأساسي
 SET IDENTITY_INSERT Users OFF;
 
 -- ===============================================
@@ -324,16 +341,6 @@ VALUES
 (3, 2, 'CreateInvoice', N'إنشاء فاتورة بيع رقم 2', '2026-07-02 14:00:00'),
 (4, 1, 'Logout', N'تسجيل خروج المستخدم admin', '2026-07-01 17:00:00');
 SET IDENTITY_INSERT SystemLogs OFF;
-
--- ===============================================
--- 16) POS Sessions
--- ===============================================
-SET IDENTITY_INSERT POSSessions ON;
-INSERT INTO POSSessions (SessionId, UserId, OpeningAmount, ClosingAmount, ExpectedAmount, StartedAt, ClosedAt, Status)
-VALUES
-(1, 2, 200.00, 271.88, 271.88, '2026-07-01 09:00:00', '2026-07-01 17:00:00', 'closed'), -- cashier1
-(2, 2, 150.00, NULL, NULL, '2026-07-02 09:00:00', NULL, 'open');                        -- جلسة مفتوحة ليوم 2
-SET IDENTITY_INSERT POSSessions OFF;
 
 -- ===============================================
 -- Recalculate Inventory to match movements (optional)

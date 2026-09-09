@@ -1,6 +1,7 @@
 using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -18,9 +19,9 @@ namespace Sayl.Core.Services
 
         // ─────────────────────────────────────────────────
         // فاتورة شراء: استلام الدفعات + تحديث المخزون + رصيد المورد
-        // VULN-26: بوابة صلاحية خدمية — فاتورة الشراء تحرك مالًا (رصيد
-        // المورد) ومخزونًا وسعر تكلفة؛ كانت تثق بأي مستدعٍ (الواجهة فقط
-        // تحجب). المطلوب الآن: محاسب فأعلى (الشراء قرار مكتب خلفي).
+        // بوابة بتات خدمية — فاتورة الشراء تحرك مالًا (رصيد المورد)
+        // ومخزونًا وسعر تكلفة؛ تثق الواجهة وحدها لا يكفي (الشراء قرار
+        // مكتب خلفي). المطلوب: شاشة فواتير الشراء (بت 32).
         // ─────────────────────────────────────────────────
         public async Task<Result<int>> CreatePurchaseInvoiceAsync(DtoPurchaseRequest request)
         {
@@ -28,8 +29,8 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("يجب إضافة بنود إلى فاتورة الشراء.");
 
             int creatorRole = await GetUserRoleValueAsync(request.UserId);
-            if (!clsPermissions.HasAtLeast(creatorRole, clsPermissions.Accountant))
-                return Result<int>.Fail("إنشاء فاتورة شراء يتطلب صلاحية محاسب أو أعلى.");
+            if (!AppPermissions.Has(creatorRole, AppPermissions.PurchaseInvoices))
+                return Result<int>.Fail("إنشاء فاتورة شراء يتطلب صلاحية شاشة فواتير الشراء.");
 
             foreach (var item in request.Items)
             {

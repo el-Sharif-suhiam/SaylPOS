@@ -124,10 +124,9 @@ namespace Sayl.UI.UserControls
             btnRestore.Bounds = new Rectangle(320, y + 232, 200, 44);
             btnRestore.Click += async (_, _) => await RestoreNowAsync();
 
-            // زر إغلاق السنة المالية — يُضاف فقط إذا كان المستخدم أدمن:
-            // هذا نمط «زر شرطي» — البناء داخل if يخفيه عن بقية الأدوار.
-            // إن أردت زرًا شرطيًا آخر انسخ البنية: if (الشرط) { إنشاء + Add }.
-            if (SessionState.IsAdmin)
+            // زر إغلاق السنة المالية — يُضاف لأصحاب شاشة المخزون (الجرد ركن
+            // الإغلاق السنوي): نمط «زر شرطي» — البناء داخل if يخفيه عمّن عداه.
+            if (SessionState.Can(Common.Utils.AppPermissions.Inventory))
             {
                 var btnFiscal = AppTheme.MakeButton("إغلاق السنة المالية", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
                 btnFiscal.Bounds = new Rectangle(540, y + 232, 200, 44);

@@ -408,6 +408,54 @@ namespace Sayl.UI.Forms
 
         // 📖 التصدير PDF — مسار async كامل:
         // التوليد داخل Task.Run وإلا جمُدت النافذة كاملة (نفس علة FiscalYearCloseForm القديمة)
+        //private async Task ExportPdfAsync()
+        //{
+        //    if (_current == null || _current.Periods.Count == 0)
+        //    {
+        //        UiHelpers.ShowError(this, "لا يوجد تقرير مُولَّد لتصديره. أعدّ العرض أولًا.");
+        //        return;
+        //    }
+
+        //    using var save = new SaveFileDialog
+        //    {
+        //        Title = "حفظ تقرير PDF",
+        //        Filter = "ملفات PDF (*.pdf)|*.pdf",
+        //        FileName = $"تقرير_{_current.ReportTypeName}_{_current.FromDate:yyyy-MM-dd}_{_current.ToDate:yyyy-MM-dd}.pdf"
+        //    };
+
+        //    if (save.ShowDialog(this) != DialogResult.OK)
+        //        return;
+
+        //    _btnPdf.Enabled = false;
+        //    Cursor = Cursors.WaitCursor;
+        //    try
+        //    {
+        //        string storeName = "سيل";
+        //        try
+        //        {
+        //            using var scope = Program.Services.CreateScope();
+        //            var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+        //            storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+        //        }
+        //        catch { /* الترويسة الافتراضية كافية */ }
+
+        //        // التوليد خارج مؤشر الواجهة — التقرير السنوي قد يحوي مئات الصفوف
+        //        var report = _current;
+        //        await Task.Run(() => PdfService.ExportPeriodicReport(report, storeName, save.FileName));
+
+        //        UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        UiHelpers.ShowError(this, "تعذر إنشاء ملف PDF: " + ex.Message);
+        //    }
+        //    finally
+        //    {
+        //        _btnPdf.Enabled = true;
+        //        Cursor = Cursors.Default;
+        //    }
+        //}
+
         private async Task ExportPdfAsync()
         {
             if (_current == null || _current.Periods.Count == 0)
@@ -416,15 +464,23 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            using var save = new SaveFileDialog
+            // 1) إنشاء المسار تلقائياً: المستندات/Sayl POS
+            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string saylDir = Path.Combine(baseDir, "Sayl_POS");
+            string periodicDir = Path.Combine(saylDir, "PeriodicReports");
+            try
             {
-                Title = "حفظ تقرير PDF",
-                Filter = "ملفات PDF (*.pdf)|*.pdf",
-                FileName = $"تقرير_{_current.ReportTypeName}_{_current.FromDate:yyyy-MM-dd}_{_current.ToDate:yyyy-MM-dd}.pdf"
-            };
-
-            if (save.ShowDialog(this) != DialogResult.OK)
+                Directory.CreateDirectory(periodicDir);
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر إنشاء مجلد الحفظ تلقائيًا.");
                 return;
+            }
+
+            // 2) تكوين اسم الملف بنفس الصيغة السابقة
+            string fileName = $"تقرير_{_current.ReportTypeName}_{_current.FromDate:yyyy-MM-dd}_{_current.ToDate:yyyy-MM-dd}.pdf";
+            string fullPath = Path.Combine(periodicDir, fileName);
 
             _btnPdf.Enabled = false;
             Cursor = Cursors.WaitCursor;
@@ -439,11 +495,10 @@ namespace Sayl.UI.Forms
                 }
                 catch { /* الترويسة الافتراضية كافية */ }
 
-                // التوليد خارج مؤشر الواجهة — التقرير السنوي قد يحوي مئات الصفوف
                 var report = _current;
-                await Task.Run(() => PdfService.ExportPeriodicReport(report, storeName, save.FileName));
+                await Task.Run(() => PdfService.ExportPeriodicReport(report, storeName, fullPath));
 
-                UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
+                UiHelpers.ShowInfo(this, $"تم حفظ التقرير في:\n{fullPath}");
             }
             catch (Exception ex)
             {

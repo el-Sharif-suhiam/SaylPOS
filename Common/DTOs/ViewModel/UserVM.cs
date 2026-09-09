@@ -11,6 +11,13 @@ namespace Common.DTOs.ViewModel
         public string UserName { get; set; }
 
         public string RoleName { get; set; }
+
+        /// <summary>معرف الدور — الحل الضعف القديم: مطابقة الاسم النصي كانت تنكسر عند إعادة التسمية.</summary>
+        public byte RoleId { get; set; }
+
+        /// <summary>قناع بتات صلاحيات الدور (من جدول الأدوار عند الدخول).</summary>
+        public int RoleValue { get; set; }
+
         public bool IsActive { get; set; }
 
     }

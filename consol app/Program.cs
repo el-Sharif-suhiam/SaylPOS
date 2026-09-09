@@ -2,6 +2,7 @@
 using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text;
@@ -23,8 +24,10 @@ namespace consol_app
         static async Task Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
+            // المثيل المسماة SAYL — المثبت ينشئها (SaylInstance = 'SAYL' في setup.iss)
+            // والافتراضي '.' قد لا يحمل SaylDB على جهاز التطوير.
             Services = new ServiceCollection()
-                .AddSaylServices("Server=.;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
+                .AddSaylServices("Server=DESKTOP-DT3B4CG\\SAYL;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
                 .BuildServiceProvider();
 
             // مسبار التزويد: دورات الهارنس تستهلك مخزون المنتج 1 دورة بعد دورة
@@ -52,6 +55,7 @@ namespace consol_app
             await FinancialGuardsAttackCycle(sessionId);
             await CreditRulesCycle();
             await PermissionRulesCycle();
+            await BitmaskPermissionsCycle();
             await ReportsCycle();
             await SettingsBackupCycle();
             await CrudSmokeCycle();
@@ -89,8 +93,10 @@ namespace consol_app
             var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
 
             // إعادة تعيين كلمات مرور مستخدمي الاختبار إلى قيم معروفة
+            // (الإعادة للآخرين: بوابة المدير — نمرر فاعلًا أدمن)
             var cashier1 = await db.Users.FirstAsync(u => u.Username == "cashier1");
-            await users.ResetPasswordAsync(cashier1.UserId, "Cashier123");
+            var adminUser = await db.Users.FirstAsync(u => u.Username == "admin");
+            await users.ResetPasswordAsync(cashier1.UserId, "Cashier123", adminUser.UserId);
 
             string[] candidates = { "admin123", "Admin@123", "12345678", "admin1234", "password1" };
             Result<UserVM>? adminLogin = null;
@@ -828,6 +834,116 @@ namespace consol_app
             // deactivate/reactivate needs accountant+
             var deactCashier = await products.DeactivateProductAsync(2, cashier.UserId);
             Check("cashier deactivate-product rejected", !deactCashier.IsSuccess);
+        }
+
+        // ───────────────── 7b. Bitmask permission system ─────────────────
+        // نظام البتات الجديد (انظر AppPermissions): يثبت العقد كاملًا —
+        // القيم الثابتة، الحماية الهرمية، السقف 3071، حماية الأدوار
+        // الأساسية، والدخول بدور معطل.
+        private static async Task BitmaskPermissionsCycle()
+        {
+            Console.WriteLine("--- BITMASK PERMISSIONS ---");
+            using var s = Scope();
+            var users = Svc<clsUsersService>(s);
+            var roles = Svc<clsRoleService>(s);
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+
+            var admin = await db.Users.FirstAsync(u => u.Username == "admin");
+            var cashier = await db.Users.FirstAsync(u => u.Username == "cashier1");
+
+            // 1) ثبات الأدوار الأساسية بعد الترقية
+            var adminRole = await db.Roles.FirstAsync(r => r.Name == "مدير النظام");
+            var cashierRole = await db.Roles.FirstAsync(r => r.Name == "كاشير");
+            var accountantRole = await db.Roles.FirstAsync(r => r.Name == "محاسب");
+            Check("admin role value = 4095", adminRole.RoleValue == AppPermissions.AdminRoleValue, $"got {adminRole.RoleValue}");
+            Check("cashier role value = 0", cashierRole.RoleValue == AppPermissions.CashierRoleValue, $"got {cashierRole.RoleValue}");
+            Check("accountant role value = 508", accountantRole.RoleValue == AppPermissions.AccountantRoleValue, $"got {accountantRole.RoleValue}");
+
+            // 2) الرياضيات العقدية: 508 = كل الشاشات إلا (منتجات/مخزون/مستخدمون/أدوار/إعدادات)
+            int expected508 = AppPermissions.Customers | AppPermissions.Suppliers |
+                AppPermissions.SalesInvoices | AppPermissions.PurchaseInvoices |
+                AppPermissions.Expenses | AppPermissions.Reports | AppPermissions.Employees;
+            Check("508 = accountant mask (all but admin/stock)", expected508 == 508, $"computed {expected508}");
+            Check("accountant lacks products bit", !AppPermissions.Has(508, AppPermissions.Products));
+            Check("accountant lacks roles bit", !AppPermissions.Has(508, AppPermissions.Roles));
+            Check("accountant has reports bit", AppPermissions.Has(508, AppPermissions.Reports));
+
+            // 3) الحماية الهرمية: أدمن لا يُسند أدمن (تغيير دور لحساب مدير من مدير = ممنوع بالخدمة)
+            //    (المشرف 3071 لا يُخترع هنا — نستخدم محاولة تسكين دور المدير لنفسه)
+            var selfToAdmin = await users.ChangeRoleAsync(admin.UserId, adminRole.RoleId, actorUserId: admin.UserId);
+            Check("self keep-role is no-op rejected", !selfToAdmin.IsSuccess);
+
+            // 4) السقف 3071: دور ببت الأدوار (1024) يُرفض خدميًا
+            var badRole = await roles.AddNewRoleAsync(new DtoRole
+            {
+                Name = "دور اختبار بت الأدوار",
+                RoleValue = AppPermissions.Customers | AppPermissions.Roles
+            }, admin.UserId);
+            Check("role with Roles-bit rejected", !badRole.IsSuccess, badRole.Message);
+
+            // 5) الدور الفارغ مرفوض
+            var emptyRole = await roles.AddNewRoleAsync(new DtoRole
+            {
+                Name = "دور فارغ اختبار",
+                RoleValue = 0
+            }, admin.UserId);
+            Check("empty role rejected", !emptyRole.IsSuccess, emptyRole.Message);
+
+            // 6) دور صالح (عملاء فقط = 4) ثم تعديله وحمايته
+            var okRole = await roles.AddNewRoleAsync(new DtoRole
+            {
+                Name = "دور اختبار مؤقت",
+                RoleValue = AppPermissions.Customers
+            }, admin.UserId);
+            Check("custom role (customers only) created", okRole.IsSuccess, okRole.Message);
+
+            if (okRole.IsSuccess)
+            {
+                // 7) الأدوار الأساسية لا تُعدَّل
+                var editAdmin = await roles.UpdateRoleAsync(new DtoRole
+                {
+                    RoleId = adminRole.RoleId, Name = "مدير النظام", RoleValue = AppPermissions.CustomRoleCeiling
+                }, admin.UserId);
+                Check("admin role edit rejected", !editAdmin.IsSuccess, editAdmin.Message);
+
+                // 8) الأدوار الأساسية لا تُعطَّل
+                var deactCashierRole = await roles.DeactivateRoleAsync(cashierRole.RoleId, admin.UserId);
+                Check("cashier role deactivate rejected", !deactCashierRole.IsSuccess, deactCashierRole.Message);
+
+                // 9) تعطيل دور حر ثم فشل دخوله
+                var deact = await roles.DeactivateRoleAsync(okRole.Data, admin.UserId);
+                Check("custom role deactivated", deact.IsSuccess, deact.Message);
+
+                // 10) حساب بدور معطل يُرفض دخوله (Fail-Closed)
+                var probeUser = new NewUserRequest("probe_disabled", "Probe12345", okRole.Data, null);
+                var probeAdd = await users.AddNewUserAsync(probeUser, admin.UserId);
+                Check("probe user on disabled role rejected", !probeAdd.IsSuccess, probeAdd.Message);
+
+                // 11) التنظيف: حذف دور الاختبار الفعلي (غير مستخدم)
+                var delRole = await roles.DeleteRoleAsync(okRole.Data, admin.UserId);
+                Check("test role hard-deleted (unused)", delRole.IsSuccess, delRole.Message);
+            }
+
+            // 12) كلمة المرور الذاتية من شاشة الدخول: قديمة خاطئة ترفض، صحيحة تنجح
+            var wrongOld = await users.ChangePasswordAsync("cashier1", "WrongOld99", "NewCashier123");
+            Check("self change wrong-old rejected", !wrongOld.IsSuccess);
+            var selfChange = await users.ChangePasswordAsync("cashier1", "Cashier123", "Cashier456");
+            Check("self change with correct old works", selfChange.IsSuccess, selfChange.Message);
+            if (selfChange.IsSuccess)
+            {
+                // إعادة لكلمة الاختبار القياسية لبقية الجنيات
+                await users.ResetPasswordAsync(cashier.UserId, "Cashier123", admin.UserId);
+            }
+
+            // 13) الكاشير (0) لا يفتح شيئًا بالبت — رياضيات العقد
+            Check("cashier mask opens nothing by bit",
+                !AppPermissions.Has(0, AppPermissions.Products) &&
+                !AppPermissions.Has(0, AppPermissions.Reports) &&
+                !AppPermissions.Has(0, AppPermissions.Settings));
+
+            // 14) الحماية: كاشير لا يعيد تعيين كلمات الآخرين حتى بصلاحية صحيحة
+            var cashierReset = await users.ResetPasswordAsync(admin.UserId, "Hacked12345", cashier.UserId);
+            Check("cashier cannot reset admin password", !cashierReset.IsSuccess, cashierReset.Message);
         }
 
         // ───────────────── 8. Reports ─────────────────

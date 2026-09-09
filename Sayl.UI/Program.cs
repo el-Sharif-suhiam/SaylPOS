@@ -66,6 +66,10 @@ namespace Sayl.UI
             Application.Run(Navigator);
         }
 
+        // 📖 تفرع ما بعد الدخول — نظام البتات (انظر AppPermissions):
+        // • الكاشير (قيمة 0) يُحدَّد بالهوية لا بالبت → PosForm مباشرة.
+        //   (فحص الهوية هنا وعند كل أمر POS في الخدمات — لا بت عليها أبدًا)
+        // • غيره → MainForm: الأقسام تُبنى من قناع دوره بفحص Can(bit).
         private static void NavigateAfterLogin()
         {
             try

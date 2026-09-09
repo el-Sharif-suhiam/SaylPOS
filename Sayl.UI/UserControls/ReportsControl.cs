@@ -65,7 +65,8 @@ namespace Sayl.UI.UserControls
         {
             // ── شريط الفلترة (أعلى القسم، Dock=Top بارتفاع 70) ──
             // كل عناصره بـ Dock=Right داخل RTL: أول Add أقصى اليمين.
-            // الترتيب البصري النهائي (من اليمين): النوع ← من ← إلى ← عرض ← PDF ← Excel ← الدوري.
+            // الترتيب البصري النهائي (من اليمين): النوع ← من ← إلى ← عرض ← PDF ← Excel ← الدوري
+            // الأزرار الأربعة مفصولة بفواصل Panel (8px) — الـ Margin لا يعمل مع Dock.
             var filterBar = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = AppTheme.CardBg, Padding = new Padding(16, 14, 16, 10) };
 
             var lblType = new Label { Text = "نوع التقرير", Dock = DockStyle.Right, Width = 78, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
@@ -102,36 +103,55 @@ namespace Sayl.UI.UserControls
             _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date, RightToLeftLayout = false };
             _dtpTo.ValueChanged += async (_, _) => await RunReportAsync();
 
-            _btnRefresh = AppTheme.MakeButton("عرض", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 42);
-            _btnRefresh.Dock = DockStyle.Right;
-            _btnRefresh.Width = 88;
+            // 📖 أزرار الإجراءات — نفس وصفة AddToolbarButton في الأقسام الأخرى
+            // لكن بـ Dock=Right لأن شريط الفلترة مبني بالإرساء اليميني.
+            // ⚠️ الفاصل: الـ Margin لا يُطبَّق على العناصر المرساة بـ Dock
+            // (فجوة صفر دائمًا — نفس سبب اختراع AddToolbarGap في الأقسام
+            // الأخرى): كل زرين يفصل بينهما فاصل Panel شفاف حقيقي بعرض 8.
+            Button MakeToolButton(string text, Color back, Color hover, int width)
+            {
+                var btn = AppTheme.MakeButton(text, back, hoverColor: hover, height: 42);
+                btn.Dock = DockStyle.Right;
+                btn.Width = width;
+                btn.Padding = new Padding(4, 0, 4, 0);
+                return btn;
+            }
+
+            Panel MakeGap(int width = 8) => new()
+            {
+                Dock = DockStyle.Right,
+                Width = width,
+                BackColor = Color.Transparent
+            };
+
+            _btnRefresh = MakeToolButton("عرض", AppTheme.Primary, AppTheme.PrimaryDark, 110);
             _btnRefresh.Click += async (_, _) => await RunReportAsync();
 
-            _btnPdf = AppTheme.MakeButton("PDF", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 42);
-            _btnPdf.Dock = DockStyle.Right;
-            _btnPdf.Width = 82;
+            _btnPdf = MakeToolButton("PDF", AppTheme.Danger, Color.FromArgb(185, 28, 28), 100);
             _btnPdf.Click += (_, _) => ExportPdf();
 
-            _btnExcel = AppTheme.MakeButton("Excel", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 42);
-            _btnExcel.Dock = DockStyle.Right;
-            _btnExcel.Width = 86;
+            _btnExcel = MakeToolButton("Excel", AppTheme.Success, Color.FromArgb(21, 128, 61), 100);
             _btnExcel.Click += (_, _) => ExportExcel();
 
-            _btnPeriodic = AppTheme.MakeButton("تقرير دوري", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 42);
-            _btnPeriodic.Dock = DockStyle.Right;
-            _btnPeriodic.Width = 118;
-            _btnPeriodic.Margin = new Padding(10, 0, 0, 0);
+            _btnPeriodic = MakeToolButton("تقرير دوري", AppTheme.Accent, AppTheme.AccentDark, 140);
             _btnPeriodic.Click += (_, _) =>
             {
                 using var form = new PeriodicReportForm();
                 form.ShowDialog(FindForm());
             };
 
-            // ترتيب الإرساء (RTL): الدوري ← Excel ← PDF ← عرض ← إلى ← من ← النوع
+            // فاصل أكبر (16) يفصل مجموعة الأزرار عن حقلي التاريخ بعدها
+            Panel MakeGroupGap() => MakeGap(16);
+
+            // ترتيب الإرساء (RTL): الدوري ← فاصل ← Excel ← فاصل ← PDF ← فاصل ← عرض ← فاصل-مجموعة ← إلى ← من ← النوع
             filterBar.Controls.Add(_btnPeriodic);
+            filterBar.Controls.Add(MakeGap());
             filterBar.Controls.Add(_btnExcel);
+            filterBar.Controls.Add(MakeGap());
             filterBar.Controls.Add(_btnPdf);
+            filterBar.Controls.Add(MakeGap());
             filterBar.Controls.Add(_btnRefresh);
+            filterBar.Controls.Add(MakeGroupGap());
             filterBar.Controls.Add(_dtpTo);
             filterBar.Controls.Add(_lblTo);
             filterBar.Controls.Add(_dtpFrom);
@@ -357,6 +377,48 @@ namespace Sayl.UI.UserControls
         // أي نداء قاعدة بيانات (اسم المتجر) بـ await، والتوليد نفسه داخل
         // Task.Run — GetAwaiter().GetResult() على مؤشر الواجهة يعني تجمّدًا
         // كاملاً (نفس مرض ExportPdf القديم الذي عولج في InvoicePrintHelper).
+        //private async void ExportPdf()
+        //{
+        //    var (headers, rows) = CurrentTable();
+        //    if (rows.Count == 0)
+        //    {
+        //        UiHelpers.ShowInfo(this, "لا توجد بيانات معروضة للتصدير.");
+        //        return;
+        //    }
+
+        //    using var save = new SaveFileDialog
+        //    {
+        //        Title = "حفظ تقرير PDF",
+        //        Filter = "ملفات PDF (*.pdf)|*.pdf",
+        //        FileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.pdf"
+        //    };
+        //    if (save.ShowDialog(this) != DialogResult.OK) return;
+
+        //    try
+        //    {
+        //        string storeName = "سيل";
+        //        try
+        //        {
+        //            using var scope = Program.Services.CreateScope();
+        //            var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+        //            storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+        //        }
+        //        catch { /* الترويسة الافتراضية كافية */ }
+
+        //        // التوليد خارج مؤشر الواجهة — قد يستهلك لحظة مع آلاف الصفوف
+        //        string title = _currentTitle, period = _currentPeriod,
+        //               user = SessionState.CurrentUser?.UserName ?? "", path = save.FileName;
+        //        await Task.Run(() =>
+        //            PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
+
+        //        UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        UiHelpers.ShowError(this, "تعذر إنشاء ملف PDF: " + ex.Message);
+        //    }
+        //}
+
         private async void ExportPdf()
         {
             var (headers, rows) = CurrentTable();
@@ -366,13 +428,23 @@ namespace Sayl.UI.UserControls
                 return;
             }
 
-            using var save = new SaveFileDialog
+            // 1) إنشاء مسار الحفظ تلقائياً
+            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string saylDir = Path.Combine(baseDir, "Sayl_POS");
+            string reportsDir = Path.Combine(saylDir, "Reports");
+            try
             {
-                Title = "حفظ تقرير PDF",
-                Filter = "ملفات PDF (*.pdf)|*.pdf",
-                FileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.pdf"
-            };
-            if (save.ShowDialog(this) != DialogResult.OK) return;
+                Directory.CreateDirectory(reportsDir);
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر إنشاء مجلد الحفظ تلقائيًا.");
+                return;
+            }
+
+            // 2) اسم الملف بنفس الصيغة السابقة
+            string fileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.pdf";
+            string fullPath = Path.Combine(reportsDir, fileName);
 
             try
             {
@@ -387,11 +459,11 @@ namespace Sayl.UI.UserControls
 
                 // التوليد خارج مؤشر الواجهة — قد يستهلك لحظة مع آلاف الصفوف
                 string title = _currentTitle, period = _currentPeriod,
-                       user = SessionState.CurrentUser?.UserName ?? "", path = save.FileName;
+                       user = SessionState.CurrentUser?.UserName ?? "", path = fullPath;
                 await Task.Run(() =>
                     PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
 
-                UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{save.FileName}");
+                UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{fullPath}");
             }
             catch (Exception ex)
             {
@@ -399,6 +471,33 @@ namespace Sayl.UI.UserControls
             }
         }
 
+        //private void ExportExcel()
+        //{
+        //    var (headers, rows) = CurrentTable();
+        //    if (rows.Count == 0)
+        //    {
+        //        UiHelpers.ShowInfo(this, "لا توجد بيانات معروضة للتصدير.");
+        //        return;
+        //    }
+
+        //    using var save = new SaveFileDialog
+        //    {
+        //        Title = "حفظ تقرير Excel",
+        //        Filter = "ملفات Excel (*.xlsx)|*.xlsx",
+        //        FileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx"
+        //    };
+        //    if (save.ShowDialog(this) != DialogResult.OK) return;
+
+        //    try
+        //    {
+        //        ExcelService.ExportTable(_currentTitle, _currentPeriod, headers, rows, save.FileName);
+        //        UiHelpers.ShowInfo(this, $"تم إنشاء ملف Excel بنجاح:\n{save.FileName}");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        UiHelpers.ShowError(this, "تعذر إنشاء ملف Excel: " + ex.Message);
+        //    }
+        //}
         private void ExportExcel()
         {
             var (headers, rows) = CurrentTable();
@@ -408,25 +507,34 @@ namespace Sayl.UI.UserControls
                 return;
             }
 
-            using var save = new SaveFileDialog
+            // 1) إنشاء مسار الحفظ تلقائياً
+            string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string saylDir = Path.Combine(baseDir, "Sayl_POS");
+            string reportsDir = Path.Combine(saylDir, "Reports");
+            try
             {
-                Title = "حفظ تقرير Excel",
-                Filter = "ملفات Excel (*.xlsx)|*.xlsx",
-                FileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx"
-            };
-            if (save.ShowDialog(this) != DialogResult.OK) return;
+                Directory.CreateDirectory(reportsDir);
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, "تعذر إنشاء مجلد الحفظ تلقائيًا.");
+                return;
+            }
+
+            // 2) اسم الملف بنفس الصيغة السابقة
+            string fileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx";
+            string fullPath = Path.Combine(reportsDir, fileName);
 
             try
             {
-                ExcelService.ExportTable(_currentTitle, _currentPeriod, headers, rows, save.FileName);
-                UiHelpers.ShowInfo(this, $"تم إنشاء ملف Excel بنجاح:\n{save.FileName}");
+                ExcelService.ExportTable(_currentTitle, _currentPeriod, headers, rows, fullPath);
+                UiHelpers.ShowInfo(this, $"تم إنشاء ملف Excel بنجاح:\n{fullPath}");
             }
             catch (Exception ex)
             {
                 UiHelpers.ShowError(this, "تعذر إنشاء ملف Excel: " + ex.Message);
             }
         }
-
         private bool CheckResult<T>(Common.Results.Result<T> r)
         {
             if (r.IsSuccess) return true;
