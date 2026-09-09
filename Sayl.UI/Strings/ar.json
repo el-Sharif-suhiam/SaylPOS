@@ -1,0 +1,15 @@
+{
+  "_comment": "القناة العربية — المصدر الأصلي. النصوص هنا منقولة كما هي من الكود؛ أي مفتاح هنا يجب أن يطابق نصه الأصلي حرفيًا.",
+
+  "Common.Title.Error": "خطأ",
+  "Common.Title.Done": "تم",
+  "Common.Msg.OperationFailed": "فشلت العملية.",
+
+  "OpenSession.Form.Title": "فتح جلسة بيع",
+  "OpenSession.Title": "فتح جلسة بيع جديدة",
+  "OpenSession.Label.Info": "أدخل النقد الافتتاحي الموجود في الدرج",
+  "OpenSession.Label.Hint": "سيظهر هذا المبلغ في تقرير إغلاق الجلسة (Z)",
+  "OpenSession.Button.Open": "فتح الجلسة",
+  "OpenSession.Button.OpenNoCash": "فتح بدون نقد افتتاحي",
+  "OpenSession.Msg.InvalidAmount": "أدخل مبلغًا صحيحًا (صفر أو أكثر)."
+}

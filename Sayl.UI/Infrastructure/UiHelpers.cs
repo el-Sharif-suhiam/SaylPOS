@@ -67,11 +67,11 @@ namespace Sayl.UI.Infrastructure
         }
 
         public static void ShowError(IWin32Window? owner, string message) =>
-            MessageBox.Show(owner, message, "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error,
+            MessageBox.Show(owner, message, AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error,
                 MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
 
         public static void ShowInfo(IWin32Window? owner, string message) =>
-            MessageBox.Show(owner, message, "تم", MessageBoxButtons.OK, MessageBoxIcon.Information,
+            MessageBox.Show(owner, message, AppLang.T("Common.Title.Done"), MessageBoxButtons.OK, MessageBoxIcon.Information,
                 MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
 
         public static void ShowResult(IWin32Window? owner, Result result, string? successOverride = null)
@@ -79,7 +79,7 @@ namespace Sayl.UI.Infrastructure
             if (result.IsSuccess)
                 ShowInfo(owner, string.IsNullOrWhiteSpace(successOverride) ? result.Message : successOverride);
             else
-                ShowError(owner, string.IsNullOrWhiteSpace(result.Message) ? "فشلت العملية." : result.Message);
+                ShowError(owner, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Common.Msg.OperationFailed") : result.Message);
         }
 
         /// <summary>تنفيذ عملية خدمة ضمن Scope مستقل (سياق EF قصير العمر).</summary>

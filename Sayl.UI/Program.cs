@@ -33,6 +33,14 @@ namespace Sayl.UI
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
                 .Build();
 
+            // لغة الواجهة: تُقرأ قبل بناء أي نافذة وتبقى ثابتة طوال الجلسة
+            // (التبديل = تغيير "Language" في appsettings + إعادة تشغيل).
+            // أي قيمة غير "en" = عربي — القاعدة الآمنة.
+            AppLang.Init(string.Equals(configuration["Language"], "en",
+                StringComparison.OrdinalIgnoreCase)
+                ? AppLanguage.English
+                : AppLanguage.Arabic);
+
             var connectionString = configuration.GetConnectionString("SaylDb")
                 ?? throw new InvalidOperationException("لم يتم العثور على جملة الاتصال 'SaylDb' في appsettings.json.");
 

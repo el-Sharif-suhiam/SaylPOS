@@ -1,0 +1,15 @@
+{
+  "_comment": "English channel — incomplete by design; missing keys fall back to Arabic transparently. Fill gradually as screens are migrated.",
+
+  "Common.Title.Error": "Error",
+  "Common.Title.Done": "Done",
+  "Common.Msg.OperationFailed": "Operation failed.",
+
+  "OpenSession.Form.Title": "Open Sales Session",
+  "OpenSession.Title": "Start a New Sales Session",
+  "OpenSession.Label.Info": "Enter the opening cash in the drawer",
+  "OpenSession.Label.Hint": "This amount appears in the session close (Z) report",
+  "OpenSession.Button.Open": "Open Session",
+  "OpenSession.Button.OpenNoCash": "Open Without Opening Cash",
+  "OpenSession.Msg.InvalidAmount": "Enter a valid amount (zero or more)."
+}
