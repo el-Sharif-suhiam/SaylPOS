@@ -282,8 +282,11 @@ namespace Sayl.UI.Forms
             btnLogout.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnLogout.Click += async (_, _) => await LogoutAsync();
 
-            // زر تبديل اللغة — كبسولة صغيرة بجوار زر الخروج
-            var btnLang = AppTheme.MakeLanguageSwitchButton(44);
+            // زر تبديل اللغة — كبسولة Eng/Ara بجوار زر الخروج (عموديًا وسط الشريط)
+            var btnLang = AppTheme.MakeLanguageSwitchButton();
+            btnLang.Dock = DockStyle.Left;
+            btnLang.Width = 64;
+            btnLang.Margin = new Padding(6, 8, 6, 8);
 
             // 🕐 VULN-45 + طلب المالك: ساعة البرنامج الحية — التاريخ والوقت
             // من AppClock (UTC+3 ثابت) لا من ساعة الجهاز: الكاشير يرى «توقيت

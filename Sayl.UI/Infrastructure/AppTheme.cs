@@ -136,17 +136,20 @@ namespace Sayl.UI.Infrastructure
         }
 
         /// <summary>
-        /// زر تبديل اللغة (عربي/English) — كبسولة بيضاء على خلفية كحلية أنيقة:
-        /// يعرض لغة الهدف («English» أو «عربي») — النقر يحفظ الاختيار ويعيد
-        /// تشغيل البرنامج. يوضع في زاوية أي نافذة (دائري 46px يطابق أزرار
-        /// «؟» و«×» في LoginForm). مصدر واحد لثلاث شاشات: الدخول/الرئيسية/POS.
+        /// زر تبديل اللغة (عربي/English) — كبسولة متناظرة (زوايا دائرية كاملة)
+        /// بحجم ثابت 64×34 تعرض لغة الهدف «Eng» أو «Ara» — النقر يحفظ
+        /// الاختيار ويعيد تشغيل البرنامج. الرسم متجهي Anti-Alias كامل
+        /// (نفس أسلوب أزرار «؟» و«×») فيظهر مستديرًا تمامًا في كل الدقة.
+        /// مصدر واحد لثلاث شاشات: الدخول/الرئيسية/POS.
         /// </summary>
-        public static Button MakeLanguageSwitchButton(int diameter = 46)
+        public static Button MakeLanguageSwitchButton()
         {
             bool toEnglish = !AppLang.IsEnglish;
+            string display = toEnglish ? "Eng" : "Ara";
+
             var b = new Button
             {
-                Size = new Size(diameter, diameter),
+                Size = new Size(64, 34),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand,
@@ -154,22 +157,34 @@ namespace Sayl.UI.Infrastructure
             };
             b.FlatAppearance.BorderSize = 0;
 
+            bool hovered = false;
+
             b.Paint += (_, e) =>
             {
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                var rect = new Rectangle(1, 1, b.Width - 3, b.Height - 3);
-                using var border = new Pen(Color.FromArgb(191, 219, 254), 1.6f);
-                g.DrawEllipse(border, rect);
 
-                string display = toEnglish ? "EN" : "ع";
-                using var font = new Font("Segoe UI", display == "EN" ? 10F : 12F, FontStyle.Bold);
-                TextRenderer.DrawText(g, display, font, rect, Color.White,
+                // الكبسولة: مستطيل بارتفاع كامل وعرض ناقص الارتفاع (زوايا نصف دائرة)
+                // — نصف القطر = الارتفاع÷2 يعطي تناظرًا مثاليًا في الزوايا الأربع.
+                int h = b.Height - 3;                       // 31 — نصف قطر الزاوية
+                int w = b.Width - 3;                        // 61 — جسم الكبسولة
+                var body = new Rectangle(1, 1, w, h);
+                using var path = CreateRoundedPath(body, h / 2);
+
+                // الحشوة: كحلي داكن → أفتح قليلًا عند المرور (hover)
+                using var fill = new SolidBrush(hovered ? Color.FromArgb(45, 90, 150) : Color.FromArgb(28, 66, 110));
+                g.FillPath(fill, path);
+
+                using var border = new Pen(hovered ? Color.FromArgb(147, 197, 253) : Color.FromArgb(191, 219, 254), 1.6f);
+                g.DrawPath(border, path);
+
+                using var font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+                TextRenderer.DrawText(g, display, font, body, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                     TextFormatFlags.NoPadding);
             };
-            b.MouseEnter += (_, _) => b.Invalidate();
-            b.MouseLeave += (_, _) => b.Invalidate();
+            b.MouseEnter += (_, _) => { hovered = true; b.Invalidate(); };
+            b.MouseLeave += (_, _) => { hovered = false; b.Invalidate(); };
             b.Click += (_, _) =>
             {
                 var confirm = MessageBox.Show(

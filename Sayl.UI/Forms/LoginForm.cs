@@ -279,9 +279,9 @@ namespace Sayl.UI.Forms
             btnClose.Bounds = new Rectangle(ClientSize.Width - 60, 16, 44, 44);
             btnClose.Click += (_, _) => Close();
 
-            // ── زر تبديل اللغة: تحت زر «؟» أعلى اليمين — كبسولة «EN/ع» ──
+            // ── زر تبديل اللغة: تحت زر «؟» أعلى اليمين — كبسولة Eng/Ara ──
             var btnLang = AppTheme.MakeLanguageSwitchButton();
-            btnLang.Bounds = new Rectangle(16, 68, 46, 46);
+            btnLang.Bounds = new Rectangle(16, 68, btnLang.Width, btnLang.Height);
 
             // ── أسفل النافذة: ساعة البرنامج + حالة الاتصال ثم سطر الحقوق ──
             // 🕐 VULN-45: الساعة تُعرض من اللحظة الأولى — «توقيت البرنامج»

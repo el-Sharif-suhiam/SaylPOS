@@ -221,7 +221,7 @@ namespace Sayl.UI.Forms
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 164));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 154));
 
             // العلامة التجارية: شعار + اسم
             var brandPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
@@ -268,17 +268,17 @@ namespace Sayl.UI.Forms
             menuLayout.RowCount = row + 1;
             layout.Controls.Add(menuLayout, 0, 1);
 
-            // أسفل الشريط: حول البرنامج + تسجيل الخروج (صف فاصل بينهما)
+            // أسفل الشريط: زر اللغة (فوق) ثم حول البرنامج ثم تسجيل الخروج
             var footer = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1
             };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 14));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));   // كبسولة اللغة
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));   // فاصل
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));   // حول البرنامج
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // تسجيل الخروج
 
             var btnAbout = MakeGhostButton(AppLang.T("Main.Button.About"), AppTheme.TextOnDark);
             btnAbout.Click += (_, _) =>
@@ -287,13 +287,14 @@ namespace Sayl.UI.Forms
             var btnLogout = MakeGhostButton(AppLang.T("Main.Button.Logout"), Color.FromArgb(248, 113, 113));
             btnLogout.Click += async (_, _) => await LogoutAsync();
 
-            // زر تبديل اللغة: صف وسط التذييل — كبسولة صغيرة بأناقة الشريط
-            var btnLang = AppTheme.MakeLanguageSwitchButton(44);
-            btnLang.Dock = DockStyle.Fill;
-            btnLang.Margin = new Padding(60, 2, 60, 2); // وسط الشريط — كبسولة أنيقة
+            // زر تبديل اللغة: أول صف بالتذييل — فوق «حول البرنامج» مباشرة،
+            // ممركز أفقيًا كعنصر هوية صغير (كبسولة Eng/Ara)
+            var btnLang = AppTheme.MakeLanguageSwitchButton();
+            btnLang.Anchor = AnchorStyles.None; // وسط الصف — لا يتمدد مع عرض الشريط
+            btnLang.Margin = new Padding(0);
 
-            footer.Controls.Add(btnAbout, 0, 0);
-            footer.Controls.Add(btnLang, 0, 1);
+            footer.Controls.Add(btnLang, 0, 0);
+            footer.Controls.Add(btnAbout, 0, 2);
             footer.Controls.Add(btnLogout, 0, 3);
             layout.Controls.Add(footer, 0, 2);
 
