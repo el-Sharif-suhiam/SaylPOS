@@ -20,7 +20,7 @@ namespace Sayl.UI.UserControls
 
             var lblInfo = new Label
             {
-                Text = "هذا القسم قيد التطوير وسيتم تفعيله في المراحل القادمة.",
+                Text = AppLang.T("Placeholder.Msg"),
                 Font = AppTheme.FontBody,
                 ForeColor = AppTheme.TextMuted,
                 AutoSize = true

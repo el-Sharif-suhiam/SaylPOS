@@ -83,7 +83,7 @@ namespace Sayl.UI.UserControls
             var periodBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Bg, Padding = new Padding(4, 8, 4, 4) };
             var lblPeriod = new Label
             {
-                Text = "الفترة:",
+                Text = AppLang.T("Dashboard.Period"),
                 Dock = DockStyle.Right,
                 Width = 60,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -97,7 +97,13 @@ namespace Sayl.UI.UserControls
                 FlatStyle = FlatStyle.Flat,
                 Font = AppTheme.FontBody
             };
-            _cmbPeriod.Items.AddRange(new object[] { "أسبوع", "شهر", "ربع سنة", "سنة" });
+            _cmbPeriod.Items.AddRange(new object[]
+            {
+                AppLang.T("Dashboard.Period.Week"),
+                AppLang.T("Dashboard.Period.Month"),
+                AppLang.T("Dashboard.Period.Quarter"),
+                AppLang.T("Dashboard.Period.Year")
+            });
             _cmbPeriod.SelectedIndex = 1;
             _cmbPeriod.SelectedIndexChanged += async (_, _) => await RefreshTrendAsync();
             periodBar.Controls.Add(_cmbPeriod);
@@ -127,7 +133,7 @@ namespace Sayl.UI.UserControls
             var topPanel = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(10) };
             var lblTop = new Label
             {
-                Text = "الأكثر مبيعًا (آخر 30 يومًا)",
+                Text = AppLang.T("Dashboard.TopProducts"),
                 Dock = DockStyle.Top,
                 Height = 30,
                 Font = AppTheme.FontHeading,
@@ -146,7 +152,7 @@ namespace Sayl.UI.UserControls
             var lowPanel = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(10) };
             _lblLowStockHeader = new Label
             {
-                Text = "المخزون المنخفض",
+                Text = AppLang.T("Dashboard.LowStock"),
                 Dock = DockStyle.Top,
                 Height = 30,
                 Font = AppTheme.FontHeading,
@@ -154,9 +160,9 @@ namespace Sayl.UI.UserControls
             };
             _gridLowStock = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridLowStock);
-            _gridLowStock.Columns.Add("colName", "المنتج");
-            _gridLowStock.Columns.Add("colQty", "المتاح");
-            _gridLowStock.Columns.Add("colReorder", "حد الطلب");
+            _gridLowStock.Columns.Add("colName", AppLang.T("Common.Label.Product"));
+            _gridLowStock.Columns.Add("colQty", AppLang.T("Inventory.Label.Available"));
+            _gridLowStock.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
             _gridLowStock.Columns["colName"].FillWeight = 55;
             _gridLowStock.Columns["colQty"].FillWeight = 22;
             _gridLowStock.Columns["colReorder"].FillWeight = 23;
@@ -197,31 +203,31 @@ namespace Sayl.UI.UserControls
 
                 DashboardSummaryVM s = result.Data;
                 _cardsPanel.Controls.Clear();
-                _cardsPanel.Controls.Add(MakeCard("صافي مبيعات اليوم", UiHelpers.Money(s.TodayNetSales), AppTheme.Primary));
-                _cardsPanel.Controls.Add(MakeCard("المحصل اليوم", UiHelpers.Money(s.TodayCollected), AppTheme.Success));
-                _cardsPanel.Controls.Add(MakeCard("فواتير اليوم", s.TodayInvoiceCount.ToString(), AppTheme.SidebarBg));
-                _cardsPanel.Controls.Add(MakeCard("صافي مبيعات الشهر", UiHelpers.Money(s.MonthNetSales), AppTheme.Primary));
-                _cardsPanel.Controls.Add(MakeCard("صافي ربح الشهر", UiHelpers.Money(s.MonthNetProfit), s.MonthNetProfit >= 0 ? AppTheme.Success : AppTheme.Danger));
-                _cardsPanel.Controls.Add(MakeCard("قيمة المخزون", UiHelpers.Money(s.TotalStockValue), AppTheme.SidebarBg));
-                _cardsPanel.Controls.Add(MakeCard("منتجات تحت حد الطلب", s.LowStockCount.ToString(), s.LowStockCount > 0 ? AppTheme.Warning : AppTheme.Success));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayNet"), UiHelpers.Money(s.TodayNetSales), AppTheme.Primary));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayCollected"), UiHelpers.Money(s.TodayCollected), AppTheme.Success));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayInvoices"), s.TodayInvoiceCount.ToString(), AppTheme.SidebarBg));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthNet"), UiHelpers.Money(s.MonthNetSales), AppTheme.Primary));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthProfit"), UiHelpers.Money(s.MonthNetProfit), s.MonthNetProfit >= 0 ? AppTheme.Success : AppTheme.Danger));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.StockValue"), UiHelpers.Money(s.TotalStockValue), AppTheme.SidebarBg));
+                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.LowStockCount"), s.LowStockCount.ToString(), s.LowStockCount > 0 ? AppTheme.Warning : AppTheme.Success));
 
                 _lstTopProducts.Items.Clear();
                 if (s.TopProducts.Count == 0)
-                    _lstTopProducts.Items.Add("لا توجد مبيعات بعد.");
+                    _lstTopProducts.Items.Add(AppLang.T("Dashboard.Msg.NoSales"));
                 foreach (var p in s.TopProducts)
-                    _lstTopProducts.Items.Add($"{p.ProductName} — {p.TotalQuantitySold} وحدة ({UiHelpers.Money(p.TotalRevenue)})");
+                    _lstTopProducts.Items.Add(AppLang.T("Dashboard.TopProduct.Line", p.ProductName, p.TotalQuantitySold, UiHelpers.Money(p.TotalRevenue)));
 
                 _gridLowStock.Rows.Clear();
                 foreach (var item in s.LowStockItems)
                     _gridLowStock.Rows.Add(item.ProductName, item.QuantityAvailable, item.ReorderLevel);
 
                 _lblLowStockHeader.Text = s.LowStockCount > 0
-                    ? $"المخزون المنخفض ({s.LowStockCount} منتج)"
-                    : "المخزون المنخفض — لا شيء";
+                    ? AppLang.T("Dashboard.LowStock.Count", s.LowStockCount)
+                    : AppLang.T("Dashboard.LowStock.None");
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل بيانات لوحة التحكم.");
+                UiHelpers.ShowError(this, AppLang.T("Dashboard.Msg.LoadFailed"));
             }
         }
 
@@ -280,14 +286,14 @@ namespace Sayl.UI.UserControls
             {
                 new ColumnSeries<decimal>
                 {
-                    Name = "عدد الفواتير",
+                    Name = AppLang.T("Dashboard.Series.InvoiceCount"),
                     Values = countValues,
                     Fill = new SolidColorPaint(new SKColor(148, 163, 184)),
                     MaxBarWidth = 26
                 },
                 new LineSeries<decimal>
                 {
-                    Name = "صافي المبيعات",
+                    Name = AppLang.T("Dashboard.Series.NetSales"),
                     Values = netValues,
                     Stroke = new SolidColorPaint(new SKColor(37, 99, 235), 3),
                     GeometryStroke = new SolidColorPaint(new SKColor(37, 99, 235), 3),

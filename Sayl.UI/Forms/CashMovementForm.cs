@@ -51,7 +51,7 @@ namespace Sayl.UI.Forms
             _rbOut = new RadioButton { Text = AppLang.T("CashMove.Out"), Bounds = new Rectangle(30, 62, 180, 30), ForeColor = AppTheme.TextPrimary };
 
             // المبلغ: خط 13 عريض وسط — أكبر إدخال بالنافذة (قراءة الكاشير)
-            var lblAmount = new Label { Text = "المبلغ *", Bounds = new Rectangle(30, 104, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblAmount = new Label { Text = AppLang.T("Common.Label.Amount") + " *", Bounds = new Rectangle(30, 104, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtAmount = new TextBox { Bounds = new Rectangle(30, 128, 380, 42), Font = new Font("Segoe UI", 13F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
 
             // السبب: Multiline=true مع ارتفاع 60 — سطران بدل واحد (شرح الحركة)

@@ -34,8 +34,9 @@ namespace Sayl.UI.Forms
         //    ProductEditForm: أبسط من مؤشر y المتقدم في EmployeeEditForm.
         private void BuildUi()
         {
-            string kind = _partyType == 'C' ? "عميل" : "مورد";
-            Text = _existing == null ? $"إضافة {kind}" : $"تعديل {kind}";
+            Text = _existing == null
+                ? (_partyType == 'C' ? AppLang.T("Party.Title.AddCustomer") : AppLang.T("Party.Title.AddSupplier"))
+                : (_partyType == 'C' ? AppLang.T("Party.Title.EditCustomer") : AppLang.T("Party.Title.EditSupplier"));
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 540);
@@ -47,18 +48,18 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label { Text = Text, Bounds = new Rectangle(0, 16, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            _txtName = MakeField("الاسم *", 30, 58, 400, _existing?.Name ?? "");
-            _txtPhone1 = MakeField("الجوال 1", 30, 116, 195, _existing?.Phone1 ?? "");
-            _txtPhone2 = MakeField("الجوال 2", 235, 116, 195, _existing?.Phone2 ?? "");
-            _txtEmail = MakeField("البريد الإلكتروني", 30, 174, 400, _existing?.Email ?? "");
-            _txtAddress = MakeField("العنوان", 30, 232, 400, _existing?.AddressLine1 ?? "");
-            _txtNotes = MakeField("ملاحظات", 30, 290, 400, _existing?.Notes ?? "");
+            _txtName = MakeField(AppLang.T("Common.Label.Name") + " *", 30, 58, 400, _existing?.Name ?? "");
+            _txtPhone1 = MakeField(AppLang.T("Party.Label.Phone1"), 30, 116, 195, _existing?.Phone1 ?? "");
+            _txtPhone2 = MakeField(AppLang.T("Party.Label.Phone2"), 235, 116, 195, _existing?.Phone2 ?? "");
+            _txtEmail = MakeField(AppLang.T("Common.Label.Email"), 30, 174, 400, _existing?.Email ?? "");
+            _txtAddress = MakeField(AppLang.T("Common.Label.Address"), 30, 232, 400, _existing?.AddressLine1 ?? "");
+            _txtNotes = MakeField(AppLang.T("Common.Label.Notes"), 30, 290, 400, _existing?.Notes ?? "");
 
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(30, 420, 240, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 420, 140, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -83,7 +84,7 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtName.Text))
             {
-                UiHelpers.ShowError(this, "الاسم مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.NameRequired"));
                 return;
             }
 
@@ -115,11 +116,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل الحفظ." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Expense.Msg.SaveFailed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowResult(this, result, "تم الحفظ بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Expense.Msg.Saved"));
             DialogResult = DialogResult.OK;
         }
     }

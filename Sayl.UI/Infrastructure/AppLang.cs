@@ -102,6 +102,46 @@ namespace Sayl.UI.Infrastructure
             catch { return raw; }
         }
 
+        /// <summary>وصف دور بصري حسب لغة الواجهة — يستبدل نصوص AppPermissions
+        /// الصلبة في كل مكان يُعرض فيه وصف الدور للمستخدم (جداول/قوائم).
+        /// أسماء الشاشات نفسها تُستبدل عبر PermScreenName أدناه.</summary>
+        public static string PermDescribe(int roleValue)
+        {
+            if (roleValue == Common.Utils.AppPermissions.AdminRoleValue) return T("Perm.Admin");
+            if (roleValue == Common.Utils.AppPermissions.AccountantRoleValue) return T("Perm.Accountant");
+            if (roleValue == Common.Utils.AppPermissions.CashierRoleValue) return T("Perm.Cashier");
+            if (roleValue == 0) return T("Perm.None");
+
+            int count = 0;
+            foreach (var (bit, _) in Common.Utils.AppPermissions.EditableScreens)
+                if (Common.Utils.AppPermissions.Has(roleValue, bit)) count++;
+
+            if (count == Common.Utils.AppPermissions.EditableScreens.Length) return T("Perm.AllScreens");
+            return count == 1 ? T("Perm.OneScreen") : T("Perm.NScreens", count);
+        }
+
+        /// <summary>اسم الشاشة من بتّها بلغة الواجهة — فهرس البت داخل كتالوج
+        /// EditableScreens يوازي ترتيب مفاتيح Perm.Screens.* في ملفات اللغة.</summary>
+        public static string PermScreenName(int screenBit)
+        {
+            var catalog = Common.Utils.AppPermissions.EditableScreens;
+            int idx = Array.FindIndex(catalog, s => s.Bit == screenBit);
+            return idx >= 0 ? T("Perm.Screens." + idx switch
+            {
+                0 => "Products",
+                1 => "Inventory",
+                2 => "Customers",
+                3 => "Suppliers",
+                4 => "SalesInvoices",
+                5 => "PurchaseInvoices",
+                6 => "Expenses",
+                7 => "Reports",
+                8 => "Employees",
+                9 => "Users",
+                _ => "Settings"
+            }) : screenBit.ToString();
+        }
+
         // ── تحميل ملفات اللغة: قراءة متسامحة — أي خلل = جدول فارغ و fallback كامل للعربية ──
         private static Dictionary<string, string> Load(string code)
         {

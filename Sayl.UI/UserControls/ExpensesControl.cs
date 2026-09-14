@@ -13,7 +13,7 @@ namespace Sayl.UI.UserControls
     {
         private List<DtoExpense> _expenses = new();
 
-        protected override string Title => "المصروفات";
+        protected override string Title => AppLang.T("Expenses.Section.Title");
 
         protected override async Task LoadDataAsync()
         {
@@ -24,12 +24,12 @@ namespace Sayl.UI.UserControls
                 _expenses = await expenseService.GetExpensesListAsync(search: TxtSearch.Text?.Trim() ?? "");
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colId", "الرقم");
-                Grid.Columns.Add("colDate", "التاريخ");
-                Grid.Columns.Add("colDesc", "الوصف");
-                Grid.Columns.Add("colCategory", "الفئة");
-                Grid.Columns.Add("colAmount", "المبلغ");
-                Grid.Columns.Add("colNotes", "ملاحظات");
+                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+                Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
+                Grid.Columns.Add("colDesc", AppLang.T("Expenses.Label.Description"));
+                Grid.Columns.Add("colCategory", AppLang.T("Expenses.Label.Category"));
+                Grid.Columns.Add("colAmount", AppLang.T("Expenses.Label.Amount"));
+                Grid.Columns.Add("colNotes", AppLang.T("Common.Label.Notes"));
                 Grid.Columns["colId"].FillWeight = 8;
                 Grid.Columns["colDate"].FillWeight = 14;
                 Grid.Columns["colDesc"].FillWeight = 30;
@@ -44,18 +44,18 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المصروفات.");
+                UiHelpers.ShowError(this, AppLang.T("Expenses.Msg.LoadFailed"));
             }
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة مصروف", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditExpense(null), 140);
+            AddToolbarButton(AppLang.T("Expenses.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditExpense(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
-            AddToolbarButton("حذف", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeleteAsync(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Delete"), AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeleteAsync(), 110);
         }
 
         private void EditSelected()
@@ -63,7 +63,7 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _expenses.Count)
             {
-                UiHelpers.ShowError(this, "اختر مصروفًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Expenses.Msg.PickExpense"));
                 return;
             }
             EditExpense(_expenses[idx]);
@@ -81,13 +81,13 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _expenses.Count)
             {
-                UiHelpers.ShowError(this, "اختر مصروفًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Expenses.Msg.PickExpense"));
                 return;
             }
 
             var expense = _expenses[idx];
-            if (!ConfirmationDialog.Show(this, "حذف مصروف",
-                $"سيتم حذف المصروف '{expense.Description}' بمبلغ {UiHelpers.Money(expense.Amount)}. هل أنت متأكد؟"))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Expenses.Delete.Title"),
+                AppLang.T("Expenses.Delete.Confirm", expense.Description, UiHelpers.Money(expense.Amount))))
                 return;
 
             Result result;

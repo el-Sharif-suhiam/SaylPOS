@@ -61,7 +61,7 @@ namespace Sayl.UI.Forms
             //             نافذة أضيق؟ صغّر العرض 560. أطول؟ كبّر 640.
             // BackColor: خلفية النافذة — AppTheme.CardBg هي خلفية البطاقات
             //            البيضاء الموحدة في كل النظام.
-            Text = _existing == null ? "إضافة موظف" : "تعديل موظف";
+            Text = _existing == null ? AppLang.T("EmployeeEdit.AddTitle") : AppLang.T("EmployeeEdit.EditTitle");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(560, 640);
             BackColor = AppTheme.CardBg;
@@ -91,9 +91,9 @@ namespace Sayl.UI.Forms
             // (تذكير: الحقل الجديد يجب أن يُعلن أيضًا أعلى الملف مع بقية الحقول
             //  ويُقرأ/يُحفظ داخل SaveAsync ليتصل بقاعدة البيانات.)
             int y = 56;
-            _txtName = MakeField("الاسم *", ref y, out _);
-            _txtPhone = MakeField("الجوال", ref y, out _);
-            _txtEmail = MakeField("البريد الإلكتروني", ref y, out _);
+            _txtName = MakeField(AppLang.T("EmployeeEdit.Label.Name"), ref y, out _);
+            _txtPhone = MakeField(AppLang.T("EmployeeEdit.Label.Phone"), ref y, out _);
+            _txtEmail = MakeField(AppLang.T("EmployeeEdit.Label.Email"), ref y, out _);
 
             // ── نوع الراتب + المعدل: صف مزدوج (يمين يسار) ──
             // وضعنا عنصرين في نفس الصف: التسمية+القائمة يمينًا (390..530)
@@ -101,14 +101,14 @@ namespace Sayl.UI.Forms
             // Bounds يسار العنصر الأيمن = 390 (أي أن عرضه من 390 إلى 530).
             var lblType = new Label
             {
-                Text = "نوع الراتب *",
+                Text = AppLang.T("EmployeeEdit.Label.SalaryType"),
                 Bounds = new Rectangle(300, y, 230, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
             var lblSalary = new Label
             {
-                Text = "المعدل *",
+                Text = AppLang.T("EmployeeEdit.Label.Rate"),
                 Bounds = new Rectangle(30, y, 240, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -123,7 +123,7 @@ namespace Sayl.UI.Forms
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 FlatStyle = FlatStyle.Flat
             };
-            _cmbSalaryType.Items.AddRange(new object[] { "شهري", "يومي", "بالساعة" });
+            _cmbSalaryType.Items.AddRange(new object[] { AppLang.T("Employees.Salary.Monthly"), AppLang.T("Employees.Salary.Daily"), AppLang.T("Employees.Salary.Hourly") });
             _cmbSalaryType.SelectedIndex = 0;
             // SelectedIndexChanged: يُنفّذ تلقائيًا عند تغيير اختيار المستخدم —
             // هنا نستدعي UpdateSalaryLabel لتغيير نص "المعدل (شهري/يومي...)".
@@ -137,19 +137,19 @@ namespace Sayl.UI.Forms
             _txtSalary.Text = "0";
             y += 64; // انتهى الصف المزدوج — تقدّم لموضع الصف التالي
 
-            _txtPosition = MakeField("المسمى الوظيفي *", ref y, out _);
-            _txtDepartment = MakeField("القسم", ref y, out _);
+            _txtPosition = MakeField(AppLang.T("EmployeeEdit.Label.Position"), ref y, out _);
+            _txtDepartment = MakeField(AppLang.T("EmployeeEdit.Label.Department"), ref y, out _);
 
             var lblHire = new Label
             {
-                Text = "تاريخ التعيين",
+                Text = AppLang.T("EmployeeEdit.Label.HireDate"),
                 Bounds = new Rectangle(300, y, 230, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
             var lblStatus = new Label
             {
-                Text = "الحالة",
+                Text = AppLang.T("EmployeeEdit.Label.Status"),
                 Bounds = new Rectangle(30, y, 240, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -167,7 +167,7 @@ namespace Sayl.UI.Forms
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 FlatStyle = FlatStyle.Flat
             };
-            _cmbStatus.Items.AddRange(new object[] { "نشط", "في إجازة", "مستقيل" });
+            _cmbStatus.Items.AddRange(new object[] { AppLang.T("Employees.Status.Active"), AppLang.T("Employees.Status.OnLeave"), AppLang.T("Employees.Status.Resigned") });
             _cmbStatus.SelectedIndex = 0;
             y += 64;
 
@@ -180,7 +180,7 @@ namespace Sayl.UI.Forms
             // تاريخ الاستقالة — يظهر فقط عند «مستقيل» (يقطع حساب الراتب الشهري عنده)
             var lblResign = new Label
             {
-                Text = "تاريخ الاستقالة",
+                Text = AppLang.T("EmployeeEdit.Label.ResignDate"),
                 Bounds = new Rectangle(300, y, 230, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -205,7 +205,7 @@ namespace Sayl.UI.Forms
             };
             y += 8; // الحقل مخفي عادة — لا يستهلك الصف الكامل
 
-            _txtAddress = MakeField("العنوان", ref y, out _);
+            _txtAddress = MakeField(AppLang.T("EmployeeEdit.Label.Address"), ref y, out _);
 
             // ── أزرار الحفظ والإغلاق (أسفل النافذة) ──
             // MakeButton(النص، لون الخلفية): زر موحّد المظهر من AppTheme.
@@ -215,11 +215,11 @@ namespace Sayl.UI.Forms
             //         هو الحد الأدنى المريح للمس (لا تصغّره).
             // Click += ...: ما يحدث عند الضغط — هنا استدعاء دالة الحفظ.
             // لتحريك الزرين: عدّل X الأول (190). عرض أكبر؟ عدّل 180.
-            _btnSave = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            _btnSave = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnSave.Bounds = new Rectangle(190, y + 16, 180, 48);
             _btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Bounds = new Rectangle(30, y + 16, 140, 48);
             btnClose.DialogResult = DialogResult.Cancel;
@@ -273,13 +273,13 @@ namespace Sayl.UI.Forms
             // تحديث نص الملصق وفق النوع — المرونة بلا رسائل حوارية
             foreach (Control c in Controls)
             {
-                if (c is Label l && (l.Text == "المعدل *" || l.Text.StartsWith("المعدل (")))
+                if (c is Label l && (l.Text == AppLang.T("EmployeeEdit.Label.Rate") || l.Text == AppLang.T("EmployeeEdit.Label.RateMonthly") || l.Text == AppLang.T("EmployeeEdit.Label.RateDaily") || l.Text == AppLang.T("EmployeeEdit.Label.RateHourly")))
                 {
                     l.Text = _cmbSalaryType.SelectedIndex switch
                     {
-                        1 => "المعدل (يومي)",
-                        2 => "المعدل (بالساعة)",
-                        _ => "المعدل (شهري)"
+                        1 => AppLang.T("EmployeeEdit.Label.RateDaily"),
+                        2 => AppLang.T("EmployeeEdit.Label.RateHourly"),
+                        _ => AppLang.T("EmployeeEdit.Label.RateMonthly")
                     };
                 }
             }
@@ -320,19 +320,19 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtName.Text))
             {
-                UiHelpers.ShowError(this, "الاسم مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.NameRequired"));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_txtPosition.Text))
             {
-                UiHelpers.ShowError(this, "المسمى الوظيفي مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("EmployeeEdit.Msg.PositionRequired"));
                 return;
             }
 
             if (!decimal.TryParse(_txtSalary.Text?.Trim(), out decimal salary) || salary < 0)
             {
-                UiHelpers.ShowError(this, "أدخل معدل راتب صحيحًا (صفر أو أكثر).");
+                UiHelpers.ShowError(this, AppLang.T("EmployeeEdit.Msg.RateInvalid"));
                 return;
             }
 
@@ -385,7 +385,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الاتصال بقاعدة البيانات.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.DbConnectionFailed"));
             }
             finally
             {

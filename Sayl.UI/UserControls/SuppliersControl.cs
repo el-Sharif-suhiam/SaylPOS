@@ -13,7 +13,7 @@ namespace Sayl.UI.UserControls
     {
         private List<Supplier> _suppliers = new();
 
-        protected override string Title => "الموردون";
+        protected override string Title => AppLang.T("Suppliers.Section.Title");
 
         // مفتاح «عرض المعطّلين» — الافتراضي: الموردون النشطون فقط
         protected override bool SupportsShowDeleted => true;
@@ -27,11 +27,11 @@ namespace Sayl.UI.UserControls
                 _suppliers = await supplierService.GetSupplierListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colName", "الاسم");
-                Grid.Columns.Add("colPhone", "الجوال");
-                Grid.Columns.Add("colCategory", "الفئة");
-                Grid.Columns.Add("colBalance", "الرصيد");
-                Grid.Columns.Add("colStatus", "الحالة");
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+                Grid.Columns.Add("colPhone", AppLang.T("Common.Label.Phone"));
+                Grid.Columns.Add("colCategory", AppLang.T("Suppliers.Label.Category"));
+                Grid.Columns.Add("colBalance", AppLang.T("Suppliers.Label.Balance"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
                 Grid.Columns["colName"].FillWeight = 30;
                 Grid.Columns["colPhone"].FillWeight = 20;
                 Grid.Columns["colCategory"].FillWeight = 15;
@@ -42,7 +42,7 @@ namespace Sayl.UI.UserControls
                 {
                     Name = "colDetails",
                     HeaderText = "",
-                    Text = "التفاصيل",
+                    Text = AppLang.T("Common.Button.Details"),
                     UseColumnTextForButtonValue = true,
                     FlatStyle = FlatStyle.Flat,
                     FillWeight = 8
@@ -54,11 +54,11 @@ namespace Sayl.UI.UserControls
                 Grid.Rows.Clear();
                 foreach (var s in _suppliers.Where(s => s.Party != null))
                     Grid.Rows.Add(s.Party!.Name, s.Party.Phone1 ?? "-", s.Category ?? "-",
-                        UiHelpers.Money(s.Balance ?? 0), s.Party.IsActive ? "نشط" : "معطل");
+                        UiHelpers.Money(s.Balance ?? 0), s.Party.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الموردين.");
+                UiHelpers.ShowError(this, AppLang.T("Suppliers.Msg.LoadFailed"));
             }
         }
 
@@ -68,18 +68,18 @@ namespace Sayl.UI.UserControls
         // («إعادة تفعيل» زر أدمن شرطي — إضافة داخل if كما في SettingsControl).
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة مورد", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);
+            AddToolbarButton(AppLang.T("Suppliers.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
-            AddToolbarButton("سداد رصيد", AppTheme.Success, Color.FromArgb(21, 128, 61), (_, _) => PaySupplierBalance(), 130);
+            AddToolbarButton(AppLang.T("Suppliers.Button.PayBalance"), AppTheme.Success, Color.FromArgb(21, 128, 61), (_, _) => PaySupplierBalance(), 130);
             AddToolbarGap();
-            AddToolbarButton("تعطيل", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
+            AddToolbarButton(AppLang.T("Suppliers.Button.Deactivate"), AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
 
             if (SessionState.Can(Common.Utils.AppPermissions.Suppliers))
             {
                 AddToolbarGap();
-                AddToolbarButton("إعادة تفعيل", AppTheme.Success, Color.FromArgb(21, 128, 61),
+                AddToolbarButton(AppLang.T("Suppliers.Button.Activate"), AppTheme.Success, Color.FromArgb(21, 128, 61),
                     async (_, _) => await ActivateAsync(), 130);
             }
 
@@ -93,7 +93,7 @@ namespace Sayl.UI.UserControls
             var visible = _suppliers.Where(s => s.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر موردًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suppliers.Msg.PickSupplier"));
                 return;
             }
 
@@ -101,7 +101,7 @@ namespace Sayl.UI.UserControls
             decimal balance = supplier.Balance ?? 0;
             if (balance <= 0)
             {
-                UiHelpers.ShowInfo(this, "لا يوجد رصيد مستحق على هذا المورد.");
+                UiHelpers.ShowInfo(this, AppLang.T("Suppliers.Msg.NoDueBalance"));
                 return;
             }
 
@@ -121,8 +121,8 @@ namespace Sayl.UI.UserControls
             var supplier = visible[e.RowIndex];
             var party = supplier.Party!;
             using var form = new PartyDetailsForm(party,
-                ("الرصيد الحالي", UiHelpers.Money(supplier.Balance ?? 0)),
-                ("الفئة", supplier.Category ?? "-"));
+                (AppLang.T("Suppliers.Details.Balance"), UiHelpers.Money(supplier.Balance ?? 0)),
+                (AppLang.T("Suppliers.Details.Category"), supplier.Category ?? "-"));
             form.ShowDialog(FindForm());
         }
 
@@ -132,19 +132,19 @@ namespace Sayl.UI.UserControls
             var visible = _suppliers.Where(s => s.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر موردًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suppliers.Msg.PickSupplier"));
                 return;
             }
 
             var party = visible[idx].Party!;
             if (party.IsActive)
             {
-                UiHelpers.ShowInfo(this, $"المورد '{party.Name}' نشط بالفعل.");
+                UiHelpers.ShowInfo(this, AppLang.T("Suppliers.Msg.AlreadyActive", party.Name));
                 return;
             }
 
-            if (!ConfirmationDialog.Show(this, "إعادة تفعيل مورد",
-                    $"سيتم إعادة تفعيل المورد '{party.Name}'. هل أنت متأكد؟", dangerStyle: false))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Suppliers.Title.Activate"),
+                    AppLang.T("Suppliers.Msg.ActivateConfirm", party.Name), dangerStyle: false))
                 return;
 
             Common.Results.Result result;
@@ -165,7 +165,7 @@ namespace Sayl.UI.UserControls
             var visible = _suppliers.Where(s => s.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر موردًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suppliers.Msg.PickSupplier"));
                 return;
             }
             EditParty(visible[idx].Party);
@@ -202,12 +202,12 @@ namespace Sayl.UI.UserControls
             var visible = _suppliers.Where(s => s.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر موردًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Suppliers.Msg.PickSupplier"));
                 return;
             }
 
             var party = visible[idx].Party!;
-            if (!ConfirmationDialog.Show(this, "تعطيل مورد", $"سيتم تعطيل المورد '{party.Name}'. هل أنت متأكد؟"))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Suppliers.Title.Deactivate"), AppLang.T("Suppliers.Msg.DeactivateConfirm", party.Name)))
                 return;
 
             Common.Results.Result result;

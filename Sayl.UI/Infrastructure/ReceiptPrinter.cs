@@ -98,11 +98,11 @@ namespace Sayl.UI.Infrastructure
         {
             try
             {
-                string storeName = "سيل", storePhone = "", vatNumber = "", footer = "";
+                string storeName = AppLang.T("Common.Default.Store"), storePhone = "", vatNumber = "", footer = "";
                 using (var scope = Program.Services.CreateScope())
                 {
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("Common.Default.Store"));
                     storePhone = await settings.GetAsync(clsSettingsService.KeyStorePhone);
                     vatNumber = await settings.GetAsync(clsSettingsService.KeyVatNumber);
                     footer = await settings.GetAsync(clsSettingsService.KeyReceiptFooter);

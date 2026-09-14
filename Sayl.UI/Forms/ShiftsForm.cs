@@ -27,7 +27,7 @@ namespace Sayl.UI.Forms
 
         private void BuildUi()
         {
-            Text = "الشفتات والإجازات الرسمية";
+            Text = AppLang.T("Shifts.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(860, 620);
             BackColor = AppTheme.CardBg;
@@ -50,7 +50,7 @@ namespace Sayl.UI.Forms
             _tabs = new TabControl { Dock = DockStyle.Fill };
 
             // ── تبويب الشفتات ──
-            var tabShifts = new TabPage("الشفتات") { BackColor = AppTheme.CardBg };
+            var tabShifts = new TabPage(AppLang.T("Shifts.Tab.Shifts")) { BackColor = AppTheme.CardBg };
 
             var barShifts = new FlowLayoutPanel
             {
@@ -60,24 +60,24 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg,
                 Padding = new Padding(8, 4, 8, 4)
             };
-            _btnAddShift = AppTheme.MakeButton("إضافة شفت", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
+            _btnAddShift = AppTheme.MakeButton(AppLang.T("Shifts.Button.AddShift"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
             _btnAddShift.Click += (_, _) => AddShift();
-            _btnDeleteShift = AppTheme.MakeButton("حذف المحدد", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
+            _btnDeleteShift = AppTheme.MakeButton(AppLang.T("Shifts.Button.DeleteSelected"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
             _btnDeleteShift.Click += async (_, _) => await DeleteShiftAsync();
             barShifts.Controls.Add(_btnAddShift);
             barShifts.Controls.Add(_btnDeleteShift);
 
             _gridShifts = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridShifts);
-            _gridShifts.Columns.Add("colName", "الاسم");
-            _gridShifts.Columns.Add("colStart", "من");
-            _gridShifts.Columns.Add("colEnd", "إلى");
+            _gridShifts.Columns.Add("colName", AppLang.T("Shifts.Col.Name"));
+            _gridShifts.Columns.Add("colStart", AppLang.T("Shifts.Col.From"));
+            _gridShifts.Columns.Add("colEnd", AppLang.T("Shifts.Col.To"));
             // VULN-37: العنوان كان «يعبر منتصف الليل» موحيًا بأن الرواتب تعالج
             // العبور — القرار المعماري الموثق: الشفتات بيانات تنظيمية فقط
             // (الرواتب تحسب أيام العمل/الإجازات لا الساعات) — فسمّينا العمود
             // بما هو فعلًا: «شفت ليلي» معلومة عرض لا وعد حساب.
-            _gridShifts.Columns.Add("colNight", "شفت ليلي");
-            _gridShifts.Columns.Add("colNotes", "ملاحظات");
+            _gridShifts.Columns.Add("colNight", AppLang.T("Shifts.Col.Night"));
+            _gridShifts.Columns.Add("colNotes", AppLang.T("Shifts.Col.Notes"));
             _gridShifts.Columns["colName"].FillWeight = 24;
             _gridShifts.Columns["colStart"].FillWeight = 14;
             _gridShifts.Columns["colEnd"].FillWeight = 14;
@@ -88,7 +88,7 @@ namespace Sayl.UI.Forms
             tabShifts.Controls.Add(barShifts);
 
             // ── تبويب الإجازات ──
-            var tabHolidays = new TabPage("الإجازات الرسمية") { BackColor = AppTheme.CardBg };
+            var tabHolidays = new TabPage(AppLang.T("Shifts.Tab.Holidays")) { BackColor = AppTheme.CardBg };
 
             var barHolidays = new FlowLayoutPanel
             {
@@ -98,19 +98,19 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg,
                 Padding = new Padding(8, 4, 8, 4)
             };
-            _btnAddHoliday = AppTheme.MakeButton("إضافة إجازة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
+            _btnAddHoliday = AppTheme.MakeButton(AppLang.T("Shifts.Button.AddHoliday"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
             _btnAddHoliday.Click += (_, _) => AddHoliday();
-            _btnDeleteHoliday = AppTheme.MakeButton("حذف المحدد", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
+            _btnDeleteHoliday = AppTheme.MakeButton(AppLang.T("Shifts.Button.DeleteSelected"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
             _btnDeleteHoliday.Click += async (_, _) => await DeleteHolidayAsync();
             barHolidays.Controls.Add(_btnAddHoliday);
             barHolidays.Controls.Add(_btnDeleteHoliday);
 
             _gridHolidays = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridHolidays);
-            _gridHolidays.Columns.Add("colName", "الاسم");
-            _gridHolidays.Columns.Add("colDate", "التاريخ");
-            _gridHolidays.Columns.Add("colDays", "المدة (أيام)");
-            _gridHolidays.Columns.Add("colAnnual", "سنوية متكررة");
+            _gridHolidays.Columns.Add("colName", AppLang.T("Shifts.Col.Name"));
+            _gridHolidays.Columns.Add("colDate", AppLang.T("Shifts.Col.Date"));
+            _gridHolidays.Columns.Add("colDays", AppLang.T("Shifts.Col.Duration"));
+            _gridHolidays.Columns.Add("colAnnual", AppLang.T("Shifts.Col.Annual"));
             _gridHolidays.Columns["colName"].FillWeight = 40;
             _gridHolidays.Columns["colDate"].FillWeight = 22;
             _gridHolidays.Columns["colDays"].FillWeight = 18;
@@ -120,7 +120,7 @@ namespace Sayl.UI.Forms
             tabHolidays.Controls.Add(barHolidays);
 
             // ── تبويب التعيينات الحالية ──
-            var tabAssign = new TabPage("تعيينات الموظفين") { BackColor = AppTheme.CardBg };
+            var tabAssign = new TabPage(AppLang.T("Shifts.Tab.Assignments")) { BackColor = AppTheme.CardBg };
 
             var barAssign = new FlowLayoutPanel
             {
@@ -130,16 +130,16 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg,
                 Padding = new Padding(8, 4, 8, 4)
             };
-            _btnEndAssignment = AppTheme.MakeButton("إنهاء تعيين المحدد", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
+            _btnEndAssignment = AppTheme.MakeButton(AppLang.T("Shifts.Button.EndAssignment"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 44);
             _btnEndAssignment.Click += async (_, _) => await EndAssignmentAsync();
             barAssign.Controls.Add(_btnEndAssignment);
 
             _gridAssignments = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridAssignments);
-            _gridAssignments.Columns.Add("colEmp", "الموظف");
-            _gridAssignments.Columns.Add("colShift", "الشفت");
-            _gridAssignments.Columns.Add("colDays", "أيام العمل");
-            _gridAssignments.Columns.Add("colFrom", "من تاريخ");
+            _gridAssignments.Columns.Add("colEmp", AppLang.T("Shifts.Col.Employee"));
+            _gridAssignments.Columns.Add("colShift", AppLang.T("Shifts.Col.Shift"));
+            _gridAssignments.Columns.Add("colDays", AppLang.T("Shifts.Col.Days"));
+            _gridAssignments.Columns.Add("colFrom", AppLang.T("Shifts.Col.FromDate"));
             _gridAssignments.Columns["colEmp"].FillWeight = 28;
             _gridAssignments.Columns["colShift"].FillWeight = 24;
             _gridAssignments.Columns["colDays"].FillWeight = 28;
@@ -175,7 +175,7 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(12, 10, 12, 10)
             };
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Dock = DockStyle.Left;
             btnClose.Width = 140;
@@ -191,7 +191,12 @@ namespace Sayl.UI.Forms
             Controls.Add(root);
         }
 
-        private static readonly string[] DayNames = { "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت" };
+        private static readonly string[] DayNames =
+        {
+            AppLang.T("Shifts.Day.Short0"), AppLang.T("Shifts.Day.Short1"), AppLang.T("Shifts.Day.Short2"),
+            AppLang.T("Shifts.Day.Short3"), AppLang.T("Shifts.Day.Short4"), AppLang.T("Shifts.Day.Short5"),
+            AppLang.T("Shifts.Day.Short6")
+        };
 
         private static string DaysText(byte bits)
         {
@@ -199,7 +204,7 @@ namespace Sayl.UI.Forms
             for (int i = 0; i < 7; i++)
                 if ((bits & (1 << i)) != 0)
                     names.Add(DayNames[i]);
-            return names.Count == 7 ? "كل الأيام" : string.Join("، ", names);
+            return names.Count == 7 ? AppLang.T("Shifts.Days.All") : string.Join(AppLang.IsEnglish ? ", " : "، ", names);
         }
 
         private async Task LoadAllAsync()
@@ -213,13 +218,13 @@ namespace Sayl.UI.Forms
                 _gridShifts.Rows.Clear();
                 foreach (var s in shifts)
                     _gridShifts.Rows.Add(s.Name, s.StartTime.ToString("HH:mm"), s.EndTime.ToString("HH:mm"),
-                        s.CrossesMidnight ? "نعم" : "", s.Notes ?? "");
+                        s.CrossesMidnight ? AppLang.T("Common.Label.Yes") : "", s.Notes ?? "");
 
                 var holidays = await shiftService.GetHolidaysAsync(AppClock.Today.Year);
                 _gridHolidays.Rows.Clear();
                 foreach (var h in holidays)
                     _gridHolidays.Rows.Add(h.Name, h.HolidayDate.ToString("yyyy-MM-dd"),
-                        h.DurationDays, h.IsAnnual ? "نعم" : "");
+                        h.DurationDays, h.IsAnnual ? AppLang.T("Common.Label.Yes") : "");
 
                 var assignments = await shiftService.GetEmployeeShiftsAsync();
                 _gridAssignments.Rows.Clear();
@@ -229,7 +234,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل البيانات.");
+                UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.LoadFailed"));
             }
         }
 
@@ -244,7 +249,7 @@ namespace Sayl.UI.Forms
         private async Task DeleteShiftAsync()
         {
             int idx = _gridShifts.CurrentRow?.Index ?? -1;
-            if (idx < 0) { UiHelpers.ShowError(this, "اختر شفتًا."); return; }
+            if (idx < 0) { UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.PickShift")); return; }
 
             try
             {
@@ -258,7 +263,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الحذف.");
+                UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.DeleteFailed"));
             }
         }
 
@@ -272,7 +277,7 @@ namespace Sayl.UI.Forms
         private async Task DeleteHolidayAsync()
         {
             int idx = _gridHolidays.CurrentRow?.Index ?? -1;
-            if (idx < 0) { UiHelpers.ShowError(this, "اختر إجازة."); return; }
+            if (idx < 0) { UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.PickHoliday")); return; }
 
             try
             {
@@ -286,17 +291,17 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الحذف.");
+                UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.DeleteFailed"));
             }
         }
 
         private async Task EndAssignmentAsync()
         {
             int idx = _gridAssignments.CurrentRow?.Index ?? -1;
-            if (idx < 0) { UiHelpers.ShowError(this, "اختر تعيينًا."); return; }
+            if (idx < 0) { UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.PickAssignment")); return; }
 
-            if (!ConfirmationDialog.Show(this, "إنهاء تعيين",
-                    "سيتم إنهاء تعيين الشفت لهذا الموظف. متابعة؟"))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Shifts.EndAssign.Title"),
+                    AppLang.T("Shifts.EndAssign.Confirm")))
                 return;
 
             try
@@ -311,7 +316,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر إنهاء التعيين.");
+                UiHelpers.ShowError(this, AppLang.T("Shifts.EndAssign.Failed"));
             }
         }
     }
@@ -326,7 +331,7 @@ namespace Sayl.UI.Forms
 
         public ShiftEditForm()
         {
-            Text = "إضافة شفت";
+            Text = AppLang.T("ShiftEdit.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 340);
             BackColor = AppTheme.CardBg;
@@ -334,11 +339,11 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblName = new Label { Text = "اسم الشفت *", Bounds = new Rectangle(30, 20, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblName = new Label { Text = AppLang.T("ShiftEdit.Label.Name"), Bounds = new Rectangle(30, 20, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtName = new TextBox { Bounds = new Rectangle(30, 46, 380, 34) };
 
-            var lblStart = new Label { Text = "من الساعة *", Bounds = new Rectangle(235, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            var lblEnd = new Label { Text = "إلى الساعة *", Bounds = new Rectangle(30, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblStart = new Label { Text = AppLang.T("ShiftEdit.Label.Start"), Bounds = new Rectangle(235, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblEnd = new Label { Text = AppLang.T("ShiftEdit.Label.End"), Bounds = new Rectangle(30, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
 
             _dtpStart = new DateTimePicker { Bounds = new Rectangle(235, 116, 175, 34), Format = DateTimePickerFormat.Time, ShowUpDown = true, RightToLeftLayout = false };
             _dtpEnd = new DateTimePicker { Bounds = new Rectangle(30, 116, 175, 34), Format = DateTimePickerFormat.Time, ShowUpDown = true, RightToLeftLayout = false };
@@ -347,21 +352,21 @@ namespace Sayl.UI.Forms
 
             var lblHint = new Label
             {
-                Text = "الشفت الليلي (مثل 22:00 → 06:00): اجعل وقت النهاية أقدم من البداية",
+                Text = AppLang.T("ShiftEdit.NightHint"),
                 Bounds = new Rectangle(30, 158, 380, 24),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted,
                 Font = new Font("Segoe UI", 8.5F)
             };
 
-            var lblNotes = new Label { Text = "ملاحظات", Bounds = new Rectangle(30, 188, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblNotes = new Label { Text = AppLang.T("ShiftEdit.Label.Notes"), Bounds = new Rectangle(30, 188, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtNotes = new TextBox { Bounds = new Rectangle(30, 214, 380, 34) };
 
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(240, 266, 170, 48);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(30, 266, 170, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -373,7 +378,7 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtName.Text))
             {
-                UiHelpers.ShowError(this, "اسم الشفت مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("ShiftEdit.Msg.NameRequired"));
                 return;
             }
 
@@ -403,7 +408,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر حفظ الشفت.");
+                UiHelpers.ShowError(this, AppLang.T("ShiftEdit.Msg.SaveFailed"));
             }
         }
     }
@@ -418,7 +423,7 @@ namespace Sayl.UI.Forms
 
         public HolidayEditForm()
         {
-            Text = "إضافة إجازة رسمية";
+            Text = AppLang.T("HolidayEdit.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 320);
             BackColor = AppTheme.CardBg;
@@ -426,27 +431,27 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblName = new Label { Text = "اسم الإجازة *", Bounds = new Rectangle(30, 20, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblName = new Label { Text = AppLang.T("HolidayEdit.Label.Name"), Bounds = new Rectangle(30, 20, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtName = new TextBox { Bounds = new Rectangle(30, 46, 380, 34) };
 
-            var lblDate = new Label { Text = "التاريخ *", Bounds = new Rectangle(235, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            var lblDays = new Label { Text = "المدة (أيام) *", Bounds = new Rectangle(30, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblDate = new Label { Text = AppLang.T("HolidayEdit.Label.Date"), Bounds = new Rectangle(235, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblDays = new Label { Text = AppLang.T("HolidayEdit.Label.Days"), Bounds = new Rectangle(30, 90, 175, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
 
             _dtpDate = new DateTimePicker { Bounds = new Rectangle(235, 116, 175, 34), Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd", RightToLeftLayout = false };
             _numDays = new NumericUpDown { Bounds = new Rectangle(30, 116, 175, 34), Minimum = 1, Maximum = 30, Value = 1 };
 
             _chkAnnual = new CheckBox
             {
-                Text = "إجازة سنوية متكررة (تتكرر كل عام بنفس اليوم)",
+                Text = AppLang.T("HolidayEdit.Label.Annual"),
                 Bounds = new Rectangle(30, 166, 380, 30),
                 ForeColor = AppTheme.TextPrimary
             };
 
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(240, 246, 170, 48);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(30, 246, 170, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -458,7 +463,7 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtName.Text))
             {
-                UiHelpers.ShowError(this, "اسم الإجازة مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("HolidayEdit.Msg.NameRequired"));
                 return;
             }
 
@@ -488,7 +493,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر حفظ الإجازة.");
+                UiHelpers.ShowError(this, AppLang.T("HolidayEdit.Msg.SaveFailed"));
             }
         }
     }

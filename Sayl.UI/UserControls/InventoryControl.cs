@@ -12,7 +12,7 @@ namespace Sayl.UI.UserControls
         private List<InventoryStatusVM> _items = new();
         private CheckBox _chkLowOnly = null!;
 
-        protected override string Title => "المخزون";
+        protected override string Title => AppLang.T("Inventory.Section.Title");
         protected override bool HasSearch => false;
 
         protected override async Task LoadDataAsync()
@@ -30,13 +30,13 @@ namespace Sayl.UI.UserControls
 
                 _items = result.Data;
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colName", "المنتج");
-                Grid.Columns.Add("colUnit", "الوحدة");
-                Grid.Columns.Add("colAvailable", "المتاح");
-                Grid.Columns.Add("colReserved", "محجوز");
-                Grid.Columns.Add("colReorder", "حد الطلب");
-                Grid.Columns.Add("colStatus", "الحالة");
-                Grid.Columns.Add("colCounted", "آخر جرد");
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Product"));
+                Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
+                Grid.Columns.Add("colAvailable", AppLang.T("Inventory.Label.Available"));
+                Grid.Columns.Add("colReserved", AppLang.T("Inventory.Label.Reserved"));
+                Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+                Grid.Columns.Add("colCounted", AppLang.T("Inventory.Label.LastCount"));
                 Grid.Columns["colName"].FillWeight = 34;
                 Grid.Columns["colUnit"].FillWeight = 10;
                 Grid.Columns["colAvailable"].FillWeight = 12;
@@ -48,12 +48,12 @@ namespace Sayl.UI.UserControls
                 Grid.Rows.Clear();
                 foreach (var i in _items)
                     Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.QuantityReserved,
-                        i.ReorderLevel, i.IsLowStock ? "منخفض" : "جيد",
+                        i.ReorderLevel, i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"),
                         i.LastCountedAt?.ToString("yyyy-MM-dd") ?? "-");
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل حالة المخزون.");
+                UiHelpers.ShowError(this, AppLang.T("Inventory.Msg.LoadFailed"));
             }
         }
 
@@ -65,7 +65,7 @@ namespace Sayl.UI.UserControls
         {
             _chkLowOnly = new CheckBox
             {
-                Text = "المنخفض فقط",
+                Text = AppLang.T("Inventory.OnlyLow"),
                 Dock = DockStyle.Right,
                 Width = 130,
                 TextAlign = ContentAlignment.MiddleRight,
@@ -75,13 +75,13 @@ namespace Sayl.UI.UserControls
             _toolbar.Controls.Add(_chkLowOnly);
             _chkLowOnly.BringToFront();
 
-            AddToolbarButton("تسوية مخزون", AppTheme.Warning, Color.FromArgb(180, 83, 9), (_, _) => AdjustStock(), 150);
+            AddToolbarButton(AppLang.T("Inventory.Button.Adjust"), AppTheme.Warning, Color.FromArgb(180, 83, 9), (_, _) => AdjustStock(), 150);
             AddToolbarGap();
 
             // الجرد الفعلي: أصحاب شاشة المخزون — ركن الإغلاق السنوي
             if (SessionState.Can(Common.Utils.AppPermissions.Inventory))
             {
-                AddToolbarButton("جرد فعلي", AppTheme.Primary, AppTheme.PrimaryDark,
+                AddToolbarButton(AppLang.T("Inventory.Button.StockCount"), AppTheme.Primary, AppTheme.PrimaryDark,
                     (_, _) =>
                     {
                         using var form = new StockCountForm();
@@ -91,7 +91,7 @@ namespace Sayl.UI.UserControls
                 AddToolbarGap();
             }
 
-            AddToolbarButton("تحديث", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
+            AddToolbarButton(AppLang.T("Inventory.Button.Refresh"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => _ = LoadDataAsync(), 110);
             AddToolbarGap();
         }
 

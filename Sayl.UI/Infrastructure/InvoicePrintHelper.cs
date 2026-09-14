@@ -34,7 +34,7 @@ namespace Sayl.UI.Infrastructure
         public static async Task PrintAsync(int invoiceId, IWin32Window? owner, InvoicePrintFormat format)
         {
             InvoicePrintVM? invoice = null;
-            string storeName = "سيل";
+            string storeName = AppLang.T("Common.Default.Store");
             string storePhone = "";
             string vatNumber = "";
             string? receiptFooter = null;
@@ -49,7 +49,7 @@ namespace Sayl.UI.Infrastructure
                         invoice = result.Data;
 
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("Common.Default.Store"));
                     storePhone = await settings.GetAsync(clsSettingsService.KeyStorePhone, "");
                     vatNumber = await settings.GetAsync(clsSettingsService.KeyVatNumber, "");
                     receiptFooter = await settings.GetAsync(clsSettingsService.KeyReceiptFooter, "");

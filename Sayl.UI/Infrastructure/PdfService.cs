@@ -68,8 +68,8 @@ namespace Sayl.UI.Infrastructure
                             // الكتلة اليسرى: التاريخ والشعار — ثابتة العرض ومحاذاة لليسار
                             r.ConstantItem(190).AlignLeft().Column(c2 =>
                             {
-                                c2.Item().PaddingLeft(10).Text("سيل POS").FontSize(9.5f).Bold().FontColor(Sky);
-                                c2.Item().PaddingLeft(10).Text($"من {report.FromDate:yyyy-MM-dd} إلى {report.ToDate:yyyy-MM-dd}")
+                                c2.Item().PaddingLeft(10).Text(AppLang.T("Pdf.Brand")).FontSize(9.5f).Bold().FontColor(Sky);
+                                c2.Item().PaddingLeft(10).Text(AppLang.T("Pdf.FromTo", report.FromDate, report.ToDate))
                                     .FontSize(8.5f).FontColor(MutedGrey);
                             });
 
@@ -77,7 +77,7 @@ namespace Sayl.UI.Infrastructure
                             r.RelativeItem().AlignRight().Column(c2 =>
                             {
                                 c2.Item().PaddingRight(10).AlignRight().Text(storeName).FontSize(19).Bold().FontColor("#FFFFFF");
-                                c2.Item().PaddingRight(10).AlignRight().Text($"التقرير الدوري — {report.ReportTypeName}")
+                                c2.Item().PaddingRight(10).AlignRight().Text(AppLang.T("Pdf.PeriodicType", report.ReportTypeName))
                                     .FontSize(9.5f).FontColor(Sky);
                             });
                         });
@@ -99,13 +99,13 @@ namespace Sayl.UI.Infrastructure
                                 });
                             }
 
-                            Card(r.RelativeItem(), "صافي الإيراد", report.TotalNetRevenue, gap: true);
-                            Card(r.RelativeItem(), "الربح الإجمالي", report.TotalGrossProfit, gap: true);
-                            Card(r.RelativeItem(), "المصروفات التشغيلية", report.TotalExpenses, gap: true);
-                            Card(r.RelativeItem(), "صافي الربح", report.TotalNetProfit, gap: false);
+                            Card(r.RelativeItem(), AppLang.T("Pdf.Kpi.NetRevenue"), report.TotalNetRevenue, gap: true);
+                            Card(r.RelativeItem(), AppLang.T("Pdf.Kpi.GrossProfit"), report.TotalGrossProfit, gap: true);
+                            Card(r.RelativeItem(), AppLang.T("Pdf.Kpi.Expenses"), report.TotalExpenses, gap: true);
+                            Card(r.RelativeItem(), AppLang.T("Pdf.Kpi.NetProfit"), report.TotalNetProfit, gap: false);
                         });
 
-                        col.Item().PaddingTop(12).Element(SectionTitle).Text("تفصيل الفترات");
+                        col.Item().PaddingTop(12).Element(SectionTitle).Text(AppLang.T("Pdf.PeriodsDetail"));
 
                         col.Item().Table(table =>
                         {
@@ -126,8 +126,8 @@ namespace Sayl.UI.Infrastructure
                             {
                                 foreach (var head in new[]
                                 {
-                                    "الفترة", "الفواتير", "الإيراد", "المرتجعات", "صافي الإيراد",
-                                    "COGS صافٍ", "الربح الإجمالي", "المصروفات", "صافي الربح"
+                                    AppLang.T("Pdf.Col.Period"), AppLang.T("Pdf.Col.Invoices"), AppLang.T("Pdf.Col.Sales"), AppLang.T("Pdf.Col.Returns"), AppLang.T("Pdf.Col.Net"),
+                                    AppLang.T("Pdf.Col.Cogs"), AppLang.T("Pdf.Col.GrossProfit"), AppLang.T("Pdf.Col.Expenses"), AppLang.T("Pdf.Col.NetProfit")
                                 })
                                     h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(8.2f);
                             });
@@ -144,14 +144,14 @@ namespace Sayl.UI.Infrastructure
                             }
 
                             TotalRow(table,
-                                "الإجمالي", report.Periods.Sum(p => p.InvoiceCount).ToString(),
+                                AppLang.T("Pdf.Table.Total"), report.Periods.Sum(p => p.InvoiceCount).ToString(),
                                 Money(report.TotalSales), Money(report.TotalReturns), Money(report.TotalNetRevenue),
                                 Money(report.TotalCogsNet), Money(report.TotalGrossProfit), Money(report.TotalExpenses),
                                 Money(report.TotalNetProfit));
                         });
 
                         // ══ سُلّم شرح حساب الربح (خطوة بخطوة) ══
-                        col.Item().PaddingTop(12).Element(SectionTitle).Text("شرح حساب الربح (خطوة بخطوة)");
+                        col.Item().PaddingTop(12).Element(SectionTitle).Text(AppLang.T("Pdf.Ladder.Title"));
                         col.Item().Table(table =>
                         {
                             table.ColumnsDefinition(c =>
@@ -161,8 +161,8 @@ namespace Sayl.UI.Infrastructure
                             });
                             table.Header(h =>
                             {
-                                h.Cell().Element(HeaderCell).AlignRight().Text("البند");
-                                h.Cell().Element(HeaderCell).AlignLeft().Text("القيمة");
+                                h.Cell().Element(HeaderCell).AlignRight().Text(AppLang.T("Common.Report.Item"));
+                                h.Cell().Element(HeaderCell).AlignLeft().Text(AppLang.T("Common.Report.Value"));
                             });
 
                             void Ladder(string label, string value, bool result)
@@ -173,19 +173,19 @@ namespace Sayl.UI.Infrastructure
                                     .AlignLeft().Text(value).FontSize(9.5f);
                             }
 
-                            Ladder("1) الإيراد الإجمالي (المبيعات)", Money(report.TotalSales), result: false);
-                            Ladder("− المرتجعات والمخصومات", "-" + Money(report.TotalReturns), result: false);
-                            Ladder("= صافي الإيراد", Money(report.TotalNetRevenue), result: true);
-                            Ladder("− تكلفة البضاعة المباعة (COGS صافٍ)", "-" + Money(report.TotalCogsNet), result: false);
-                            Ladder("= الربح الإجمالي (بعد المخصومات فقط)", Money(report.TotalGrossProfit), result: true);
-                            Ladder("− المصروفات التشغيلية", "-" + Money(report.TotalExpenses), result: false);
-                            Ladder("= صافي هامش الربح", Money(report.TotalNetProfit), result: true);
+                            Ladder(AppLang.T("Pdf.Ladder.Sales"), Money(report.TotalSales), result: false);
+                            Ladder(AppLang.T("Pdf.Ladder.Returns"), "-" + Money(report.TotalReturns), result: false);
+                            Ladder(AppLang.T("Pdf.Ladder.Net"), Money(report.TotalNetRevenue), result: true);
+                            Ladder(AppLang.T("Pdf.Ladder.Cogs"), "-" + Money(report.TotalCogsNet), result: false);
+                            Ladder(AppLang.T("Pdf.Ladder.Gross"), Money(report.TotalGrossProfit), result: true);
+                            Ladder(AppLang.T("Pdf.Ladder.Expenses"), "-" + Money(report.TotalExpenses), result: false);
+                            Ladder(AppLang.T("Pdf.Ladder.NetProfit"), Money(report.TotalNetProfit), result: true);
                         });
 
                         // ══ الإيرادات اليومية (تجمع الفواتير بدل سرد كل فاتورة) ══
                         if (report.DailyLines.Count > 0)
                         {
-                            col.Item().PaddingTop(12).Element(SectionTitle).Text("الإيرادات اليومية");
+                            col.Item().PaddingTop(12).Element(SectionTitle).Text(AppLang.T("Pdf.Daily.Title"));
 
                             col.Item().Table(table =>
                             {
@@ -202,7 +202,7 @@ namespace Sayl.UI.Infrastructure
                                 table.Header(h =>
                                 {
                                     foreach (var head in new[]
-                                        { "اليوم", "الفواتير", "إجمالي البيع", "المرتجعات", "صافي الإيراد", "COGS صافٍ", "الربح الإجمالي" })
+                                        { AppLang.T("Pdf.Daily.ColDay"), AppLang.T("Pdf.Daily.ColInvoices"), AppLang.T("Pdf.Daily.ColGross"), AppLang.T("Pdf.Daily.ColReturns"), AppLang.T("Pdf.Daily.ColNet"), AppLang.T("Pdf.Daily.ColCogs"), AppLang.T("Pdf.Daily.ColGrossProfit") })
                                         h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(8.2f);
                                 });
 
@@ -218,7 +218,7 @@ namespace Sayl.UI.Infrastructure
                                 }
 
                                 TotalRow(table,
-                                    "الإجمالي", report.DailyLines.Sum(x => x.InvoiceCount).ToString(),
+                                    AppLang.T("Pdf.Table.Total"), report.DailyLines.Sum(x => x.InvoiceCount).ToString(),
                                     Money(report.DailyLines.Sum(x => x.GrossSales)),
                                     Money(report.DailyLines.Sum(x => x.ReturnsAmount)),
                                     Money(report.DailyLines.Sum(x => x.NetSales)),
@@ -232,7 +232,7 @@ namespace Sayl.UI.Infrastructure
                         // ══ ملخص الجلسات المكتملة (نظير تقرير Z) ══
                         if (report.SessionLines.Count > 0)
                         {
-                            col.Item().PaddingTop(12).Element(SectionTitle).Text("ملخص الجلسات المكتملة (Z)");
+                            col.Item().PaddingTop(12).Element(SectionTitle).Text(AppLang.T("Pdf.Sessions.Title"));
 
                             col.Item().Table(table =>
                             {
@@ -245,8 +245,8 @@ namespace Sayl.UI.Infrastructure
                                 {
                                     foreach (var head in new[]
                                     {
-                                        "الجلسة", "الكاشير", "الافتتاحي", "مبيعات نقدي", "مرتجعات نقدي",
-                                        "قبض نقد", "صرف نقد", "النقد المتوقع", "صافي المبيعات", "الإغلاق"
+                                        AppLang.T("Pdf.Session.Session"), AppLang.T("Pdf.Session.Cashier"), AppLang.T("Pdf.Session.Opening"), AppLang.T("Pdf.Session.CashSales"), AppLang.T("Pdf.Session.CashReturns"),
+                                        AppLang.T("Pdf.Session.CashIn"), AppLang.T("Pdf.Session.CashOut"), AppLang.T("Pdf.Session.Expected"), AppLang.T("Pdf.Session.NetSales"), AppLang.T("Pdf.Session.ClosedAt")
                                     })
                                         h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(7.6f);
                                 });
@@ -271,10 +271,10 @@ namespace Sayl.UI.Infrastructure
                             .Padding(10).Row(r =>
                             {
                                 r.RelativeItem().AlignRight()
-                                    .Text($"صافي الإيراد: {Money(report.TotalNetRevenue)}  —  المحصل: {Money(report.TotalCollected)}")
+                                    .Text(AppLang.T("Pdf.Footer.NetRevenue", Money(report.TotalNetRevenue), Money(report.TotalCollected)))
                                     .FontSize(11).Bold().FontColor(Navy);
                                 r.ConstantItem(200).AlignLeft()
-                                    .Text($"غير المحصل: {Money(report.TotalOutstanding)}")
+                                    .Text(AppLang.T("Pdf.Footer.Outstanding", Money(report.TotalOutstanding)))
                                     .FontSize(11).Bold().FontColor("#B91C1C");
                             });
                     });
@@ -285,10 +285,10 @@ namespace Sayl.UI.Infrastructure
                         col.Item().PaddingBottom(3).LineHorizontal(0.5f).LineColor("#CBD5E1");
                         col.Item().AlignCenter().Text(t =>
                         {
-                            t.Span("سيل POS — نظام نقاط البيع").FontSize(8.5f).FontColor(MutedGrey);
-                            t.Span("    |    صفحة ").FontSize(8.5f).FontColor(MutedGrey);
+                            t.Span(AppLang.T("Pdf.Footer.Identity")).FontSize(8.5f).FontColor(MutedGrey);
+                            t.Span(AppLang.T("Pdf.Footer.Page")).FontSize(8.5f).FontColor(MutedGrey);
                             t.CurrentPageNumber().FontSize(8.5f).FontColor(MutedGrey);
-                            t.Span(" من ").FontSize(8.5f).FontColor(MutedGrey);
+                            t.Span(AppLang.T("Pdf.Footer.Of")).FontSize(8.5f).FontColor(MutedGrey);
                             t.TotalPages().FontSize(8.5f).FontColor(MutedGrey);
                         });
                     });
@@ -315,8 +315,8 @@ namespace Sayl.UI.Infrastructure
 
             string typeLabel = TranslateType(inv.Type);
             bool isSupplierSide = inv.Type is "purchase" or "supplier_return";
-            string partyLabel = isSupplierSide ? "المورد" : "العميل";
-            string partyName = inv.PartyName ?? (isSupplierSide ? "-" : "عميل نقدي");
+            string partyLabel = isSupplierSide ? AppLang.T("Pdf.A4.SupplierWord") : AppLang.T("Common.Label.Customer");
+            string partyName = inv.PartyName ?? (isSupplierSide ? "-" : AppLang.T("Common.Party.WalkIn"));
 
             var document = QuestPDF.Fluent.Document.Create(container =>
             {
@@ -338,14 +338,14 @@ namespace Sayl.UI.Infrastructure
                             {
                                 c2.Item().Text(storeName).FontSize(22).Bold().FontColor("#FFFFFF");
                                 if (!string.IsNullOrWhiteSpace(storePhone))
-                                    c2.Item().PaddingTop(4).Text($"هاتف: {storePhone}").FontSize(10f).FontColor(Sky);
+                                    c2.Item().PaddingTop(4).Text(AppLang.T("Pdf.Phone", storePhone)).FontSize(10f).FontColor(Sky);
                                 if (!string.IsNullOrWhiteSpace(vatNumber))
-                                    c2.Item().PaddingTop(2).Text($"الرقم الضريبي: {vatNumber}").FontSize(10f).FontColor(Sky);
+                                    c2.Item().PaddingTop(2).Text(AppLang.T("Pdf.Vat", vatNumber)).FontSize(10f).FontColor(Sky);
                             });
                             r.ConstantItem(240).AlignLeft().Column(c2 =>
                             {
                                 c2.Item().Text(typeLabel).FontSize(18).Bold().FontColor("#FFFFFF");
-                                c2.Item().PaddingTop(4).Text($"رقم الفاتورة: {inv.InvoiceId}")
+                                c2.Item().PaddingTop(4).Text(AppLang.T("Pdf.InvNo", inv.InvoiceId))
                                     .FontSize(11f).FontColor(Sky);
                                 c2.Item().PaddingTop(2).Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-")
                                     .FontSize(10f).FontColor(MutedGrey);
@@ -363,19 +363,19 @@ namespace Sayl.UI.Infrastructure
                             {
                                 c2.Item().PaddingBottom(6).Text(partyLabel).FontSize(12).Bold().FontColor(NavyMid);
                                 c2.Item().Text(partyName).FontSize(12).Bold();
-                                c2.Item().PaddingTop(2).Text($"الهاتف: {inv.PartyPhone ?? "-"}").FontSize(10.5f).FontColor("#475569");
-                                c2.Item().Text($"العنوان: {inv.PartyAddress ?? "-"}").FontSize(10.5f).FontColor("#475569");
+                                c2.Item().PaddingTop(2).Text(AppLang.T("Pdf.CustomerPhone", inv.PartyPhone ?? "-")).FontSize(10.5f).FontColor("#475569");
+                                c2.Item().Text(AppLang.T("Pdf.CustomerAddress", inv.PartyAddress ?? "-")).FontSize(10.5f).FontColor("#475569");
                             });
                             r.ConstantItem(265).Border(1).BorderColor(BorderGrey).Padding(14).Column(c2 =>
                             {
-                                c2.Item().PaddingBottom(6).Text("بيانات الفاتورة").FontSize(12).Bold().FontColor(NavyMid);
-                                c2.Item().Text($"الحالة: {TranslateStatus(inv.Status)}   |   الدفع: {TranslatePayment(inv.PaymentStatus)}")
+                                c2.Item().PaddingBottom(6).Text(AppLang.T("Pdf.A4.InvoiceData")).FontSize(12).Bold().FontColor(NavyMid);
+                                c2.Item().Text($"{AppLang.T("Pdf.StatusWord")}: {TranslateStatus(inv.Status)}   |   {AppLang.T("Pdf.PaymentWord")}: {TranslatePayment(inv.PaymentStatus)}")
                                     .FontSize(10.5f).FontColor("#475569");
-                                c2.Item().PaddingTop(2).Text($"الكاشير: {inv.CashierName}").FontSize(10.5f).FontColor("#475569");
+                                c2.Item().PaddingTop(2).Text($"{AppLang.T("Pdf.CashierWord")}: {inv.CashierName}").FontSize(10.5f).FontColor("#475569");
                                 if (inv.SessionId != null)
-                                    c2.Item().Text($"الجلسة: #{inv.SessionId}").FontSize(10.5f).FontColor("#475569");
+                                    c2.Item().Text($"{AppLang.T("Pdf.SessionWord")}: #{inv.SessionId}").FontSize(10.5f).FontColor("#475569");
                                 if (inv.OriginalInvoiceId != null)
-                                    c2.Item().Text($"مرتجع على فاتورة: #{inv.OriginalInvoiceId}")
+                                    c2.Item().Text(AppLang.T("Pdf.Return.Original", inv.OriginalInvoiceId))
                                         .FontSize(10.5f).FontColor("#B91C1C");
                             });
                         });
@@ -395,12 +395,12 @@ namespace Sayl.UI.Infrastructure
 
                             table.Header(h =>
                             {
-                                h.Cell().Element(HeaderCell).AlignCenter().Text("م").FontSize(10f);
-                                h.Cell().Element(HeaderCell).AlignCenter().Text("الصنف").FontSize(10.5f);
-                                h.Cell().Element(HeaderCell).AlignCenter().Text("الدفعة").FontSize(10.5f);
-                                h.Cell().Element(HeaderCell).AlignCenter().Text("الكمية").FontSize(10.5f);
-                                h.Cell().Element(HeaderCell).AlignLeft().Text("سعر الوحدة").FontSize(10.5f);
-                                h.Cell().Element(HeaderCell).AlignLeft().Text("الإجمالي").FontSize(10.5f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Pdf.Col.No")).FontSize(10f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Pdf.Col.Item")).FontSize(10.5f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Pdf.Col.Batch")).FontSize(10.5f);
+                                h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Pdf.Col.Qty")).FontSize(10.5f);
+                                h.Cell().Element(HeaderCell).AlignLeft().Text(AppLang.T("Pdf.Col.UnitPrice")).FontSize(10.5f);
+                                h.Cell().Element(HeaderCell).AlignLeft().Text(AppLang.T("Pdf.Col.LineTotal")).FontSize(10.5f);
                             });
 
                             int no = 0;
@@ -420,7 +420,7 @@ namespace Sayl.UI.Infrastructure
 
                             // سطر الإجمالي — كحلي بارز
                             table.Cell().ColumnSpan(5).Element(TotalCell).AlignRight()
-                                .Text($"إجمالي البنود ({inv.Items.Count}) — {inv.Items.Sum(i => i.Quantity)} وحدة");
+                                .Text(AppLang.T("Pdf.ItemsCount", inv.Items.Count, inv.Items.Sum(i => i.Quantity)));
                             table.Cell().Element(TotalCell).AlignLeft()
                                 .Text(Money(inv.TotalAmount)).FontColor(Sky);
                         });
@@ -438,29 +438,29 @@ namespace Sayl.UI.Infrastructure
                                     });
                                 }
 
-                                MoneyLine("المجموع (قبل الخصم)", Money(inv.TotalAmount));
+                                MoneyLine(AppLang.T("Pdf.SubtotalBeforeDiscount"), Money(inv.TotalAmount));
                                 if (inv.DiscountAmount > 0)
-                                    MoneyLine("الخصم", "-" + Money(inv.DiscountAmount));
+                                    MoneyLine(AppLang.T("Pdf.Discount"), "-" + Money(inv.DiscountAmount));
                                 if (inv.TaxAmount > 0)
-                                    MoneyLine("الضريبة", Money(inv.TaxAmount));
+                                    MoneyLine(AppLang.T("Pdf.Tax"), Money(inv.TaxAmount));
 
                                 // الصافي — الأبرز في الفاتورة كلها
                                 c2.Item().PaddingTop(10).Background(Navy).Padding(12).Row(rr =>
                                 {
-                                    rr.RelativeItem().Text("الصافي المستحق").FontSize(12.5f).Bold().FontColor("#FFFFFF");
+                                    rr.RelativeItem().Text(AppLang.T("Pdf.NetDue")).FontSize(12.5f).Bold().FontColor("#FFFFFF");
                                     rr.ConstantItem(140).AlignLeft().Text(Money(inv.NetAmount))
                                         .FontSize(14f).Bold().FontColor(Sky);
                                 });
 
                                 if (inv.PaidAmount > 0)
-                                    MoneyLine("المدفوع", Money(inv.PaidAmount));
+                                    MoneyLine(AppLang.T("Pdf.Paid"), Money(inv.PaidAmount));
                                 decimal change = inv.PaidAmount - inv.NetAmount;
                                 if (change > 0)
-                                    MoneyLine("الباقي للعميل", Money(change));
+                                    MoneyLine(AppLang.T("Pdf.Change"), Money(change));
                                 if (inv.RemainingAmount > 0)
                                     c2.Item().PaddingVertical(3).Row(rr =>
                                     {
-                                        rr.RelativeItem().Text("المتبقي (دَين)").FontSize(11f).FontColor("#B91C1C");
+                                        rr.RelativeItem().Text(AppLang.T("Pdf.RemainingDebt")).FontSize(11f).FontColor("#B91C1C");
                                         rr.ConstantItem(140).AlignLeft().Text(Money(inv.RemainingAmount))
                                             .FontSize(11.5f).Bold().FontColor("#B91C1C");
                                     });
@@ -469,7 +469,7 @@ namespace Sayl.UI.Infrastructure
                         // ══ سجل المدفوعات ══
                         if (inv.Payments.Count > 0)
                         {
-                            col.Item().PaddingTop(22).Element(SectionTitle).Text("سجل المدفوعات");
+                            col.Item().PaddingTop(22).Element(SectionTitle).Text(AppLang.T("Pdf.PaymentsLog"));
                             col.Item().PaddingTop(4).Table(table =>
                             {
                                 table.ColumnsDefinition(c =>
@@ -481,9 +481,9 @@ namespace Sayl.UI.Infrastructure
 
                                 table.Header(h =>
                                 {
-                                    h.Cell().Element(HeaderCell).AlignCenter().Text("التاريخ").FontSize(10.5f);
-                                    h.Cell().Element(HeaderCell).AlignCenter().Text("طريقة الدفع").FontSize(10.5f);
-                                    h.Cell().Element(HeaderCell).AlignLeft().Text("المبلغ").FontSize(10.5f);
+                                    h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Pdf.A4.DateWord")).FontSize(10.5f);
+                                    h.Cell().Element(HeaderCell).AlignCenter().Text(AppLang.T("Common.Label.Method")).FontSize(10.5f);
+                                    h.Cell().Element(HeaderCell).AlignLeft().Text(AppLang.T("Common.Label.Amount")).FontSize(10.5f);
                                 });
 
                                 bool stripe = false;
@@ -501,19 +501,19 @@ namespace Sayl.UI.Infrastructure
                         // ══ الملاحظات ══
                         if (!string.IsNullOrWhiteSpace(inv.Notes))
                             col.Item().PaddingTop(16).Background("#FFFBEB").Border(1).BorderColor("#FDE68A")
-                                .Padding(12).Text($"ملاحظات: {inv.Notes}").FontSize(10.5f);
+                                .Padding(12).Text(AppLang.T("Pdf.Notes", inv.Notes)).FontSize(10.5f);
 
                         // ══ خطّا التوقيع ══
                         col.Item().PaddingTop(44).Row(r =>
                         {
                             r.RelativeItem().PaddingRight(36).Column(c2 =>
                             {
-                                c2.Item().AlignCenter().Text("توقيع البائع (الكاشير)").FontSize(10f).FontColor("#475569");
+                                c2.Item().AlignCenter().Text(AppLang.T("Pdf.CashierSign")).FontSize(10f).FontColor("#475569");
                                 c2.Item().PaddingTop(22).LineHorizontal(0.7f).LineColor(MutedGrey);
                             });
                             r.RelativeItem().PaddingLeft(36).Column(c2 =>
                             {
-                                c2.Item().AlignCenter().Text($"توقيع {partyLabel}").FontSize(10f).FontColor("#475569");
+                                c2.Item().AlignCenter().Text(AppLang.T("Pdf.PartySign", partyLabel)).FontSize(10f).FontColor("#475569");
                                 c2.Item().PaddingTop(22).LineHorizontal(0.7f).LineColor(MutedGrey);
                             });
                         });
@@ -524,11 +524,11 @@ namespace Sayl.UI.Infrastructure
                     {
                         col.Item().PaddingBottom(4).LineHorizontal(0.5f).LineColor("#CBD5E1");
                         col.Item().AlignCenter()
-                            .Text(string.IsNullOrWhiteSpace(receiptFooter) ? "شكرًا لتعاملكم معنا" : receiptFooter!)
+                            .Text(string.IsNullOrWhiteSpace(receiptFooter) ? AppLang.T("Pdf.Thanks") : receiptFooter!)
                             .FontSize(10f).FontColor("#475569");
                         col.Item().PaddingTop(2).AlignCenter().Text(t =>
                         {
-                            t.Span("سيل POS — نظام نقاط البيع    |    صفحة ").FontSize(9f).FontColor(MutedGrey);
+                            t.Span(AppLang.T("Pdf.Footer.IdentityPaged")).FontSize(9f).FontColor(MutedGrey);
                             t.CurrentPageNumber().FontSize(9f).FontColor(MutedGrey);
                             t.Span(" / ").FontSize(9f).FontColor(MutedGrey);
                             t.TotalPages().FontSize(9f).FontColor(MutedGrey);
@@ -593,9 +593,9 @@ namespace Sayl.UI.Infrastructure
                         // 1) ترويسة المحل — الاسم هو الأقوى بصريًا
                         col.Item().AlignCenter().Text(storeName).FontSize(15).Bold();
                         if (!string.IsNullOrWhiteSpace(storePhone))
-                            col.Item().AlignCenter().Text($"هاتف: {storePhone}").FontSize(8);
+                            col.Item().AlignCenter().Text(AppLang.T("Pdf.Phone", storePhone)).FontSize(8);
                         if (!string.IsNullOrWhiteSpace(vatNumber))
-                            col.Item().AlignCenter().Text($"الرقم الضريبي: {vatNumber}").FontSize(8);
+                            col.Item().AlignCenter().Text(AppLang.T("Pdf.Vat", vatNumber)).FontSize(8);
                         Separator();
 
                         // 2) معرّف الفاتورة + شارة الحالة غير المكتملة + المرتجع على فاتورة أصلية
@@ -604,23 +604,23 @@ namespace Sayl.UI.Infrastructure
                                 .FontSize(8.5f).Bold();
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"{TranslateType(inv.Type)} رقم: {inv.InvoiceId}").FontSize(9.5f).Bold();
+                            r.RelativeItem().Text(AppLang.T("Pdf.Thermal.TypeNo", TranslateType(inv.Type), inv.InvoiceId)).FontSize(9.5f).Bold();
                             r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("dd/MM/yyyy") : "-").FontSize(8);
                         });
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"الوقت: {inv.CreatedAt:HH:mm}").FontSize(8);
+                            r.RelativeItem().Text(AppLang.T("Pdf.Return.Time", inv.CreatedAt)).FontSize(8);
                             if (inv.OriginalInvoiceId != null)
-                                r.ConstantItem(140).AlignLeft().Text($"مرتجع على: #{inv.OriginalInvoiceId}").FontSize(7.5f);
+                                r.ConstantItem(140).AlignLeft().Text(AppLang.T("Pdf.Return.OfShort", inv.OriginalInvoiceId)).FontSize(7.5f);
                         });
 
                         // 3) الكاشير (إلزامي فوق البنود) + الطرف (مورد للشراء، عميل لغيره)
-                        col.Item().Text($"الكاشير: {inv.CashierName}").FontSize(8);
+                        col.Item().Text(AppLang.T("Pdf.CashierLine", inv.CashierName)).FontSize(8);
                         col.Item().Text(inv.Type is "purchase" or "supplier_return"
-                            ? $"المورد: {inv.PartyName ?? "-"}"
-                            : $"العميل: {inv.PartyName ?? "عميل نقدي"}").FontSize(8);
+                            ? AppLang.T("Pdf.SupplierLine", inv.PartyName ?? "-")
+                            : AppLang.T("Pdf.CustomerLine", inv.PartyName ?? AppLang.T("Common.Party.WalkIn"))).FontSize(8);
                         if (!string.IsNullOrWhiteSpace(inv.Notes))
-                            col.Item().Text($"ملاحظات: {inv.Notes}").FontSize(7.5f);
+                            col.Item().Text(AppLang.T("Pdf.Notes", inv.Notes)).FontSize(7.5f);
                         Separator();
 
                         // 4) جدول البنود — 4 أعمدة، الأرقام ثابتة المحاذاة
@@ -635,10 +635,10 @@ namespace Sayl.UI.Infrastructure
                             });
                             table.Header(h =>
                             {
-                                h.Cell().Text("الصنف").FontSize(8).Bold();
-                                h.Cell().AlignCenter().Text("كمية").FontSize(8).Bold();
-                                h.Cell().AlignLeft().Text("سعر").FontSize(8).Bold();
-                                h.Cell().AlignLeft().Text("إجمالي").FontSize(8).Bold();
+                                h.Cell().Text(AppLang.T("Pdf.Col.Item")).FontSize(8).Bold();
+                                h.Cell().AlignCenter().Text(AppLang.T("Display.Label.Qty")).FontSize(8).Bold();
+                                h.Cell().AlignLeft().Text(AppLang.T("Display.Label.Price")).FontSize(8).Bold();
+                                h.Cell().AlignLeft().Text(AppLang.T("Display.Label.Total")).FontSize(8).Bold();
                             });
                             foreach (var item in inv.Items)
                             {
@@ -651,26 +651,26 @@ namespace Sayl.UI.Infrastructure
 
                         // 5) عدّاد الأسطر/الوحدات
                         int units = inv.Items.Sum(i => i.Quantity);
-                        col.Item().Text($"البنود: {inv.Items.Count} أسطر / {units} وحدة").FontSize(7.5f);
+                        col.Item().Text(AppLang.T("Pdf.Thermal.ItemsCount", inv.Items.Count, units)).FontSize(7.5f);
 
                         Separator();
 
                         // 6) الملخص المالي — الحقول الصفرية تختفي
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text("المجموع").FontSize(9);
+                            r.RelativeItem().Text(AppLang.T("Pdf.Subtotal")).FontSize(9);
                             r.ConstantItem(52).AlignLeft().Text(Money(inv.TotalAmount)).FontSize(9);
                         });
                         if (inv.DiscountAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("الخصم").FontSize(9);
+                                r.RelativeItem().Text(AppLang.T("Pdf.Discount")).FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.DiscountAmount)).FontSize(9);
                             });
                         if (inv.TaxAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("الضريبة").FontSize(9);
+                                r.RelativeItem().Text(AppLang.T("Pdf.Tax")).FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.TaxAmount)).FontSize(9);
                             });
 
@@ -678,7 +678,7 @@ namespace Sayl.UI.Infrastructure
                         col.Item().PaddingTop(1).BorderTop(0.4f).BorderColor(Colors.Grey.Darken2);
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text("الإجمالي").FontSize(11).Bold();
+                            r.RelativeItem().Text(AppLang.T("Pdf.Table.Total")).FontSize(11).Bold();
                             r.ConstantItem(58).AlignLeft().Text(Money(inv.NetAmount)).FontSize(11).Bold();
                         });
 
@@ -686,7 +686,7 @@ namespace Sayl.UI.Infrastructure
                         if (inv.PaidAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("المدفوع").FontSize(9);
+                                r.RelativeItem().Text(AppLang.T("Pdf.Paid")).FontSize(9);
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.PaidAmount)).FontSize(9);
                             });
                         if (inv.Payments.Count > 0)
@@ -696,7 +696,7 @@ namespace Sayl.UI.Infrastructure
                                 .Select(g => $"{g.Key} {Money(g.Sum(x => x.Amount))}"));
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("طريقة الدفع").FontSize(8);
+                                r.RelativeItem().Text(AppLang.T("Common.Label.Method")).FontSize(8);
                                 r.ConstantItem(52).AlignLeft().Text(methods).FontSize(8);
                             });
                         }
@@ -704,21 +704,21 @@ namespace Sayl.UI.Infrastructure
                         if (change > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("الباقي للعميل").FontSize(9).Bold();
+                                r.RelativeItem().Text(AppLang.T("Pdf.Change")).FontSize(9).Bold();
                                 r.ConstantItem(52).AlignLeft().Text(Money(change)).FontSize(9).Bold();
                             });
                         if (inv.RemainingAmount > 0)
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Text("المتبقي (دَين)").FontSize(9).Bold();
+                                r.RelativeItem().Text(AppLang.T("Pdf.RemainingDebt")).FontSize(9).Bold();
                                 r.ConstantItem(52).AlignLeft().Text(Money(inv.RemainingAmount)).FontSize(9).Bold();
                             });
 
                         // 9) التذييل — نص قابل للضبط + اسم النظام
                         col.Item().PaddingTop(4).AlignCenter().Text(
-                                string.IsNullOrWhiteSpace(receiptFooter) ? "شكرًا لتعاملكم معنا" : receiptFooter!)
+                                string.IsNullOrWhiteSpace(receiptFooter) ? AppLang.T("Pdf.Thanks") : receiptFooter!)
                             .FontSize(9).Bold();
-                        col.Item().AlignCenter().Text("سيل POS — نظام نقاط البيع").FontSize(7.5f);
+                        col.Item().AlignCenter().Text(AppLang.T("Pdf.Footer.Identity")).FontSize(7.5f);
                     });
                 });
             });
@@ -787,7 +787,7 @@ namespace Sayl.UI.Infrastructure
                             // يسار: كتلة سيل والتاريخ — ثابتة العرض ومحاذاة لليسار
                             r.ConstantItem(200).AlignLeft().Column(c2 =>
                             {
-                                c2.Item().PaddingLeft(10).Text("سيل POS").FontSize(10).Bold().FontColor("#93C5FD");
+                                c2.Item().PaddingLeft(10).Text(AppLang.T("Pdf.Brand")).FontSize(10).Bold().FontColor("#93C5FD");
                                 c2.Item().PaddingLeft(10).PaddingTop(3).Text(Sayl.UI.Infrastructure.AppClock.NowLocal.ToString("yyyy-MM-dd HH:mm"))
                                     .FontSize(9.5f).FontColor("#94A3B8");
                             });
@@ -832,7 +832,7 @@ namespace Sayl.UI.Infrastructure
                             {
                                 r.ConstantItem(170).AlignLeft().Column(c2 =>
                                 {
-                                    c2.Item().PaddingLeft(10).Text("مُعد التقرير").FontSize(9f).FontColor("#64748B");
+                                    c2.Item().PaddingLeft(10).Text(AppLang.T("Pdf.ReportPreparedBy")).FontSize(9f).FontColor("#64748B");
                                     c2.Item().PaddingLeft(10).PaddingTop(2).Text(userName).FontSize(11.5f).Bold().FontColor("#00335F");
                                 });
                             }
@@ -907,7 +907,7 @@ namespace Sayl.UI.Infrastructure
                                 table.Cell().ColumnSpan((uint)(headers.Length - 1))
                                     .BorderTop(2).BorderColor("#93C5FD")
                                     .Background("#002B54").PaddingVertical(9).PaddingHorizontal(10)
-                                    .AlignRight().Text("الإجمالي").FontSize(12).Bold()
+                                    .AlignRight().Text(AppLang.T("Pdf.Table.Total")).FontSize(12).Bold()
                                     .FontColor("#FFFFFF");
 
                                 decimal total = 0;
@@ -925,9 +925,9 @@ namespace Sayl.UI.Infrastructure
                         // سطر السجلات — خارج البطاقة، بتباعد مريح
                         col.Item().PaddingTop(18).Row(r =>
                         {
-                            r.RelativeItem().AlignRight().Text($"عدد السجلات: {rows.Count}")
+                            r.RelativeItem().AlignRight().Text(AppLang.T("Pdf.Table.RowsCount", rows.Count))
                                 .FontSize(10f).FontColor("#475569");
-                            r.ConstantItem(260).AlignLeft().Text($"سيل POS — نظام نقاط البيع")
+                            r.ConstantItem(260).AlignLeft().Text(AppLang.T("Pdf.Footer.Identity"))
                                 .FontSize(9.5f).FontColor("#94A3B8");
                         });
                     });
@@ -938,9 +938,9 @@ namespace Sayl.UI.Infrastructure
                         col.Item().PaddingBottom(6).LineHorizontal(0.5f).LineColor("#CBD5E1");
                         col.Item().AlignCenter().Text(t =>
                         {
-                            t.Span("صفحة ").FontSize(9.5f).FontColor("#64748B");
+                            t.Span(AppLang.T("Pdf.Footer.Page")).FontSize(9.5f).FontColor("#64748B");
                             t.CurrentPageNumber().FontSize(9.5f).FontColor("#64748B");
-                            t.Span(" من ").FontSize(9.5f).FontColor("#64748B");
+                            t.Span(AppLang.T("Pdf.Footer.Of")).FontSize(9.5f).FontColor("#64748B");
                             t.TotalPages().FontSize(9.5f).FontColor("#64748B");
                         });
                     });
@@ -952,34 +952,34 @@ namespace Sayl.UI.Infrastructure
 
         private static string TranslateType(string type) => type switch
         {
-            "sale" => "فاتورة بيع",
-            "purchase" => "فاتورة شراء",
-            "customer_return" => "مرتجع عميل",
-            "supplier_return" => "مرتجع مورد",
+            "sale" => AppLang.T("Common.Type.Sale"),
+            "purchase" => AppLang.T("Common.Type.Purchase"),
+            "customer_return" => AppLang.T("Common.Type.CustomerReturn"),
+            "supplier_return" => AppLang.T("Common.Type.SupplierReturn"),
             _ => type
         };
 
         private static string TranslateMethod(string method) => method switch
         {
-            "cash" => "نقدي",
-            "card" => "شبكة",
-            "bank_transfer" => "تحويل بنكي",
+            "cash" => AppLang.T("Common.Method.Cash"),
+            "card" => AppLang.T("Common.Method.Card"),
+            "bank_transfer" => AppLang.T("Common.Method.BankTransfer"),
             _ => method
         };
 
         private static string TranslateStatus(string status) => status switch
         {
-            "completed" => "مكتملة",
-            "suspended" => "معلقة",
-            "cancelled" => "ملغاة",
+            "completed" => AppLang.T("Common.Status.Completed"),
+            "suspended" => AppLang.T("Common.Status.Suspended"),
+            "cancelled" => AppLang.T("Common.Status.Cancelled"),
             _ => status
         };
 
         private static string TranslatePayment(string status) => status switch
         {
-            "paid" => "مدفوعة",
-            "partial" => "جزئية",
-            "unpaid" => "غير مدفوعة",
+            "paid" => AppLang.T("Common.Payment.Paid"),
+            "partial" => AppLang.T("Common.Payment.Partial"),
+            "unpaid" => AppLang.T("Common.Payment.Unpaid"),
             _ => status
         };
 

@@ -42,7 +42,7 @@ namespace Sayl.UI.Forms
         private NumericUpDown _nudQty = null!;
         public PurchaseForm()
         {
-            Text = "فاتورة شراء جديدة";
+            Text = AppLang.T("Purchase.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(900, 760);
             MinimumSize = new Size(880, 660);
@@ -102,7 +102,7 @@ namespace Sayl.UI.Forms
             var header = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
             var lblTitle = new Label
             {
-                Text = "فاتورة شراء جديدة",
+                Text = AppLang.T("Purchase.Title"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -133,7 +133,7 @@ namespace Sayl.UI.Forms
 
             // المورد (يمين): تسمية + صف بحث أفقي + قائمة تملأ الباقي
             var supplierPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
-            var lblSupplier = MakeCaption("المورد *", new Rectangle(0, 0, 200, 22));
+            var lblSupplier = MakeCaption(AppLang.T("Purchase.Label.Supplier"), new Rectangle(0, 0, 200, 22));
             // FlowLayoutPanel بـ FlowDirection=RightToLeft: صف أفقي يرتص
             // من اليمين — أول Controls.Add يظهر أقصى اليمين.
             // WrapContents=false: لا التفاف للسطر التالي مهما ضاقت المساحة.
@@ -147,7 +147,7 @@ namespace Sayl.UI.Forms
             };
             // Enter داخل مربع البحث = زر البحث (SuppressKeyPress يمنع «بيب»)
             _txtSupplierSearch = new TextBox { Width = 180, Height = 30 };
-            _txtSupplierSearch.PlaceholderText = "بحث...";
+            _txtSupplierSearch.PlaceholderText = AppLang.T("Purchase.Search.Placeholder");
             _txtSupplierSearch.KeyDown += async (_, args) =>
             {
                 if (args.KeyCode == Keys.Enter)
@@ -156,7 +156,7 @@ namespace Sayl.UI.Forms
                     await LoadSuppliersAsync(_txtSupplierSearch.Text.Trim());
                 }
             };
-            var btnSupplierSearch = AppTheme.MakeButton("بحث", AppTheme.PrimaryLight,
+            var btnSupplierSearch = AppTheme.MakeButton(AppLang.T("Purchase.Button.Search"), AppTheme.PrimaryLight,
                 foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 32);
             btnSupplierSearch.Width = 80;
             btnSupplierSearch.Click += async (_, _) => await LoadSuppliersAsync(_txtSupplierSearch.Text.Trim());
@@ -183,7 +183,7 @@ namespace Sayl.UI.Forms
 
             // المنتجات (يسار): نفس بنية المورد تمامًا + كمية وزر إضافة
             var productPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 6) };
-            var lblProduct = MakeCaption("المنتج المخزني (بحث بالاسم أو الباركود)", new Rectangle(0, 0, 200, 22));
+            var lblProduct = MakeCaption(AppLang.T("Purchase.Label.Product"), new Rectangle(0, 0, 200, 22));
             var productSearchRow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -192,7 +192,7 @@ namespace Sayl.UI.Forms
                 Height = 40
             };
             _txtProductSearch = new TextBox { Width = 180, Height = 30 };
-            _txtProductSearch.PlaceholderText = "بحث...";
+            _txtProductSearch.PlaceholderText = AppLang.T("Purchase.Search.Placeholder");
             _txtProductSearch.KeyDown += async (_, args) =>
             {
                 if (args.KeyCode == Keys.Enter)
@@ -201,13 +201,13 @@ namespace Sayl.UI.Forms
                     await LoadProductsAsync(_txtProductSearch.Text.Trim());
                 }
             };
-            var btnProductSearch = AppTheme.MakeButton("بحث", AppTheme.PrimaryLight,
+            var btnProductSearch = AppTheme.MakeButton(AppLang.T("Purchase.Button.Search"), AppTheme.PrimaryLight,
                 foreColor: AppTheme.PrimaryDark, hoverColor: Color.FromArgb(200, 216, 233), height: 32);
             btnProductSearch.Width = 80;
             btnProductSearch.Click += async (_, _) => await LoadProductsAsync(_txtProductSearch.Text.Trim());
 
             // زر الإضافة معطّل حتى يُختار منتج (SelectedIndexChanged يشغّله)
-            _btnAddProduct = AppTheme.MakeButton("إضافة للفاتورة", AppTheme.Accent,
+            _btnAddProduct = AppTheme.MakeButton(AppLang.T("Purchase.Button.AddItem"), AppTheme.Accent,
                 hoverColor: AppTheme.AccentDark, height: 32);
             _btnAddProduct.Width = 130;
             _btnAddProduct.Enabled = false;
@@ -215,7 +215,7 @@ namespace Sayl.UI.Forms
 
             var lblQty = new Label
             {
-                Text = "الكمية:",
+                Text = AppLang.T("Purchase.Label.Qty"),
                 AutoSize = true,
                 ForeColor = AppTheme.TextMuted,
                 Margin = new Padding(4, 6, 2, 0) // هامش صغير يحاذي الارتفاع داخل صف 40
@@ -276,12 +276,12 @@ namespace Sayl.UI.Forms
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
-            _grid.Columns.Add("colProduct", "المنتج");
-            _grid.Columns.Add("colBatch", "رقم الدفعة *");
-            _grid.Columns.Add("colQty", "الكمية");
-            _grid.Columns.Add("colCost", "التكلفة");
-            _grid.Columns.Add("colExpiry", "الانتهاء yyyy-mm-dd");
-            _grid.Columns.Add("colTotal", "الإجمالي");
+            _grid.Columns.Add("colProduct", AppLang.T("Purchase.Col.Product"));
+            _grid.Columns.Add("colBatch", AppLang.T("Purchase.Col.Batch"));
+            _grid.Columns.Add("colQty", AppLang.T("Purchase.Col.Qty"));
+            _grid.Columns.Add("colCost", AppLang.T("Purchase.Col.Cost"));
+            _grid.Columns.Add("colExpiry", AppLang.T("Purchase.Col.Expiry"));
+            _grid.Columns.Add("colTotal", AppLang.T("Purchase.Col.Total"));
             _grid.Columns.Add("colDelete", "");
             _grid.Columns["colProduct"].ReadOnly = true;
             _grid.Columns["colProduct"].FillWeight = 30;
@@ -331,7 +331,7 @@ namespace Sayl.UI.Forms
             paymentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             paymentPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
-            var lblDiscount = MakeCaption("الخصم", new Rectangle(0, 0, 100, 22));
+            var lblDiscount = MakeCaption(AppLang.T("Purchase.Label.Discount"), new Rectangle(0, 0, 100, 22));
             _txtDiscount = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -342,7 +342,7 @@ namespace Sayl.UI.Forms
             // TextChanged = إعادة حساب حية: كل تعديل خصم يحدّث الصافي فورًا
             _txtDiscount.TextChanged += (_, _) => RecalcTotals();
 
-            var lblTax = MakeCaption("الضريبة %", new Rectangle(0, 0, 100, 22));
+            var lblTax = MakeCaption(AppLang.T("Purchase.Label.TaxPercent"), new Rectangle(0, 0, 100, 22));
             _txtTaxPercent = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -352,7 +352,7 @@ namespace Sayl.UI.Forms
             };
             _txtTaxPercent.TextChanged += (_, _) => RecalcTotals();
 
-            var lblPaid = MakeCaption("المدفوع الآن (0 = آجل)", new Rectangle(0, 0, 100, 22));
+            var lblPaid = MakeCaption(AppLang.T("Purchase.Label.PaidNow"), new Rectangle(0, 0, 100, 22));
             _txtPaid = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -362,7 +362,7 @@ namespace Sayl.UI.Forms
             };
             _txtPaid.TextChanged += (_, _) => UpdateRemaining();
 
-            var lblMethod = MakeCaption("طريقة الدفع", new Rectangle(0, 0, 100, 22));
+            var lblMethod = MakeCaption(AppLang.T("Purchase.Label.Method"), new Rectangle(0, 0, 100, 22));
             _cmbMethod = new ComboBox
             {
                 Dock = DockStyle.Fill,
@@ -370,7 +370,7 @@ namespace Sayl.UI.Forms
                 FlatStyle = FlatStyle.Flat,
                 Margin = new Padding(6)
             };
-            _cmbMethod.Items.AddRange(new object[] { "نقدي", "بطاقة" });
+            _cmbMethod.Items.AddRange(new object[] { AppLang.T("Purchase.Method.Cash"), AppLang.T("Purchase.Method.Card") });
             _cmbMethod.SelectedIndex = 0;
 
             // عمود TLP بـ RTL: العمود 0 يمين (التسميات) والعمود 1 يسار (الإدخال)
@@ -394,14 +394,14 @@ namespace Sayl.UI.Forms
             // بترتيب الإضافة (المجموع ثم الصافي الأبرز ثم المتبقي).
             _lblSubtotal = new Label
             {
-                Text = "المجموع: 0.00",
+                Text = AppLang.T("Purchase.Subtotal", "0.00"),
                 Dock = DockStyle.Top,
                 ForeColor = AppTheme.TextMuted,
                 TextAlign = ContentAlignment.MiddleLeft
             };
             _lblNet = new Label
             {
-                Text = "الصافي: 0.00",
+                Text = AppLang.T("Purchase.Net", "0.00"),
                 Dock = DockStyle.Top,
                 Font = new Font("Segoe UI", 12.5F, FontStyle.Bold), // الأبرز — رقم القرار
                 ForeColor = AppTheme.PrimaryDark,
@@ -409,13 +409,13 @@ namespace Sayl.UI.Forms
             };
             _lblRemaining = new Label
             {
-                Text = "المتبقي على المورد: 0.00",
+                Text = AppLang.T("Purchase.Remaining", "0.00"),
                 Dock = DockStyle.Top,
                 ForeColor = AppTheme.Warning,
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            var lblNotes = MakeCaption("ملاحظات", new Rectangle(0, 0, 100, 22));
+            var lblNotes = MakeCaption(AppLang.T("Purchase.Label.Notes"), new Rectangle(0, 0, 100, 22));
             _txtNotes = new TextBox
             {
                 Dock = DockStyle.Fill,     // يملأ المساحة بين التسمية وصف الأزرار
@@ -431,12 +431,12 @@ namespace Sayl.UI.Forms
                 WrapContents = false,
                 Height = 60
             };
-            _btnSave = AppTheme.MakeButton("حفظ الفاتورة", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
+            _btnSave = AppTheme.MakeButton(AppLang.T("Purchase.Button.Save"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
             _btnSave.Width = 180;
             _btnSave.Height = 50;
             _btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Width = 160;
             btnClose.Height = 50;
@@ -494,11 +494,11 @@ namespace Sayl.UI.Forms
 
                 _lstSuppliers.Items.Clear();
                 foreach (var s in _suppliers)
-                    _lstSuppliers.Items.Add($"{s.Party.Name}  —  رصيد: {UiHelpers.Money(s.Balance ?? 0)}");
+                    _lstSuppliers.Items.Add(AppLang.T("Purchase.SupplierLine", s.Party.Name, UiHelpers.Money(s.Balance ?? 0)));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الموردين.");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.SuppliersLoadFailed"));
             }
         }
 
@@ -512,16 +512,16 @@ namespace Sayl.UI.Forms
 
                 _lstProducts.Items.Clear();
                 foreach (var p in _products)
-                    _lstProducts.Items.Add($"{p.Name}  [{p.Barcode ?? "بدون باركود"}]");
+                    _lstProducts.Items.Add(AppLang.T("Purchase.ProductLine", p.Name, p.Barcode ?? AppLang.T("ReceiveStock.NoBarcode")));
 
                 if (_products.Count == 0)
-                    _lstProducts.Items.Add("لا توجد منتجات مطابقة.");
+                    _lstProducts.Items.Add(AppLang.T("Purchase.Msg.NoMatches"));
                 else if (_products.Count == 1)
                     _lstProducts.SelectedIndex = 0;
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المنتجات.");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.ProductsLoadFailed"));
             }
         }
 
@@ -563,7 +563,7 @@ namespace Sayl.UI.Forms
         {
             if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
             {
-                UiHelpers.ShowInfo(this, "اختر منتجًا من القائمة أولًا.");
+                UiHelpers.ShowInfo(this, AppLang.T("Purchase.Msg.PickProductFirst"));
                 return;
             }
 
@@ -593,7 +593,7 @@ namespace Sayl.UI.Forms
                 p.CostPrice.ToString("0.##"),
                 string.Empty,
                 string.Empty,
-                "حذف");
+                AppLang.T("Purchase.Delete"));
 
             _grid.Rows[rowIndex].Tag = p.ProductId;
             _grid.Rows[rowIndex].Cells["colDelete"].Style.ForeColor = AppTheme.Danger;
@@ -629,8 +629,8 @@ namespace Sayl.UI.Forms
             decimal tax = taxPercent > 0 ? afterDiscount * taxPercent / 100 : 0;
             _net = afterDiscount + tax;
 
-            _lblSubtotal.Text = "المجموع: " + UiHelpers.Money(total);
-            _lblNet.Text = "الصافي: " + UiHelpers.Money(_net);
+            _lblSubtotal.Text = AppLang.T("Purchase.Subtotal", UiHelpers.Money(total));
+            _lblNet.Text = AppLang.T("Purchase.Net", UiHelpers.Money(_net));
             UpdateRemaining();
         }
 
@@ -639,7 +639,7 @@ namespace Sayl.UI.Forms
             decimal paid = Math.Max(0, ParseDecimal(_txtPaid.Text));
             decimal remaining = _net - paid;
             if (remaining < 0) remaining = 0;
-            _lblRemaining.Text = "المتبقي على المورد: " + UiHelpers.Money(remaining);
+            _lblRemaining.Text = AppLang.T("Purchase.Remaining", UiHelpers.Money(remaining));
         }
 
         private static decimal ParseDecimal(object? value)
@@ -671,13 +671,13 @@ namespace Sayl.UI.Forms
         {
             if (_lstSuppliers.SelectedIndex < 0 || _lstSuppliers.SelectedIndex >= _suppliers.Count)
             {
-                UiHelpers.ShowError(this, "اختر المورد من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.PickSupplier"));
                 return;
             }
 
             if (SessionState.CurrentUser == null)
             {
-                UiHelpers.ShowError(this, "لا يوجد مستخدم مسجل.");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.NoUser"));
                 return;
             }
 
@@ -692,7 +692,7 @@ namespace Sayl.UI.Forms
 
                 if (batch.Length == 0)
                 {
-                    UiHelpers.ShowError(this, $"رقم الدفعة مطلوب للمنتج: {productName}");
+                    UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.BatchRequiredFor", productName));
                     _grid.CurrentCell = row.Cells["colBatch"];
                     return;
                 }
@@ -701,7 +701,7 @@ namespace Sayl.UI.Forms
                 int qty = (int)qtyRaw;
                 if (qtyRaw <= 0 || qtyRaw != qty)
                 {
-                    UiHelpers.ShowError(this, $"الكمية يجب أن تكون عددًا صحيحًا أكبر من صفر للمنتج: {productName}");
+                    UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.QtyInvalidFor", productName));
                     _grid.CurrentCell = row.Cells["colQty"];
                     return;
                 }
@@ -709,14 +709,14 @@ namespace Sayl.UI.Forms
                 decimal cost = ParseDecimal(row.Cells["colCost"].Value);
                 if (cost < 0)
                 {
-                    UiHelpers.ShowError(this, $"التكلفة يجب أن تكون صفرًا أو أكثر للمنتج: {productName}");
+                    UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.CostInvalidFor", productName));
                     _grid.CurrentCell = row.Cells["colCost"];
                     return;
                 }
 
                 if (!TryParseExpiry(row.Cells["colExpiry"].Value?.ToString(), out DateOnly? expiry, out string bad))
                 {
-                    UiHelpers.ShowError(this, $"تاريخ الانتهاء غير صالح ({bad}) للمنتج: {productName}\nاستخدم الصيغة yyyy-mm-dd");
+                    UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.ExpiryInvalid", bad, productName));
                     _grid.CurrentCell = row.Cells["colExpiry"];
                     return;
                 }
@@ -734,14 +734,14 @@ namespace Sayl.UI.Forms
 
             if (items.Count == 0)
             {
-                UiHelpers.ShowError(this, "أضف بندًا واحدًا على الأقل إلى الفاتورة.");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.OneItemRequired"));
                 return;
             }
 
             decimal discount = Math.Max(0, ParseDecimal(_txtDiscount.Text));
             if (discount > subtotal)
             {
-                UiHelpers.ShowError(this, $"الخصم يتجاوز مجموع الفاتورة ({UiHelpers.Money(subtotal)}).");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.DiscountTooBig", UiHelpers.Money(subtotal)));
                 _txtDiscount.Focus();
                 _txtDiscount.SelectAll();
                 return;
@@ -755,7 +755,7 @@ namespace Sayl.UI.Forms
             decimal paid = Math.Max(0, ParseDecimal(_txtPaid.Text));
             if (paid > net)
             {
-                UiHelpers.ShowError(this, $"المدفوع الآن أكبر من صافي الفاتورة ({UiHelpers.Money(net)}).");
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.Overpaid", UiHelpers.Money(net)));
                 _txtPaid.Focus();
                 _txtPaid.SelectAll();
                 return;
@@ -790,7 +790,7 @@ namespace Sayl.UI.Forms
                 }
 
                 UiHelpers.ShowResult(this, result,
-                    $"تم إنشاء فاتورة الشراء رقم {result.Data} بنجاح.");
+                    AppLang.T("Purchase.Msg.Created", result.Data));
 
                 if (result.IsSuccess)
                 {
@@ -801,7 +801,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الاتصال بقاعدة البيانات.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.DbConnectionFailed"));
             }
             finally
             {

@@ -56,7 +56,7 @@ namespace Sayl.UI.UserControls
             // Padding: هامش داخلي (يمين، أعلى، يسار، أسفل) — يبعد النص عن الحواف.
             // TextAlign=MiddleRight: النص لليمين (عربي RTL).
             var panel = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = AppTheme.CardBg, Padding = new Padding(20, 16, 20, 8) };
-            var lblTitle = new Label { Text = "إعدادات النظام", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI", 14F, FontStyle.Bold), ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("Settings.Title"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI", 14F, FontStyle.Bold), ForeColor = AppTheme.TextPrimary };
             panel.Controls.Add(lblTitle);
 
             // ── الجسم: كل الحقول هنا — Dock=Fill يملأ ما تبقى تحت الشريط ──
@@ -67,23 +67,23 @@ namespace Sayl.UI.UserControls
             // y يبدأ من 16 — أول صف للحقول. كل AddField يزيده تلقائيًا 64.
             int y = 16;
             // الحقول ذات التسمية الكاملة العرض (full: true) — انظر AddField أسفل الملف.
-            _txtStoreName = AddField(body, "اسم المتجر (يظهر على الإيصال)", 40, ref y, full: true);
-            _txtStorePhone = AddField(body, "هاتف المتجر", 40, ref y, full: true);
-            _txtVat = AddField(body, "الرقم الضريبي", 40, ref y, full: true);
-            _txtFooter = AddField(body, "رسالة أسفل الإيصال", 40, ref y, full: true);
-            _txtWelcome = AddField(body, "رسالة شاشة الزبون (الشاشة الثانية)", 40, ref y, full: true);
+            _txtStoreName = AddField(body, AppLang.T("Settings.Label.StoreName"), 40, ref y, full: true);
+            _txtStorePhone = AddField(body, AppLang.T("Settings.Label.StorePhone"), 40, ref y, full: true);
+            _txtVat = AddField(body, AppLang.T("Settings.Label.Vat"), 40, ref y, full: true);
+            _txtFooter = AddField(body, AppLang.T("Settings.Label.ReceiptFooter"), 40, ref y, full: true);
+            _txtWelcome = AddField(body, AppLang.T("Settings.Label.WelcomeMessage"), 40, ref y, full: true);
 
             // ── نسبة الضريبة: تسمية يمين (40..300) + مربع رقم قصير يسار (320..440) ──
-            // لاحظ النمط: التسمية TextAl을=MiddleRight لتلتصق بمربعها الأيسر.
+            // لاحظ النمط: التسمية TextAlign=MiddleRight لتلتصق بمربعها الأيسر.
             // Rectangle(40, y, 260, 22) = من اليسار 40، من الأعلى y، عرض 260، ارتفاع 22.
-            var lblTax = new Label { Text = "نسبة الضريبة %", Bounds = new Rectangle(40, y, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblTax = new Label { Text = AppLang.T("Settings.Label.TaxPercent"), Bounds = new Rectangle(40, y, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtTax = new TextBox { Bounds = new Rectangle(320, y - 2, 120, 34), TextAlign = HorizontalAlignment.Center };
             body.Controls.Add(lblTax);
             body.Controls.Add(_txtTax);
 
             // ── مجلد النسخ الاحتياطي: y+46 يعني «46 بكسل تحت الحقل السابق» ──
             // القفزة أكبر من 64 العادية لأن سطر الضريبة أقصر (مربع واحد).
-            var lblBackup = new Label { Text = "مجلد النسخ الاحتياطي", Bounds = new Rectangle(40, y + 46, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblBackup = new Label { Text = AppLang.T("Settings.Label.BackupFolder"), Bounds = new Rectangle(40, y + 46, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtBackupFolder = new TextBox { Bounds = new Rectangle(320, y + 44, 420, 34) };
             body.Controls.Add(lblBackup);
             body.Controls.Add(_txtBackupFolder);
@@ -92,7 +92,7 @@ namespace Sayl.UI.UserControls
             // DropDownStyle=DropDownList: قائمة اختيار فقط — لا كتابة يدوية.
             // GetInstalledPrinters قد ترجع فارغة (خدمة الطباعة متوقفة) —
             // القائمة تبقى فارغة بلا انفجار.
-            var lblPrinter = new Label { Text = "طابعة الإيصالات", Bounds = new Rectangle(40, y + 92, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblPrinter = new Label { Text = AppLang.T("Settings.Label.ReceiptPrinter"), Bounds = new Rectangle(40, y + 92, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbPrinter = new ComboBox { Bounds = new Rectangle(320, y + 90, 420, 34), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
             foreach (var p in ReceiptPrinter.GetInstalledPrinters())
                 _cmbPrinter.Items.Add(p);
@@ -102,25 +102,25 @@ namespace Sayl.UI.UserControls
             // ── مفتاح الطباعة التلقائية: CheckBox ──
             // TextAlign=MiddleRight: النص يمين المربع — عربي.
             // Bounds عرضه 420 يغطي مساحة مربعي الحقول السابقين.
-            _chkAutoPrint = new CheckBox { Text = "طباعة الإيصال تلقائيًا بعد كل عملية بيع", Bounds = new Rectangle(320, y + 134, 420, 28), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextPrimary };
+            _chkAutoPrint = new CheckBox { Text = AppLang.T("Settings.Label.AutoPrint"), Bounds = new Rectangle(320, y + 134, 420, 28), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextPrimary };
             body.Controls.Add(_chkAutoPrint);
 
             // ── صف الأزرار الأول: حفظ (يمين) ونسخ احتياطي (يسار) ──
             // Height=48: حد اللمس الأدنى — لا تصغّره.
             // «يمين/يسار» هنا بالإحداثيات: 320 = يمين الشاشة (RTL)،
             // 540 = يساره — على عكس LTR المعروف.
-            var btnSave = AppTheme.MakeButton("حفظ الإعدادات", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnSave = AppTheme.MakeButton(AppLang.T("Settings.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnSave.Bounds = new Rectangle(320, y + 176, 200, 48);
             // Click += async (_,_) => ...: ربط حدث النقر بعملية غير متزامنة —
             // اللامدا تتلقى (مرسل الحدث، بياناته) ونتجاهلهما بـ _.
             btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnBackup = AppTheme.MakeButton("نسخة احتياطية الآن", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
+            var btnBackup = AppTheme.MakeButton(AppLang.T("Settings.Button.BackupNow"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
             btnBackup.Bounds = new Rectangle(540, y + 176, 200, 48);
             btnBackup.Click += async (_, _) => await BackupNowAsync();
 
             // ── صف الأزرار الثاني: استعادة (يمين) + إغلاق سنة (يسار، أدمن فقط) ──
-            var btnRestore = AppTheme.MakeButton("استعادة نسخة احتياطية", AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5));
+            var btnRestore = AppTheme.MakeButton(AppLang.T("Settings.Button.Restore"), AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5));
             btnRestore.Bounds = new Rectangle(320, y + 232, 200, 44);
             btnRestore.Click += async (_, _) => await RestoreNowAsync();
 
@@ -128,7 +128,7 @@ namespace Sayl.UI.UserControls
             // الإغلاق السنوي): نمط «زر شرطي» — البناء داخل if يخفيه عمّن عداه.
             if (SessionState.Can(Common.Utils.AppPermissions.Inventory))
             {
-                var btnFiscal = AppTheme.MakeButton("إغلاق السنة المالية", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
+                var btnFiscal = AppTheme.MakeButton(AppLang.T("Settings.Button.FiscalClose"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
                 btnFiscal.Bounds = new Rectangle(540, y + 232, 200, 44);
                 // هنا الحدث متزامن (بلا async): ShowDialog يوقف هذه الشاشة
                 // حتى تُغلق نافذة الإغلاق — وهذا مقصود (نافذة حوارية).
@@ -178,11 +178,11 @@ namespace Sayl.UI.UserControls
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
 
-                _txtStoreName.Text = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                _txtStoreName.Text = await settings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("App.Store.Default"));
                 _txtStorePhone.Text = await settings.GetAsync(clsSettingsService.KeyStorePhone);
                 _txtVat.Text = await settings.GetAsync(clsSettingsService.KeyVatNumber);
                 _txtFooter.Text = await settings.GetAsync(clsSettingsService.KeyReceiptFooter);
-                _txtWelcome.Text = await settings.GetAsync(clsSettingsService.KeyWelcomeMessage, "شكرًا لزيارتكم");
+                _txtWelcome.Text = await settings.GetAsync(clsSettingsService.KeyWelcomeMessage, AppLang.T("Settings.Default.Welcome"));
                 decimal tax = await settings.GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
                 _txtTax.Text = tax > 0 ? tax.ToString("0.##") : "";
                 _txtBackupFolder.Text = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
@@ -194,7 +194,7 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الإعدادات.");
+                UiHelpers.ShowError(this, AppLang.T("Settings.Msg.LoadFailed"));
             }
         }
 
@@ -202,7 +202,7 @@ namespace Sayl.UI.UserControls
         {
             if (!decimal.TryParse(_txtTax.Text?.Trim(), out decimal tax) || tax < 0 || tax > 100)
             {
-                UiHelpers.ShowError(this, "أدخل نسبة ضريبة صحيحة (0-100).");
+                UiHelpers.ShowError(this, AppLang.T("Settings.Msg.TaxInvalid"));
                 return;
             }
 
@@ -222,12 +222,12 @@ namespace Sayl.UI.UserControls
                 await settings.SetAsync(clsSettingsService.KeyReceiptPrinter, _cmbPrinter.SelectedItem?.ToString() ?? "");
 
                 _lblStatus.ForeColor = AppTheme.Success;
-                _lblStatus.Text = "تم حفظ الإعدادات بنجاح.";
+                _lblStatus.Text = AppLang.T("Settings.Msg.Saved");
             }
             catch
             {
                 _lblStatus.ForeColor = AppTheme.Danger;
-                _lblStatus.Text = "فشل حفظ الإعدادات.";
+                _lblStatus.Text = AppLang.T("Settings.Msg.SaveFailed");
             }
         }
 
@@ -251,12 +251,12 @@ namespace Sayl.UI.UserControls
                 }
 
                 _lblStatus.ForeColor = result.IsSuccess ? AppTheme.Success : AppTheme.Danger;
-                _lblStatus.Text = result.IsSuccess ? $"تم النسخ: {Path.GetFileName(result.Data)}" : result.Message;
+                _lblStatus.Text = result.IsSuccess ? AppLang.T("Settings.Msg.BackupDone", Path.GetFileName(result.Data)) : result.Message;
             }
             catch
             {
                 _lblStatus.ForeColor = AppTheme.Danger;
-                _lblStatus.Text = "فشل النسخ الاحتياطي.";
+                _lblStatus.Text = AppLang.T("Settings.Msg.BackupFailed");
             }
         }
 
@@ -266,21 +266,16 @@ namespace Sayl.UI.UserControls
 
             using var dlg = new OpenFileDialog
             {
-                Title = "اختر ملف النسخة الاحتياطية",
-                Filter = "نسخة احتياطية (*.bak)|*.bak|كل الملفات (*.*)|*.*",
+                Title = AppLang.T("Settings.Restore.PickTitle"),
+                Filter = AppLang.T("Settings.Restore.Filter"),
                 InitialDirectory = Directory.Exists(folder) ? folder : null
             };
             if (dlg.ShowDialog(this) != DialogResult.OK)
                 return;
 
             var confirm = MessageBox.Show(this,
-                "تحذير: الاستعادة ستستبدل جميع البيانات الحالية " +
-                "ببيانات النسخة المختارة، ولن يمكن التراجع.\n\n" +
-                "تأكد من:\n" +
-                "- إغلاق جميع جلسات البيع على كل الأجهزة\n" +
-                "- أخذ نسخة احتياطية جديدة للبيانات الحالية أولًا\n\n" +
-                "هل تريد المتابعة بالاستعادة؟",
-                "تأكيد الاستعادة", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                AppLang.T("Settings.Restore.ConfirmBody"),
+                AppLang.T("Settings.Restore.ConfirmTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2,
                 MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
             if (confirm != DialogResult.Yes)
@@ -304,10 +299,8 @@ namespace Sayl.UI.UserControls
                 }
 
                 var restart = MessageBox.Show(this,
-                    "تمت استعادة النسخة الاحتياطية بنجاح.\n\n" +
-                    "يُنصح بإعادة تشغيل البرنامج الآن لضمان قراءة أحدث البيانات.\n\n" +
-                    "هل تريد إعادة تشغيل البرنامج الآن؟",
-                    "تمت الاستعادة", MessageBoxButtons.YesNo, MessageBoxIcon.Information,
+                    AppLang.T("Settings.Restore.DoneBody"),
+                    AppLang.T("Settings.Restore.DoneTitle"), MessageBoxButtons.YesNo, MessageBoxIcon.Information,
                     MessageBoxDefaultButton.Button1,
                     MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
 
@@ -316,13 +309,13 @@ namespace Sayl.UI.UserControls
                 else
                 {
                     _lblStatus.ForeColor = AppTheme.Success;
-                    _lblStatus.Text = $"تمت الاستعادة: {Path.GetFileName(result.Data)}";
+                    _lblStatus.Text = AppLang.T("Settings.Restore.Restored", Path.GetFileName(result.Data));
                 }
             }
             catch
             {
                 _lblStatus.ForeColor = AppTheme.Danger;
-                _lblStatus.Text = "فشلت الاستعادة.";
+                _lblStatus.Text = AppLang.T("Settings.Restore.Failed");
             }
         }
     }

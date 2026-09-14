@@ -239,7 +239,7 @@ namespace Sayl.UI.Forms
     {
         public ActivationForm()
         {
-            Text = "تفعيل البرنامج";
+            Text = AppLang.T("Activation.Title");
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(540, 620);
             MinimumSize = new Size(520, 540);
@@ -271,7 +271,7 @@ namespace Sayl.UI.Forms
             var logo = Brand.MakeLogo(76, AppTheme.Primary);
             var lblTitle = new Label
             {
-                Text = "تفعيل سيل — Sayl POS",
+                Text = AppLang.T("Activation.Header"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
@@ -289,7 +289,7 @@ namespace Sayl.UI.Forms
             header.Controls.Add(lblTitle);
 
             // ── كود الجهاز ──
-            var lblDeviceTitle = MakeSectionLabel("كود هذا الجهاز");
+            var lblDeviceTitle = MakeSectionLabel(AppLang.T("Activation.DeviceCode"));
 
             var deviceHost = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(24, 0, 24, 0) };
             var txtDeviceCode = new TextBox
@@ -303,7 +303,7 @@ namespace Sayl.UI.Forms
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
                 Bounds = new Rectangle(24, 2, deviceHost.Width - 24 - 118, 48)
             };
-            var btnCopy = AppTheme.MakeButton("نسخ الكود", AppTheme.PrimaryLight, foreColor: AppTheme.PrimaryDark,
+            var btnCopy = AppTheme.MakeButton(AppLang.T("Activation.CopyCode"), AppTheme.PrimaryLight, foreColor: AppTheme.PrimaryDark,
                 hoverColor: Color.FromArgb(200, 216, 233), height: 48);
             btnCopy.Anchor = AnchorStyles.Right | AnchorStyles.Top;
             btnCopy.Bounds = new Rectangle(deviceHost.Width - 118 - 24, 2, 118, 48);
@@ -319,7 +319,7 @@ namespace Sayl.UI.Forms
 
             var lblHint = new Label
             {
-                Text = "أرسل هذا الكود إلى الموزّع عبر واتساب أو الرسائل، أو استورد ملف .lic المُرسل إليك.",
+                Text = AppLang.T("Activation.Hint"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopCenter,
                 ForeColor = AppTheme.TextMuted,
@@ -327,7 +327,7 @@ namespace Sayl.UI.Forms
             };
 
             // ── مفتاح التفعيل ──
-            var lblKeyTitle = MakeSectionLabel("مفتاح التفعيل");
+            var lblKeyTitle = MakeSectionLabel(AppLang.T("Activation.LicenseKey"));
 
             var keyHost = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(24, 0, 24, 0) };
             var txtLicense = new TextBox
@@ -368,16 +368,16 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(20, 8, 20, 8)
             };
 
-            var btnCancel = AppTheme.MakeButton("إغلاق", Color.FromArgb(229, 231, 235), foreColor: AppTheme.TextPrimary,
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), Color.FromArgb(229, 231, 235), foreColor: AppTheme.TextPrimary,
                 hoverColor: Color.FromArgb(209, 213, 219), height: 52);
             btnCancel.DialogResult = DialogResult.Cancel;
             btnCancel.Width = 140;
 
-            var btnImport = AppTheme.MakeButton("استيراد ملف .lic", AppTheme.PrimaryLight, foreColor: AppTheme.PrimaryDark,
+            var btnImport = AppTheme.MakeButton(AppLang.T("Activation.ImportLic"), AppTheme.PrimaryLight, foreColor: AppTheme.PrimaryDark,
                 hoverColor: Color.FromArgb(200, 216, 233), height: 52);
             btnImport.Width = 180;
 
-            var btnActivate = AppTheme.MakeButton("تفعيل البرنامج", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 52);
+            var btnActivate = AppTheme.MakeButton(AppLang.T("Activation.Activate"), AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 52);
             btnActivate.Width = 160;
 
             buttonsHost.Controls.Add(btnActivate);
@@ -407,7 +407,7 @@ namespace Sayl.UI.Forms
             {
                 Clipboard.SetText(txtDeviceCode.Text);
                 lblStatus.ForeColor = AppTheme.Success;
-                lblStatus.Text = "تم نسخ الكود — أرسله إلى الموزّع.";
+                lblStatus.Text = AppLang.T("Activation.Msg.Copied");
             };
 
             btnImport.Click += (_, _) =>
@@ -415,7 +415,7 @@ namespace Sayl.UI.Forms
                 using (var dlg = new OpenFileDialog
                 {
                     Filter = "License files (*.lic)|*.lic|All files (*.*)|*.*",
-                    Title = "اختر ملف الترخيص"
+                    Title = AppLang.T("Activation.PickLicTitle")
                 })
                 {
                     if (dlg.ShowDialog() == DialogResult.OK)
@@ -424,12 +424,12 @@ namespace Sayl.UI.Forms
                         {
                             string licenseText = File.ReadAllText(dlg.FileName);
                             txtLicense.Text = licenseText.Trim();
-                            lblStatus.Text = "تم تحميل ملف الترخيص. اضغط تفعيل البرنامج.";
+                            lblStatus.Text = AppLang.T("Activation.Msg.LicLoaded");
                             lblStatus.ForeColor = AppTheme.Success;
                         }
                         catch (Exception ex)
                         {
-                            ShowError(lblStatus, "تعذر قراءة الملف: " + ex.Message);
+                            ShowError(lblStatus, AppLang.T("Activation.Msg.ReadFileFailed", ex.Message));
                         }
                     }
                 }
@@ -440,7 +440,7 @@ namespace Sayl.UI.Forms
                 string license = txtLicense.Text.Trim();
                 if (license.Length == 0)
                 {
-                    ShowError(lblStatus, "يرجى لصق مفتاح التفعيل أو استيراد ملف .lic أولاً.");
+                    ShowError(lblStatus, AppLang.T("Activation.Msg.PasteFirst"));
                     return;
                 }
 
@@ -454,7 +454,7 @@ namespace Sayl.UI.Forms
                         Close();
                     }
                     else
-                        ShowError(lblStatus, error ?? "فشل التفعيل");
+                        ShowError(lblStatus, error ?? AppLang.T("Activation.Msg.Failed"));
                 }
                 finally
                 {

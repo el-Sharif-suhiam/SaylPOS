@@ -93,7 +93,7 @@ namespace Sayl.UI.Infrastructure
             }
             catch
             {
-                return Result.Fail("تعذر الاتصال بقاعدة البيانات.");
+                return Result.Fail(AppLang.T("Common.Msg.DbConnectionFailed"));
             }
         }
     }

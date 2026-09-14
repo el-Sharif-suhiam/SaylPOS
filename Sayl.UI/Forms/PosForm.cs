@@ -635,7 +635,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر البحث عن المنتج.");
+                UiHelpers.ShowError(this, AppLang.T("Pos.Msg.SearchFailed"));
             }
         }
 
@@ -1327,7 +1327,7 @@ namespace Sayl.UI.Forms
             {
                 _customerId = picker.SelectedCustomerId;
                 _customerName = picker.SelectedCustomerName;
-                _lblCustomer.Text = _customerName ?? "عميل";
+                _lblCustomer.Text = _customerName ?? AppLang.T("Pos.Customer.Word");
             }
             _txtSearch.Focus(); // الماسح ينتظر: التركيز يعود لمربع البحث فور إغلاق النافذة
         }

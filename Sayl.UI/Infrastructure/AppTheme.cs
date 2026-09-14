@@ -141,6 +141,10 @@ namespace Sayl.UI.Infrastructure
         /// الاختيار ويعيد تشغيل البرنامج. الرسم متجهي Anti-Alias كامل
         /// (نفس أسلوب أزرار «؟» و«×») فيظهر مستديرًا تمامًا في كل الدقة.
         /// مصدر واحد لثلاث شاشات: الدخول/الرئيسية/POS.
+        /// ملاحظة الرسم: الاعتماد الكامل على Paint يدوي — إطار الزر
+        /// وخلفيته النظامية معطّلان (ButtonBase لا يرسم شيئًا)، وأثر
+        /// hover يُرسم داخل الكبسولة نفسها (تفتيح الحد + الحشوة) فلا
+        /// يظهر أي مستطيل أبيض حاد يكسر شكل الزر عند المرور.
         /// </summary>
         public static Button MakeLanguageSwitchButton()
         {
@@ -156,6 +160,10 @@ namespace Sayl.UI.Infrastructure
                 TabStop = false
             };
             b.FlatAppearance.BorderSize = 0;
+            // ⚠️ تعطيل أثر FlatAppearance النظامي: القيم الشفافة تمنع
+            // ويندوز من رسم خلفية hover زرقاء/بيضاء مربعة خلف الرسم اليدوي.
+            b.FlatAppearance.MouseOverBackColor = Color.Transparent;
+            b.FlatAppearance.MouseDownBackColor = Color.Transparent;
 
             bool hovered = false;
 

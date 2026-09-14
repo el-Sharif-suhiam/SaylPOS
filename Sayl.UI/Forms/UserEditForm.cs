@@ -36,7 +36,7 @@ namespace Sayl.UI.Forms
                 _employees = await employeeService.GetEmployeesListAsync(includeInactive: false);
 
                 _cmbEmployee.Items.Clear();
-                _cmbEmployee.Items.Add("بدون ربط بموظف");
+                _cmbEmployee.Items.Add(AppLang.T("UserEdit.NoEmployee"));
                 foreach (var e in _employees)
                     _cmbEmployee.Items.Add(e.Name);
                 _cmbEmployee.SelectedIndex = 0;
@@ -44,7 +44,7 @@ namespace Sayl.UI.Forms
             catch
             {
                 _cmbEmployee.Items.Clear();
-                _cmbEmployee.Items.Add("بدون ربط بموظف");
+                _cmbEmployee.Items.Add(AppLang.T("UserEdit.NoEmployee"));
                 _cmbEmployee.SelectedIndex = 0;
             }
         }
@@ -59,7 +59,7 @@ namespace Sayl.UI.Forms
         //    بعد التقدير الأول؛ السطر الثاني هو الفاصل. عدّل الأخير فقط.
         private void BuildUi()
         {
-            Text = "إضافة مستخدم";
+            Text = AppLang.T("UserEdit.Title");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(420, 330);
@@ -69,30 +69,30 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             BackColor = AppTheme.CardBg;
 
-            var lblTitle = new Label { Text = "إضافة مستخدم جديد", Bounds = new Rectangle(0, 16, 420, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("UserEdit.Heading"), Bounds = new Rectangle(0, 16, 420, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            var lblUser = new Label { Text = "اسم المستخدم *", Bounds = new Rectangle(30, 58, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblUser = new Label { Text = AppLang.T("UserEdit.Label.Username"), Bounds = new Rectangle(30, 58, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtUserName = new TextBox { Bounds = new Rectangle(30, 82, 360, 36), Font = AppTheme.FontBody };
 
-            var lblPass = new Label { Text = "كلمة المرور * (8 أحرف على الأقل، حروف وأرقام)", Bounds = new Rectangle(30, 128, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblPass = new Label { Text = AppLang.T("UserEdit.Label.Password"), Bounds = new Rectangle(30, 128, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtPassword = new TextBox { Bounds = new Rectangle(30, 152, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
 
-            var lblRole = new Label { Text = "الدور *", Bounds = new Rectangle(30, 198, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblRole = new Label { Text = AppLang.T("UserEdit.Label.Role"), Bounds = new Rectangle(30, 198, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbRole = new ComboBox { Bounds = new Rectangle(30, 222, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
             // وصف الشاشات بدل الرقم الصم — قائمة الأدوار تصل مفلترة هرميًا
             // من UsersControl (أدنى من المشغّل + الكاشير)
             foreach (var role in _roles)
-                _cmbRole.Items.Add($"{role.Name} — {AppPermissions.Describe(role.RoleValue)}");
+                _cmbRole.Items.Add($"{role.Name} — {AppLang.PermDescribe(role.RoleValue)}");
             _cmbRole.SelectedIndex = _roles.Count > 0 ? 0 : -1;
 
-            var lblEmployee = new Label { Text = "ربط بموظف (اختياري)", Bounds = new Rectangle(30, 268, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblEmployee = new Label { Text = AppLang.T("UserEdit.Label.Employee"), Bounds = new Rectangle(30, 268, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbEmployee = new ComboBox { Bounds = new Rectangle(30, 292, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
 
-            var btnOk = AppTheme.MakeButton("إضافة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Add"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(30, 346, 220, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(270, 346, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -106,13 +106,13 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtUserName.Text))
             {
-                UiHelpers.ShowError(this, "اسم المستخدم مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("UserEdit.Msg.UsernameRequired"));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_txtPassword.Text))
             {
-                UiHelpers.ShowError(this, "كلمة المرور مطلوبة.");
+                UiHelpers.ShowError(this, AppLang.T("UserEdit.Msg.PasswordRequired"));
                 return;
             }
 
@@ -125,7 +125,7 @@ namespace Sayl.UI.Forms
 
             if (_cmbRole.SelectedIndex < 0 || _cmbRole.SelectedIndex >= _roles.Count)
             {
-                UiHelpers.ShowError(this, "اختر دورًا.");
+                UiHelpers.ShowError(this, AppLang.T("UserEdit.Msg.PickRole"));
                 return;
             }
 
@@ -149,11 +149,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشلت الإضافة." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("UserEdit.Msg.AddFailed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowResult(this, result, "تمت إضافة المستخدم بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("UserEdit.Msg.Added"));
             DialogResult = DialogResult.OK;
         }
     }
@@ -176,13 +176,13 @@ namespace Sayl.UI.Forms
             MinimizeBox = false;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
-            Text = "كلمة المرور";
+            Text = AppLang.T("PwdInput.Title");
 
             var lbl = new Label { Text = caption, Bounds = new Rectangle(24, 14, 352, 40), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextPrimary };
             _txt.Bounds = new Rectangle(24, 58, 352, 36);
             _txt.UseSystemPasswordChar = true;
 
-            var btnOk = AppTheme.MakeButton("تأكيد", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Confirm"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(24, 110, 200, 48);
             btnOk.Click += (_, _) =>
             {
@@ -195,7 +195,7 @@ namespace Sayl.UI.Forms
                 DialogResult = DialogResult.OK;
             };
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(240, 110, 136, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
 

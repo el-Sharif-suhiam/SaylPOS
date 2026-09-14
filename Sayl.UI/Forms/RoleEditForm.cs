@@ -34,7 +34,7 @@ namespace Sayl.UI.Forms
         // الملخص الحي أسفل الشبكة يقرأ بصريًا ما يختاره المدير.
         private void BuildUi()
         {
-            Text = _existing == null ? "إضافة دور" : "تعديل دور";
+            Text = _existing == null ? AppLang.T("RoleEdit.AddTitle") : AppLang.T("RoleEdit.EditTitle");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 560);
@@ -46,10 +46,10 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label { Text = Text, Bounds = new Rectangle(0, 16, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            var lblName = new Label { Text = "اسم الدور *", Bounds = new Rectangle(30, 58, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblName = new Label { Text = AppLang.T("RoleEdit.Label.Name"), Bounds = new Rectangle(30, 58, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtName = new TextBox { Bounds = new Rectangle(30, 82, 400, 36), Font = AppTheme.FontBody, Text = _existing?.Name ?? "" };
 
-            var lblScreens = new Label { Text = "شاشات هذا الدور * (من يُمنح الشاشة يُمنح كل ما فيها)", Bounds = new Rectangle(30, 126, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblScreens = new Label { Text = AppLang.T("RoleEdit.Label.Screens"), Bounds = new Rectangle(30, 126, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
 
             // شبكة الخانات — من كتالوج AppPermissions.EditableScreens (بلا الأدوار)
             var screens = AppPermissions.EditableScreens;
@@ -59,7 +59,7 @@ namespace Sayl.UI.Forms
                 int y = 156 + i * 34;
                 _screenChecks[i] = new CheckBox
                 {
-                    Text = screens[i].Name,
+                    Text = AppLang.PermScreenName(screens[i].Bit),
                     Tag = screens[i].Bit,
                     Bounds = new Rectangle(150, y, 280, 30),
                     TextAlign = ContentAlignment.MiddleRight,
@@ -82,12 +82,12 @@ namespace Sayl.UI.Forms
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
             };
 
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             int btnY = 156 + screens.Length * 34 + 40;
             btnOk.Bounds = new Rectangle(30, btnY, 260, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(310, btnY, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -114,8 +114,8 @@ namespace Sayl.UI.Forms
             int mask = CurrentMask();
             int count = _screenChecks.Count(c => c.Checked);
             _lblSummary.Text = count == 0
-                ? "لم تختر أي شاشة بعد — الدور الفارغ ممنوع"
-                : $"مختار {count} من {_screenChecks.Length} شاشة — قيمة الصلاحيات: {mask}";
+                ? AppLang.T("RoleEdit.Summary.Empty")
+                : AppLang.T("RoleEdit.Summary.Selected", count, _screenChecks.Length, mask);
         }
 
         private async Task SaveAsync()
@@ -123,7 +123,7 @@ namespace Sayl.UI.Forms
             string name = _txtName.Text?.Trim() ?? "";
             if (string.IsNullOrWhiteSpace(name))
             {
-                UiHelpers.ShowError(this, "اسم الدور مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("RoleEdit.Msg.NameRequired"));
                 return;
             }
 
@@ -131,7 +131,7 @@ namespace Sayl.UI.Forms
             int mask = CurrentMask();
             if (mask == 0)
             {
-                UiHelpers.ShowError(this, "يجب اختيار شاشة واحدة على الأقل لهذا الدور.");
+                UiHelpers.ShowError(this, AppLang.T("RoleEdit.Msg.OneScreenRequired"));
                 return;
             }
 
@@ -149,7 +149,7 @@ namespace Sayl.UI.Forms
                 if (_existing == null)
                 {
                     var added = await roleService.AddNewRoleAsync(dto, SessionState.CurrentUser?.UserId ?? 0);
-                    result = added.IsSuccess ? Result.Ok("تم حفظ الدور بنجاح.") : Result.Fail(added.Message);
+                    result = added.IsSuccess ? Result.Ok(AppLang.T("RoleEdit.Msg.Saved")) : Result.Fail(added.Message);
                 }
                 else
                 {
@@ -159,11 +159,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل الحفظ." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Common.Msg.SaveFailed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowResult(this, result, "تم الحفظ بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Common.Msg.Saved"));
             DialogResult = DialogResult.OK;
         }
     }

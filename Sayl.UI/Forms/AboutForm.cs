@@ -22,7 +22,7 @@ namespace Sayl.UI.Forms
     {
         public AboutForm()
         {
-            Text = "حول البرنامج";
+            Text = AppLang.T("About.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             // 📖 760×680: عرض أوسع لتبويب التراخيص — بطاقات المكونات بعمودين
             // كاملين وبنود EULA تتنفس. (كانت 520×600 فانحشرت البطاقات في ~420px
@@ -56,7 +56,7 @@ namespace Sayl.UI.Forms
 
             var lblName = new Label
             {
-                Text = "سيل — Sayl",
+                Text = AppLang.T("About.App.Brand"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
@@ -84,7 +84,7 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg,
                 Padding = new Padding(24, 12, 24, 14)
             };
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnClose.Dock = DockStyle.Fill;
             btnClose.DialogResult = DialogResult.Cancel;
             btnCloseHost.Controls.Add(btnClose);
@@ -110,7 +110,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════
         private TabPage BuildAboutPage()
         {
-            var page = new TabPage("عن النظام") { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
+            var page = new TabPage(AppLang.T("About.Tab.System")) { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
 
             // الحاضنة: ثلاثة أعمدة — مرن | عمود المحتوى 460px | مرن
             var shell = new TableLayoutPanel
@@ -142,7 +142,7 @@ namespace Sayl.UI.Forms
 
             var lblVersion = new Label
             {
-                Text = "الإصدار 1.0.0",
+                Text = AppLang.T("About.Version"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextMuted
@@ -155,14 +155,14 @@ namespace Sayl.UI.Forms
             {
                 string who = string.IsNullOrEmpty(customer) ? "—" : customer;
                 string until = expiryUtc == null
-                    ? "ترخيص دائم"
-                    : "حتى " + expiryUtc.Value.ToLocalTime().ToString("yyyy/MM/dd");
-                licenseText = $"مرخَّص لـ {who}  •  {until}";
+                    ? AppLang.T("About.License.Permanent")
+                    : AppLang.T("About.License.Until", expiryUtc.Value.ToLocalTime().ToString("yyyy/MM/dd"));
+                licenseText = AppLang.T("About.License.LicensedTo", who, until);
                 licenseColor = AppTheme.Success;
             }
             else
             {
-                licenseText = "غير مفعَّل";
+                licenseText = AppLang.T("About.License.NotActivated");
                 licenseColor = AppTheme.Danger;
             }
 
@@ -177,7 +177,7 @@ namespace Sayl.UI.Forms
 
             var lblDescription = new Label
             {
-                Text = "نظام متكامل للمبيعات وإدارة المخزون\nللمتاجر والصيدليات والمطاعم والأعمال الصغيرة.\n\nمبني على .NET 10 و SQL Server",
+                Text = AppLang.T("About.Description"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextPrimary,
@@ -186,7 +186,7 @@ namespace Sayl.UI.Forms
 
             var lblCreator = new Label
             {
-                Text = "By :\nم. الشريف اسحيم",
+                Text = AppLang.T("About.Creator"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(3, 16, 82),
@@ -217,9 +217,9 @@ namespace Sayl.UI.Forms
                     (socialHost.Height - socialPanel.Height) / 2);
             }
             socialHost.Resize += (_, _) => CenterSocial();
-            socialPanel.Controls.Add(MakeSocialIcon("فيسبوك", Properties.Resources.Facebook, "https://facebook.com/yourpage"));
+            socialPanel.Controls.Add(MakeSocialIcon(AppLang.T("About.Social.Facebook"), Properties.Resources.Facebook, "https://facebook.com/yourpage"));
             socialPanel.Controls.Add(MakeSocialIcon("GitHub", Properties.Resources.github, "https://github.com/yourusername"));
-            socialPanel.Controls.Add(MakeSocialIcon("الموقع", Properties.Resources.Website, "https://www.sayl.com"));
+            socialPanel.Controls.Add(MakeSocialIcon(AppLang.T("About.Social.Website"), Properties.Resources.Website, "https://www.sayl.com"));
             socialHost.Controls.Add(socialPanel);
 
             body.Controls.Add(lblVersion, 0, 0);
@@ -244,7 +244,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════
         private TabPage BuildLicensePage()
         {
-            var page = new TabPage("التراخيص") { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
+            var page = new TabPage(AppLang.T("About.Tab.Licenses")) { BackColor = AppTheme.CardBg, Dock = DockStyle.Fill };
 
             var scroll = new Panel
             {
@@ -293,7 +293,7 @@ namespace Sayl.UI.Forms
             {
                 Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = Color.White,
-                Text = "© 2026 م. الشريف اسحيم — جميع الحقوق محفوظة\r\n«سيل» علامة تجارية لمالكها",
+                Text = AppLang.T("About.License.Rights"),
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold)
             };
             var imgLogo = Brand.MakeLogo(56, AppTheme.SidebarBg);
@@ -304,23 +304,23 @@ namespace Sayl.UI.Forms
             AddRow(rightsCard, 96, 14);
 
             // ── 2) مقدمة ──
-            AddRow(MakeText("هذا البرنامج منتج تجاري مغلق المصدر — شراؤك للنسخة يمنحك «رخصة استخدام» غير حصرية وغير قابلة للتحويل، وفق البنود التالية:", bold: false), 42, 6);
+            AddRow(MakeText(AppLang.T("About.License.Intro"), bold: false), 42, 6);
 
             // ── 3) بنود الاتفاقية الخمسة ──
-            AddRow(MakeEulaCard("١", "طبيعة الترخيص",
-                "منتج تجاري مغلق المصدر. لا يعني شراؤك للنسخة تملّكك للبرنامج، وإنما حصولك على «رخصة استخدام» غير حصرية وغير قابلة للتحويل."), 98);
-            AddRow(MakeEulaCard("٢", "نطاق الاستخدام",
-                "يُرخَّص استخدام النظام على الجهاز المُفعَّل فقط. يرتبط الترخيص بمعرّف عتاد الجهاز (HWID — بصمة إلكترونية تُستخرج من مكونات الجهاز المادية)، ولا يعمل النظام على أي جهاز آخر دون ترخيص جديد. لإصدار ترخيص بديل (عطل أو ترقية جهاز) تواصل مع مطور النظام."), 122);
-            AddRow(MakeEulaCard("٣", "القيود",
-                "يُمنع صراحةً: نسخ البرنامج لأغراض التوزيع أو البيع • استخلاص الشيفرة المصدرية أو فك التجميع • إزالة أو التحايل على آلية التفعيل أو إشعارات حقوق الملكية."), 98);
-            AddRow(MakeEulaCard("٤", "حماية البيانات",
-                "جميع بياناتك تُخزَّن محليًا على جهازك — لا شيء يُرسَل عبر الإنترنت ولا يطّلع المطور على أي بيانات تجارية لك. النظام ينشئ نسخًا احتياطية تلقائية، وتقع مسؤولية نسخ إضافية خارجية على المستخدم."), 122);
-            AddRow(MakeEulaCard("٥", "إخلاء المسؤولية",
-                "يُقدَّم النظام «كما هو» دون ضمانات صريحة أو ضمنية لملاءمته لغرض معين. المطور غير مسؤول عن أية أرباح فائتة أو فقدان بيانات بما لا يخالف حدود القوانين المحلية. حد المسؤولية لا يتجاوز قيمة الترخيص المدفوعة."), 122, 12);
+            AddRow(MakeEulaCard(AppLang.T("About.License.Eula1.Number"), AppLang.T("About.License.Eula1.Title"),
+                AppLang.T("About.License.Eula1.Body")), 98);
+            AddRow(MakeEulaCard(AppLang.T("About.License.Eula2.Number"), AppLang.T("About.License.Eula2.Title"),
+                AppLang.T("About.License.Eula2.Body")), 122);
+            AddRow(MakeEulaCard(AppLang.T("About.License.Eula3.Number"), AppLang.T("About.License.Eula3.Title"),
+                AppLang.T("About.License.Eula3.Body")), 98);
+            AddRow(MakeEulaCard(AppLang.T("About.License.Eula4.Number"), AppLang.T("About.License.Eula4.Title"),
+                AppLang.T("About.License.Eula4.Body")), 122);
+            AddRow(MakeEulaCard(AppLang.T("About.License.Eula5.Number"), AppLang.T("About.License.Eula5.Title"),
+                AppLang.T("About.License.Eula5.Body")), 122, 12);
 
             // ── 4) عنوان قسم المكونات ──
-            AddRow(MakeSectionLabel("المكونات مفتوحة المصدر المستخدمة"), 30, 2);
-            AddRow(MakeText("النظام مبنٍ باستخدام مكونات بتراخيص مجانية تسمح بالاستخدام التجاري:", bold: false), 24, 6);
+            AddRow(MakeSectionLabel(AppLang.T("About.License.Components")), 30, 2);
+            AddRow(MakeText(AppLang.T("About.License.ComponentsIntro"), bold: false), 24, 6);
 
             // ── 5) شبكة المكونات: 4 صفوف × عمودان (Absolute 58 لا AutoSize) ──
             var grid = new TableLayoutPanel
@@ -335,14 +335,14 @@ namespace Sayl.UI.Forms
 
             string[] components =
             {
-                "QuestPDF 2026.8",      "توليد PDF — رخصة Community",
-                "ClosedXML 0.104",      "تصدير Excel — رخصة MIT",
-                "LiveChartsCore 2.0",   "الرسوم البيانية — MIT",
-                "EF Core 10",           "قاعدة البيانات — MIT",
-                "Microsoft.Extensions", "بنية التطبيق — MIT/Apache",
-                "BCrypt.Net 4.2",       "تشفير كلمات المرور — Apache",
-                "SQL Server Express",  "قاعدة بيانات المحل — مجاني",
-                ".NET Runtime 10",      "بيئة التشغيل — مجاني",
+                "QuestPDF 2026.8",      AppLang.T("About.License.ComponentPdf"),
+                "ClosedXML 0.104",      AppLang.T("About.License.ComponentExcel"),
+                "LiveChartsCore 2.0",   AppLang.T("About.License.ComponentCharts"),
+                "EF Core 10",           AppLang.T("About.License.ComponentDb"),
+                "Microsoft.Extensions", AppLang.T("About.License.ComponentFramework"),
+                "BCrypt.Net 4.2",       AppLang.T("About.License.ComponentCrypto"),
+                "SQL Server Express",  AppLang.T("About.License.ComponentSql"),
+                ".NET Runtime 10",      AppLang.T("About.License.ComponentRuntime"),
             };
             // 📖 خطوة 4 (زوجان لكل دورة) — خطوة 2 كانت تقرأ خارج الحدود
             for (int i = 0; i + 3 < components.Length; i += 4)
@@ -358,12 +358,12 @@ namespace Sayl.UI.Forms
             AddRow(grid, 4 * 58, 10);
 
             // ── 6) خلاصة GPL + الإصدار ──
-            AddRow(MakeText("لا يتضمن النظام أي مكوّن يفرض الكشف عن الشيفرة المصدرية (GPL / AGPL).", bold: true), 26, 2);
+            AddRow(MakeText(AppLang.T("About.License.NoGpl"), bold: true), 26, 2);
             var lblVer = new Label
             {
                 AutoSize = true, ForeColor = AppTheme.TextMuted,
                 Font = new Font("Segoe UI", 8.5F),
-                Text = "اتفاقية الإصدار 1.0 — 2026/09",
+                Text = AppLang.T("About.License.Version"),
                 Margin = new Padding(0), Padding = new Padding(0)
             };
             AddRow(lblVer, 22, 0);
@@ -508,7 +508,7 @@ namespace Sayl.UI.Forms
                 }
                 catch
                 {
-                    MessageBox.Show("تعذر فتح الرابط: " + url, "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(AppLang.T("About.Msg.OpenLinkFailed", url), AppLang.T("About.Msg.OpenLinkTitle"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             };
             return btn;

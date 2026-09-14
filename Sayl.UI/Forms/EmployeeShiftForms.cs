@@ -35,7 +35,7 @@ namespace Sayl.UI.Forms
         {
             _users = freeUsers;
 
-            Text = $"ربط حساب مستخدم — {employeeName}";
+            Text = AppLang.T("LinkAccount.Title", employeeName);
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(420, 220);
             BackColor = AppTheme.CardBg;
@@ -45,7 +45,7 @@ namespace Sayl.UI.Forms
 
             var lbl = new Label
             {
-                Text = "اختر الحساب غير المرتبط بموظف:",
+                Text = AppLang.T("LinkAccount.Label.Pick"),
                 Bounds = new Rectangle(30, 24, 360, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -59,13 +59,13 @@ namespace Sayl.UI.Forms
             if (_users.Count > 0)
                 _cmbUsers.SelectedIndex = 0;
 
-            var btnOk = AppTheme.MakeButton("ربط", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Link"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(220, 116, 170, 48);
             btnOk.Click += (_, _) =>
             {
                 if (_cmbUsers.SelectedIndex < 0 || _cmbUsers.SelectedIndex >= _users.Count)
                 {
-                    UiHelpers.ShowError(this, "اختر حسابًا.");
+                    UiHelpers.ShowError(this, AppLang.T("LinkAccount.Msg.PickRequired"));
                     return;
                 }
                 SelectedUserId = _users[_cmbUsers.SelectedIndex].UserId;
@@ -73,7 +73,7 @@ namespace Sayl.UI.Forms
                 Close();
             };
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg,
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(30, 116, 170, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
@@ -94,7 +94,7 @@ namespace Sayl.UI.Forms
         {
             _employeeId = employeeId;
 
-            Text = $"تعيين شفت — {employeeName}";
+            Text = AppLang.T("ShiftAssign.Title", employeeName);
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(500, 480);
             BackColor = AppTheme.CardBg;
@@ -104,7 +104,7 @@ namespace Sayl.UI.Forms
 
             var lblShift = new Label
             {
-                Text = "الشفت",
+                Text = AppLang.T("ShiftAssign.Label.Shift"),
                 Bounds = new Rectangle(30, 24, 420, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -115,13 +115,13 @@ namespace Sayl.UI.Forms
 
             var lblDays = new Label
             {
-                Text = "أيام العمل",
+                Text = AppLang.T("ShiftAssign.Label.Days"),
                 Bounds = new Rectangle(30, 98, 420, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
 
-            string[] days = { "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت" };
+            string[] days = { AppLang.T("ShiftAssign.Day.Sun"), AppLang.T("ShiftAssign.Day.Mon"), AppLang.T("ShiftAssign.Day.Tue"), AppLang.T("ShiftAssign.Day.Wed"), AppLang.T("ShiftAssign.Day.Thu"), AppLang.T("ShiftAssign.Day.Fri"), AppLang.T("ShiftAssign.Day.Sat") };
 
             // Checkboxes بحجم ممتاز لشاشة اللمس: 160×52 — نقرة إصبع مريحة بلا مبالغة
             var daysPanel = new Panel
@@ -146,11 +146,11 @@ namespace Sayl.UI.Forms
             }
             Controls.Add(daysPanel);
 
-            var btnOk = AppTheme.MakeButton("تعيين", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Assign"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(280, 320, 190, 48);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg,
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(30, 320, 190, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
@@ -174,14 +174,14 @@ namespace Sayl.UI.Forms
 
                 foreach (var s in shifts)
                     _cmbShifts.Items.Add(s.CrossesMidnight
-                        ? $"{s.Name} ({s.StartTime:HH:mm} → {s.EndTime:HH:mm} يعبر منتصف الليل)"
+                        ? $"{s.Name} ({s.StartTime:HH:mm} → {s.EndTime:HH:mm} {AppLang.T("ShiftAssign.CrossesMidnight")})"
                         : $"{s.Name} ({s.StartTime:HH:mm} → {s.EndTime:HH:mm})");
                 if (shifts.Count > 0)
                     _cmbShifts.SelectedIndex = 0;
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الشفتات.");
+                UiHelpers.ShowError(this, AppLang.T("ShiftAssign.Msg.LoadFailed"));
             }
         }
 
@@ -198,14 +198,14 @@ namespace Sayl.UI.Forms
         {
             if (_cmbShifts.SelectedIndex < 0)
             {
-                UiHelpers.ShowError(this, "اختر شفتًا (أضف شفتات من زر «الشفتات والإجازات»).");
+                UiHelpers.ShowError(this, AppLang.T("ShiftAssign.Msg.ShiftRequired"));
                 return;
             }
 
             byte days = SelectedDays();
             if (days < 1)
             {
-                UiHelpers.ShowError(this, "اختر يومًا واحدًا على الأقل.");
+                UiHelpers.ShowError(this, AppLang.T("ShiftAssign.Msg.OneDayRequired"));
                 return;
             }
 
@@ -229,7 +229,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تعيين الشفت.");
+                UiHelpers.ShowError(this, AppLang.T("ShiftAssign.Msg.AssignFailed"));
             }
         }
     }
