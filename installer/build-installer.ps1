@@ -83,7 +83,7 @@ Write-Host "`n[2/3] Staging SQL scripts..." -ForegroundColor Cyan
 $sqlSources = @(
     (Join-Path $repoRoot "SaylDB.sql"),
     (Join-Path $repoRoot "DataSeed.sql"),
-    # (Join-Path $repoRoot "SQL_Upgrades\Upgrade_01_Production.sql")
+    (Join-Path $repoRoot "Upgrade_09_SaylLeastPrivilege.sql")
 )
 $stagingXml = Join-Path $stagingDb "xml"
 New-Item -ItemType Directory -Path $stagingXml -Force | Out-Null

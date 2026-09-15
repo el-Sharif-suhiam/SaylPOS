@@ -490,12 +490,23 @@ begin
     Conn.Execute('ALTER LOGIN [' + SaylLoginName + '] WITH PASSWORD=N''' + Pwd + ''', CHECK_POLICY=OFF')
   else
     Conn.Execute('CREATE LOGIN [' + SaylLoginName + '] WITH PASSWORD=N''' + Pwd + ''', CHECK_POLICY=OFF');
-  try
-    Conn.Execute('ALTER SERVER ROLE sysadmin ADD MEMBER [' + SaylLoginName + ']');
-  except
-    { probably already a member - harmless }
-  end;
-  AppendLog(Log, 'Login ''' + SaylLoginName + ''' ready.');
+
+  { الامتياز الأدنى — no sysadmin ever:
+    - dbcreator: RESTORE DATABASE + ALTER DATABASE (SINGLE/MULTI_USER) التي يحتاجها التطبيق
+    - db_backupoperator: BACKUP DATABASE
+    - dbo عبر ALTER AUTHORIZATION: كامل CRUD على SaylDB (لا يحتاج تبديل قاعدة — ينفذ من أي سياق)
+    إعادة التثبيت على أجهزة قديمة تسحب sysadmin تلقائيًا (شرط EXISTS قبل DROP). }
+  Conn.Execute(
+    'IF EXISTS (SELECT 1 FROM sys.server_role_members m ' +
+    'JOIN sys.server_principals r ON m.role_principal_id = r.principal_id ' +
+    'JOIN sys.server_principals p ON m.member_principal_id = p.principal_id ' +
+    'WHERE r.name = ''sysadmin'' AND p.name = ''' + SaylLoginName + ''') ' +
+    'ALTER SERVER ROLE sysadmin DROP MEMBER [' + SaylLoginName + ']; ' +
+    'ALTER SERVER ROLE dbcreator ADD MEMBER [' + SaylLoginName + ']; ' +
+    'ALTER SERVER ROLE db_backupoperator ADD MEMBER [' + SaylLoginName + ']; ' +
+    'IF DB_ID(N''SaylDB'') IS NOT NULL ' +
+    'ALTER AUTHORIZATION ON DATABASE::[SaylDB] TO [' + SaylLoginName + '];');
+  AppendLog(Log, 'Login ''' + SaylLoginName + ''' ready (least privilege, no sysadmin).');
 end;
 
 { ---------- main-role preparation ---------- }
