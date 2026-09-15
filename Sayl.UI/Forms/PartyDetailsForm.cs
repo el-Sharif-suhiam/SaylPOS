@@ -13,7 +13,7 @@ namespace Sayl.UI.Forms
             (string Caption, string Value)? extra1 = null,
             (string Caption, string Value)? extra2 = null)
         {
-            Text = "تفاصيل الطرف";
+            Text = AppLang.T("PartyDetails.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             BackColor = AppTheme.CardBg;
             RightToLeft = Yes();
@@ -24,9 +24,9 @@ namespace Sayl.UI.Forms
 
             string typeText = party.PartyType switch
             {
-                'C' => "عميل",
-                'S' => "مورد",
-                'B' => "عميل ومورد",
+                'C' => AppLang.T("PartyDetails.Type.Customer"),
+                'S' => AppLang.T("PartyDetails.Type.Supplier"),
+                'B' => AppLang.T("PartyDetails.Type.Both"),
                 _ => party.PartyType.ToString()
             };
 
@@ -59,7 +59,7 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label
             {
-                Text = $"بيانات {typeText}: {party.Name}",
+                Text = AppLang.T("PartyDetails.Info.Title", typeText, party.Name),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -67,22 +67,22 @@ namespace Sayl.UI.Forms
                 Height = 44
             };
 
-            Add("الاسم", party.Name);
-            Add("النوع", typeText);
-            Add("الحالة", party.IsActive ? "نشط" : "معطل");
-            Add("الجوال 1", party.Phone1);
-            Add("الجوال 2", party.Phone2);
-            Add("البريد الإلكتروني", party.Email);
-            Add("العنوان", party.AddressLine1);
-            Add("العنوان 2", party.AddressLine2);
+            Add(AppLang.T("PartyDetails.Label.Name"), party.Name);
+            Add(AppLang.T("PartyDetails.Label.Type"), typeText);
+            Add(AppLang.T("Common.Label.Status"), party.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
+            Add(AppLang.T("CustomerPicker.Label.Phone"), party.Phone1);
+            Add(AppLang.T("CustomerPicker.Label.Phone2"), party.Phone2);
+            Add(AppLang.T("PartyDetails.Label.Email"), party.Email);
+            Add(AppLang.T("PartyDetails.Label.Address"), party.AddressLine1);
+            Add(AppLang.T("PartyDetails.Label.Address2"), party.AddressLine2);
 
             if (extra1.HasValue) Add(extra1.Value.Caption, extra1.Value.Value);
             if (extra2.HasValue) Add(extra2.Value.Caption, extra2.Value.Value);
 
-            Add("ملاحظات", party.Notes);
-            Add("تاريخ الإضافة", party.CreatedAt == default ? null : Sayl.UI.Infrastructure.AppClock.ToLocal(party.CreatedAt).ToString("yyyy-MM-dd"));
+            Add(AppLang.T("Common.Label.Notes"), party.Notes);
+            Add(AppLang.T("PartyDetails.Label.AddedAt"), party.CreatedAt == default ? null : Sayl.UI.Infrastructure.AppClock.ToLocal(party.CreatedAt).ToString("yyyy-MM-dd"));
             if (row < 14)
-                Add("آخر تحديث", party.UpdatedAt?.ToString("yyyy-MM-dd"));
+                Add(AppLang.T("PartyDetails.Label.LastUpdate"), party.UpdatedAt?.ToString("yyyy-MM-dd"));
 
             // صف مرن يمتص المساحة المتبقية ثم زر الإغلاق
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -92,7 +92,7 @@ namespace Sayl.UI.Forms
             row++;
 
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Dock = DockStyle.Fill;
             btnClose.Margin = new Padding(0, 6, 0, 8);

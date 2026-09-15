@@ -38,7 +38,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = _existing == null ? "إضافة منتج" : "تعديل منتج";
+            Text = _existing == null ? AppLang.T("Products.Edit.AddTitle") : AppLang.T("Products.Edit.EditTitle");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 470);
@@ -56,10 +56,10 @@ namespace Sayl.UI.Forms
 
             // ── الحقول الفردية كاملة العرض (400) — فوق بعضها ──
             // * = إلزامي (الاسم وسعر البيع يتحقق منهما SaveAsync).
-            _txtName = MakeField("الاسم *", x, 58, w, _existing?.Name ?? "");
-            _txtBarcode = MakeField("الباركود", x, 116, w, _existing?.Barcode ?? "");
+            _txtName = MakeField(AppLang.T("Products.Edit.Name"), x, 58, w, _existing?.Name ?? "");
+            _txtBarcode = MakeField(AppLang.T("Products.Edit.Barcode"), x, 116, w, _existing?.Barcode ?? "");
             // ── صف مزدوج: الوحدة (يمين 30..220) والنوع قائمة (يسار 240..430) ──
-            _txtUnit = MakeField("الوحدة", x, 174, 190, _existing?.Unit ?? "");
+            _txtUnit = MakeField(AppLang.T("Products.Edit.Unit"), x, 174, 190, _existing?.Unit ?? "");
 
             // النوع: قائمة إنجليزية مباشرة (stock/service/manufactured) —
             // تُحفظ كما هي في قاعدة البيانات بلا ترجمة (عرض مبسّط).
@@ -73,20 +73,20 @@ namespace Sayl.UI.Forms
             _cmbType.Items.AddRange(new object[] { "stock", "service", "manufactured" });
             _cmbType.SelectedIndex = _existing == null ? 0 : Math.Max(0, _cmbType.Items.IndexOf(_existing.Type));
 
-            var lblType = new Label { Text = "النوع", Bounds = new Rectangle(240, 174, 190, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblType = new Label { Text = AppLang.T("Products.Edit.Type"), Bounds = new Rectangle(240, 174, 190, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
 
             // ── صف مزدوج ثانٍ: سعر البيع (يمين) والتكلفة (يسار) ──
             // "0.##": يظهر 5 لا 5.00 — ألطف لأسعار الوحدات الصحيحة.
-            _txtBasePrice = MakeField("سعر البيع *", x, 244, 190, _existing?.BasePrice.ToString("0.##") ?? "");
-            _txtCostPrice = MakeField("التكلفة", 240, 244, 190, _existing?.CostPrice.ToString("0.##") ?? "");
-            _txtReorder = MakeField("حد الطلب", 240, 302, 190, _existing?.ReorderLevel?.ToString() ?? "");
+            _txtBasePrice = MakeField(AppLang.T("Products.Edit.SellPrice"), x, 244, 190, _existing?.BasePrice.ToString("0.##") ?? "");
+            _txtCostPrice = MakeField(AppLang.T("Products.Edit.Cost"), 240, 244, 190, _existing?.CostPrice.ToString("0.##") ?? "");
+            _txtReorder = MakeField(AppLang.T("Products.Edit.Reorder"), 240, 302, 190, _existing?.ReorderLevel?.ToString() ?? "");
 
             // ── الأزرار: حفظ (يمين 30) أعرض، إلغاء (يسار 260) أضيق ──
-            var btnOk = AppTheme.MakeButton("حفظ", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(x, 360, 220, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(260, 360, 170, 50);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
 
@@ -115,13 +115,13 @@ namespace Sayl.UI.Forms
         {
             if (string.IsNullOrWhiteSpace(_txtName.Text))
             {
-                UiHelpers.ShowError(this, "الاسم مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.NameRequired"));
                 return;
             }
 
             if (!decimal.TryParse(_txtBasePrice.Text?.Trim(), out decimal basePrice) || basePrice < 0)
             {
-                UiHelpers.ShowError(this, "أدخل سعر بيع صحيحًا.");
+                UiHelpers.ShowError(this, AppLang.T("Products.Msg.SellPriceInvalid"));
                 return;
             }
 
@@ -148,7 +148,7 @@ namespace Sayl.UI.Forms
                 if (_existing == null)
                 {
                     var added = await productService.AddNewProductAsync(dto);
-                    result = added.IsSuccess ? Result.Ok("تم حفظ المنتج بنجاح.") : Result.Fail(added.Message);
+                    result = added.IsSuccess ? Result.Ok(AppLang.T("Products.Msg.Saved")) : Result.Fail(added.Message);
                 }
                 else
                 {
@@ -158,11 +158,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل الحفظ." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Common.Msg.SaveFailed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowResult(this, result, "تم حفظ المنتج بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Products.Msg.Saved"));
             DialogResult = DialogResult.OK;
         }
     }

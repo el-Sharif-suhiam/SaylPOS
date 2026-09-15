@@ -63,7 +63,7 @@ namespace Sayl.UI.Forms
         private void BuildUi()
         {
             // ── قواعد النافذة (نفس نمط كل النوافذ الحوارية) ──
-            Text = "مرتجع بيع";
+            Text = AppLang.T("Return.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(760, 640);
             MinimumSize = new Size(560, 480);
@@ -90,7 +90,7 @@ namespace Sayl.UI.Forms
             // ── العنوان ──
             var lblTitle = new Label
             {
-                Text = "مرتجع بيع",
+                Text = AppLang.T("Return.Title"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -122,7 +122,7 @@ namespace Sayl.UI.Forms
 
             var lblInvoice = new Label
             {
-                Text = "رقم فاتورة البيع الأصلية",
+                Text = AppLang.T("Return.Label.OriginalInvoice"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted,
@@ -150,7 +150,7 @@ namespace Sayl.UI.Forms
 
 
 
-            _btnLoad = AppTheme.MakeButton("تحميل الفاتورة", AppTheme.Primary,hoverColor: AppTheme.PrimaryDark);
+            _btnLoad = AppTheme.MakeButton(AppLang.T("Return.Button.Load"), AppTheme.Primary,hoverColor: AppTheme.PrimaryDark);
             _btnLoad.TextAlign = ContentAlignment.MiddleCenter; 
             _btnLoad.Dock = DockStyle.Fill;
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
@@ -163,10 +163,10 @@ namespace Sayl.UI.Forms
             UiHelpers.StyleGrid(_grid);
             _grid.ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
-            _grid.Columns.Add("colProduct", "المنتج");
-            _grid.Columns.Add("colSold", "المباع");
-            _grid.Columns.Add("colPrice", "السعر");
-            var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = "كمية المرتجع", ReadOnly = false };
+            _grid.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            _grid.Columns.Add("colSold", AppLang.T("Return.Label.Sold"));
+            _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
+            var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("Return.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
             _grid.Columns["colProduct"].FillWeight = 45;
             _grid.Columns["colSold"].FillWeight = 15;
@@ -189,7 +189,7 @@ namespace Sayl.UI.Forms
             // ── سطر المعلومات: بطاقة رمادية تتحدث بعد التحميل ──
             _lblInfo = new Label
             {
-                Text = "أدخل رقم فاتورة البيع ثم اضغط تحميل.",
+                Text = AppLang.T("Return.Info.Initial"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font("Segoe UI", 10F),
@@ -214,12 +214,12 @@ namespace Sayl.UI.Forms
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
             buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
 
-            var btnReturn = AppTheme.MakeButton("تنفيذ المرتجع", AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 50);
+            var btnReturn = AppTheme.MakeButton(AppLang.T("Return.Button.Execute"), AppTheme.Warning, hoverColor: Color.FromArgb(180, 83, 9), height: 50);
             btnReturn.Dock = DockStyle.Fill;
             btnReturn.Margin = new Padding(0, 6, 4, 6);
             btnReturn.Click += async (_, _) => await ExecuteReturnAsync();
 
-            var btnCancel = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 50);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 50);
             btnCancel.Dock = DockStyle.Fill;
             btnCancel.Margin = new Padding(4, 6, 0, 6);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = إغلاق
@@ -244,7 +244,7 @@ namespace Sayl.UI.Forms
         {
             if (!int.TryParse(_txtInvoiceId.Text?.Trim(), out int invoiceId) || invoiceId <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل رقم فاتورة صحيحًا.");
+                UiHelpers.ShowError(this, AppLang.T("Return.Msg.InvalidInvoiceId"));
                 return;
             }
 
@@ -261,7 +261,7 @@ namespace Sayl.UI.Forms
 
                 if (result.Data.Type != "sale" || result.Data.Status != "completed")
                 {
-                    UiHelpers.ShowError(this, "المرتجع مسموح فقط على فواتير بيع مكتملة.");
+                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.OnlyCompletedSale"));
                     return;
                 }
 
@@ -272,11 +272,11 @@ namespace Sayl.UI.Forms
                 foreach (var item in _items)
                     _grid.Rows.Add(item.ProductName, item.Quantity, UiHelpers.Money(item.ItemPrice), 0);
 
-                _lblInfo.Text = $"فاتورة #{invoiceId} — العميل: {result.Data.PartyName ?? "مجهول"} — أدخل كمية المرتجع لكل بند.";
+                _lblInfo.Text = AppLang.T("Return.Info.Loaded", invoiceId, result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الفاتورة.");
+                UiHelpers.ShowError(this, AppLang.T("Return.Msg.LoadFailed"));
             }
         }
 
@@ -284,7 +284,7 @@ namespace Sayl.UI.Forms
         {
             if (_originalInvoiceId <= 0 || _items.Count == 0)
             {
-                UiHelpers.ShowError(this, "حمّل الفاتورة أولًا.");
+                UiHelpers.ShowError(this, AppLang.T("Return.Msg.LoadFirst"));
                 return;
             }
 
@@ -299,7 +299,7 @@ namespace Sayl.UI.Forms
                 var item = _items[i];
                 if (qty > item.Quantity)
                 {
-                    UiHelpers.ShowError(this, $"كمية المرتجع للمنتج '{item.ProductName}' أكبر من المباع ({item.Quantity}).");
+                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.QtyExceedsSold", item.ProductName, item.Quantity));
                     return;
                 }
 
@@ -309,12 +309,12 @@ namespace Sayl.UI.Forms
 
             if (returnItems.Count == 0)
             {
-                UiHelpers.ShowError(this, "أدخل كمية مرتجعة لبند واحد على الأقل.");
+                UiHelpers.ShowError(this, AppLang.T("Return.Msg.OneItemRequired"));
                 return;
             }
 
-            bool confirmed = ConfirmationDialog.Show(this, "تنفيذ مرتجع",
-                $"سيتم إرجاع {returnItems.Count} بند بقيمة {UiHelpers.Money(returnTotal)} للمخزون. متابعة؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Return.Execute.Title"),
+                AppLang.T("Return.Execute.Confirm", returnItems.Count, UiHelpers.Money(returnTotal)));
             if (!confirmed)
                 return;
 
@@ -336,11 +336,11 @@ namespace Sayl.UI.Forms
 
             if (!result.IsSuccess)
             {
-                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? "فشل تنفيذ المرتجع." : result.Message);
+                UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Return.Msg.Failed") : result.Message);
                 return;
             }
 
-            UiHelpers.ShowInfo(this, $"تم تنفيذ المرتجع بنجاح. رقم المرتجع: {result.Data}");
+            UiHelpers.ShowInfo(this, AppLang.T("Return.Msg.Done", result.Data));
             Returned = true;
             DialogResult = DialogResult.OK;
         }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
+using Common.DTOs;
 using Common.DTOs.ViewModel;
 using System;
 using System.Collections.Generic;
@@ -65,6 +66,38 @@ namespace Sayl.Core.Services
                     IsActive = u.IsActive
                 })
                 .ToListAsync();
+        }
+
+        /// <summary>صفحة حسابات (ترقيم SQL): نفس فلاتر القائمة + عدّ كامل + Skip/Take.</summary>
+        public async Task<PagedResult<UserVM>> GetUsersPagedAsync(
+            bool includeInactive = false, int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Users.AsQueryable();
+
+            if (!includeInactive)
+                query = query.Where(u => u.IsActive);
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderBy(u => u.Username)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(u => new UserVM
+                {
+                    UserId = u.UserId,
+                    UserName = u.Username,
+                    RoleName = u.Role.Name,
+                    RoleId = u.RoleId,
+                    RoleValue = u.Role.RoleValue,
+                    Name = u.Employee.Name ?? "No Employee",
+                    IsActive = u.IsActive
+                })
+                .ToListAsync();
+
+            return new PagedResult<UserVM> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
         }
 
         public async Task<UserVM?> GetUserAsync(int userId)

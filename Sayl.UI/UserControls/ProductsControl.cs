@@ -13,7 +13,7 @@ namespace Sayl.UI.UserControls
     {
         private List<DtoProduct> _products = new();
 
-        protected override string Title => "المنتجات";
+        protected override string Title => AppLang.T("Products.Section.Title");
 
         // مفتاح «عرض المعطّلين» في شريط الأدوات — الافتراضي: المنتجات النشطة فقط
         protected override bool SupportsShowDeleted => true;
@@ -24,17 +24,22 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-                _products = await productService.GetProductsListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await productService.GetProductsPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _products = paged.Items;
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colName", "الاسم");
-                Grid.Columns.Add("colBarcode", "الباركود");
-                Grid.Columns.Add("colUnit", "الوحدة");
-                Grid.Columns.Add("colType", "النوع");
-                Grid.Columns.Add("colPrice", "سعر البيع");
-                Grid.Columns.Add("colCost", "التكلفة");
-                Grid.Columns.Add("colReorder", "حد الطلب");
-                Grid.Columns.Add("colStatus", "الحالة");
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+                Grid.Columns.Add("colBarcode", AppLang.T("Common.Label.Barcode"));
+                Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
+                Grid.Columns.Add("colType", AppLang.T("Common.Label.Type"));
+                Grid.Columns.Add("colPrice", AppLang.T("Products.Label.SellPrice"));
+                Grid.Columns.Add("colCost", AppLang.T("Common.Label.Cost"));
+                Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
                 Grid.Columns["colName"].FillWeight = 28;
                 Grid.Columns["colBarcode"].FillWeight = 18;
                 Grid.Columns["colUnit"].FillWeight = 9;
@@ -48,22 +53,23 @@ namespace Sayl.UI.UserControls
                 foreach (var p in _products)
                     Grid.Rows.Add(p.Name, p.Barcode ?? "-", p.Unit ?? "-", p.Type,
                         UiHelpers.Money(p.BasePrice), UiHelpers.Money(p.CostPrice),
-                        p.ReorderLevel?.ToString() ?? "-", p.IsActive ? "نشط" : "معطل");
+                        p.ReorderLevel?.ToString() ?? "-",
+                        p.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المنتجات.");
+                UiHelpers.ShowError(this, AppLang.T("Products.Msg.LoadFailed"));
             }
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة منتج", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditProduct(null), 140);
+            AddToolbarButton(AppLang.T("Products.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditProduct(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
-            AddToolbarButton("تفعيل/تعطيل", AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
+            AddToolbarButton(AppLang.T("Common.Button.ToggleActive"), AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
         }
 
         private void EditSelected()
@@ -71,7 +77,7 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _products.Count)
             {
-                UiHelpers.ShowError(this, "اختر منتجًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Products.Msg.PickProduct"));
                 return;
             }
             EditProduct(_products[idx]);
@@ -89,15 +95,16 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _products.Count)
             {
-                UiHelpers.ShowError(this, "اختر منتجًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Products.Msg.PickProduct"));
                 return;
             }
 
             var product = _products[idx];
-            bool confirmed = ConfirmationDialog.Show(this, product.IsActive ? "تعطيل منتج" : "تفعيل منتج",
+            bool confirmed = ConfirmationDialog.Show(this,
+                product.IsActive ? AppLang.T("Products.Title.Deactivate") : AppLang.T("Products.Title.Activate"),
                 product.IsActive
-                    ? $"سيتم تعطيل المنتج '{product.Name}'. هل أنت متأكد؟"
-                    : $"سيتم تفعيل المنتج '{product.Name}'. متابعة؟");
+                    ? AppLang.T("Products.Msg.DeactivateConfirm", product.Name)
+                    : AppLang.T("Products.Msg.ActivateConfirm", product.Name));
             if (!confirmed)
                 return;
 

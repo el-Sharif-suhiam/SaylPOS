@@ -18,7 +18,7 @@ namespace Sayl.UI.UserControls
     {
         private List<DtoRole> _roles = new();
 
-        protected override string Title => "الأدوار والصلاحيات";
+        protected override string Title => AppLang.T("Roles.Section.Title");
 
         // مفتاح «عرض المعطلين» — الأدوار المعطلة تظهر ويمكن استعادتها
         protected override bool SupportsShowDeleted => true;
@@ -29,15 +29,20 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
-                _roles = await roleService.GetRolesListAsync(TxtSearch.Text?.Trim() ?? "",
-                    includeInactive: ShowInactive);
+                var paged = await roleService.GetRolesPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "",
+                    includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _roles = paged.Items;
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colId", "الرقم");
-                Grid.Columns.Add("colName", "اسم الدور");
-                Grid.Columns.Add("colDesc", "الصلاحيات");
-                Grid.Columns.Add("colValue", "القيمة");
-                Grid.Columns.Add("colStatus", "الحالة");
+                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+                Grid.Columns.Add("colName", AppLang.T("Roles.Label.RoleName"));
+                Grid.Columns.Add("colDesc", AppLang.T("Roles.Label.Perms"));
+                Grid.Columns.Add("colValue", AppLang.T("Roles.Label.Value"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
                 Grid.Columns["colId"].FillWeight = 8;
                 Grid.Columns["colName"].FillWeight = 24;
                 Grid.Columns["colDesc"].FillWeight = 42;
@@ -52,19 +57,19 @@ namespace Sayl.UI.UserControls
                         || r.RoleValue == AppPermissions.CashierRoleValue;
 
                     string desc = fixedRole
-                        ? AppPermissions.Describe(r.RoleValue)
-                        : $"مخصص — {AppPermissions.Describe(r.RoleValue)}";
+                        ? AppLang.PermDescribe(r.RoleValue)
+                        : AppLang.T("Roles.Custom", AppLang.PermDescribe(r.RoleValue));
 
                     string status = fixedRole
-                        ? "أساسي (محمي)"
-                        : r.IsActive ? "نشط" : "معطل";
+                        ? AppLang.T("Roles.Fixed")
+                        : r.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive");
 
                     Grid.Rows.Add(r.RoleId, r.Name, desc, r.RoleValue, status);
                 }
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الأدوار.");
+                UiHelpers.ShowError(this, AppLang.T("Roles.Msg.LoadFailed"));
             }
         }
 
@@ -72,11 +77,11 @@ namespace Sayl.UI.UserControls
         // «تعطيل/تفعيل» (لا حذف) — سياسة النظام: الحذف الناعم للأدوار.
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة دور", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditRole(null), 140);
+            AddToolbarButton(AppLang.T("Roles.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditRole(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
-            AddToolbarButton("تعطيل/تفعيل", AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
+            AddToolbarButton(AppLang.T("Roles.Button.Toggle"), AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
         }
 
         private void EditSelected()
@@ -84,7 +89,7 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _roles.Count)
             {
-                UiHelpers.ShowError(this, "اختر دورًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Roles.Msg.PickRole"));
                 return;
             }
             EditRole(_roles[idx]);
@@ -98,7 +103,7 @@ namespace Sayl.UI.UserControls
                  existing.RoleValue == AppPermissions.AccountantRoleValue ||
                  existing.RoleValue == AppPermissions.CashierRoleValue))
             {
-                UiHelpers.ShowInfo(this, $"الدور '{existing.Name}' أساسي ومحمي — لا يُعدَّل. أنشئ دورًا مخصصًا جديدًا.");
+                UiHelpers.ShowInfo(this, AppLang.T("Roles.Msg.FixedNoEdit", existing.Name));
                 return;
             }
 
@@ -112,7 +117,7 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _roles.Count)
             {
-                UiHelpers.ShowError(this, "اختر دورًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Roles.Msg.PickRole"));
                 return;
             }
 
@@ -123,16 +128,16 @@ namespace Sayl.UI.UserControls
                 role.RoleValue == AppPermissions.AccountantRoleValue ||
                 role.RoleValue == AppPermissions.CashierRoleValue)
             {
-                UiHelpers.ShowError(this, $"الدور '{role.Name}' أساسي ومحمي — لا يُعطَّل ولا يُفعَّل.");
+                UiHelpers.ShowError(this, AppLang.T("Roles.Msg.FixedNoToggle", role.Name));
                 return;
             }
 
             bool deactivating = role.IsActive;
             if (!ConfirmationDialog.Show(this,
-                    deactivating ? "تعطيل دور" : "تفعيل دور",
+                    deactivating ? AppLang.T("Roles.Title.Deactivate") : AppLang.T("Roles.Title.Activate"),
                     deactivating
-                        ? $"سيتم تعطيل الدور '{role.Name}'. حاملوه الحاليون (إن وُجدوا) يُمنعون من الدخول حتى إعادة تعيينهم. متابعة؟"
-                        : $"سيتم تفعيل الدور '{role.Name}'. متابعة؟"))
+                        ? AppLang.T("Roles.Msg.DeactivateConfirm", role.Name)
+                        : AppLang.T("Roles.Msg.ActivateConfirm", role.Name)))
                 return;
 
             Result result;

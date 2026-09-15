@@ -42,7 +42,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "تفاصيل الفاتورة";
+            Text = AppLang.T("InvoiceDetails.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(680, 700);
             MinimumSize = new Size(520, 440);
@@ -70,7 +70,7 @@ namespace Sayl.UI.Forms
 
             _lblHeader = new Label
             {
-                Text = "جارٍ التحميل...",
+                Text = AppLang.T("InvoiceDetails.Loading"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopRight,
                 Font = new Font("Segoe UI", 11F),
@@ -79,7 +79,7 @@ namespace Sayl.UI.Forms
 
             var lblItems = new Label
             {
-                Text = "البنود",
+                Text = AppLang.T("InvoiceDetails.Label.Items"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = AppTheme.FontHeading,
@@ -88,11 +88,11 @@ namespace Sayl.UI.Forms
 
             _gridItems = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridItems);
-            _gridItems.Columns.Add("colProduct", "المنتج");
-            _gridItems.Columns.Add("colBatch", "الدفعة");
-            _gridItems.Columns.Add("colQty", "الكمية");
-            _gridItems.Columns.Add("colPrice", "السعر");
-            _gridItems.Columns.Add("colTotal", "الإجمالي");
+            _gridItems.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            _gridItems.Columns.Add("colBatch", AppLang.T("Common.Label.Batch"));
+            _gridItems.Columns.Add("colQty", AppLang.T("Common.Label.Qty"));
+            _gridItems.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
+            _gridItems.Columns.Add("colTotal", AppLang.T("Common.Label.Total"));
             _gridItems.Columns["colProduct"].FillWeight = 38;
             _gridItems.Columns["colBatch"].FillWeight = 16;
             _gridItems.Columns["colQty"].FillWeight = 12;
@@ -101,7 +101,7 @@ namespace Sayl.UI.Forms
 
             var lblPayments = new Label
             {
-                Text = "المدفوعات",
+                Text = AppLang.T("InvoiceDetails.Label.Payments"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = AppTheme.FontHeading,
@@ -110,9 +110,9 @@ namespace Sayl.UI.Forms
 
             _gridPayments = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridPayments);
-            _gridPayments.Columns.Add("colDate", "التاريخ");
-            _gridPayments.Columns.Add("colMethod", "الطريقة");
-            _gridPayments.Columns.Add("colAmount", "المبلغ");
+            _gridPayments.Columns.Add("colDate", AppLang.T("InvoiceDetails.Label.PaymentDate"));
+            _gridPayments.Columns.Add("colMethod", AppLang.T("Common.Label.Method"));
+            _gridPayments.Columns.Add("colAmount", AppLang.T("Common.Label.Amount"));
             _gridPayments.Columns["colDate"].FillWeight = 34;
             _gridPayments.Columns["colMethod"].FillWeight = 33;
             _gridPayments.Columns["colAmount"].FillWeight = 33;
@@ -127,18 +127,18 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(8, 0, 8, 0)
             };
 
-            var btnPrint = AppTheme.MakeButton("طباعة حرارية 80مم", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnPrint = AppTheme.MakeButton(AppLang.T("InvoiceDetails.Button.Thermal"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnPrint.Dock = DockStyle.Fill;
             btnPrint.Margin = new Padding(0, 0, 4, 0);
             btnPrint.Click += async (_, _) => await PrintPdfAsync(InvoicePrintFormat.ThermalReceipt);
 
             // الفاتورة الرسمية A4 — للتقارير المفصلة والاحتياجات الرسمية (توقيعات، دفعات، دفعات)
-            var btnPrintA4 = AppTheme.MakeButton("فاتورة A4 احترافية", AppTheme.Accent, hoverColor: AppTheme.AccentDark);
+            var btnPrintA4 = AppTheme.MakeButton(AppLang.T("InvoiceDetails.Button.A4"), AppTheme.Accent, hoverColor: AppTheme.AccentDark);
             btnPrintA4.Dock = DockStyle.Fill;
             btnPrintA4.Margin = new Padding(4, 0, 4, 0);
             btnPrintA4.Click += async (_, _) => await PrintPdfAsync(InvoicePrintFormat.A4Detailed);
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Dock = DockStyle.Fill;
             btnClose.Margin = new Padding(4, 0, 0, 0);
             btnClose.DialogResult = DialogResult.Cancel;
@@ -179,11 +179,16 @@ namespace Sayl.UI.Forms
                 _invoice = result.Data;
                 var inv = _invoice;
 
-                Text = $"فاتورة #{inv.InvoiceId}";
-                _lblHeader.Text =
-                    $"فاتورة رقم: {inv.InvoiceId}    النوع: {TranslateType(inv.Type)}    الحالة: {TranslateStatus(inv.Status)}    الدفع: {TranslatePayment(inv.PaymentStatus)}\n" +
-                    $"العميل: {inv.PartyName ?? "عميل مجهول"}    {(string.IsNullOrWhiteSpace(inv.PartyPhone) ? "" : $"جوال: {inv.PartyPhone}    ")}الكاشير: {inv.CashierName}\n" +
-                    $"التاريخ: {Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}";
+                Text = AppLang.T("InvoiceDetails.Title", inv.InvoiceId);
+                _lblHeader.Text = AppLang.T("InvoiceDetails.Header",
+                    inv.InvoiceId,
+                    TranslateType(inv.Type),
+                    TranslateStatus(inv.Status),
+                    TranslatePayment(inv.PaymentStatus),
+                    inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
+                    string.IsNullOrWhiteSpace(inv.PartyPhone) ? "" : AppLang.T("InvoiceDetails.Header.Phone", inv.PartyPhone),
+                    inv.CashierName,
+                    Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm"));
 
                 _gridItems.Rows.Clear();
                 foreach (var item in inv.Items)
@@ -195,13 +200,17 @@ namespace Sayl.UI.Forms
                 foreach (var p in inv.Payments)
                     _gridPayments.Rows.Add(p.PaymentDate.ToString("yyyy-MM-dd"), TranslateMethod(p.PaymentMethod), UiHelpers.Money(p.Amount));
 
-                _lblTotals.Text =
-                    $"الإجمالي: {UiHelpers.Money(inv.TotalAmount)}    الخصم: {UiHelpers.Money(inv.DiscountAmount)}    الضريبة: {UiHelpers.Money(inv.TaxAmount)}\n" +
-                    $"الصافي: {UiHelpers.Money(inv.NetAmount)}    المدفوع: {UiHelpers.Money(inv.PaidAmount)}    المتبقي: {UiHelpers.Money(inv.RemainingAmount)}";
+                _lblTotals.Text = AppLang.T("InvoiceDetails.Totals",
+                    UiHelpers.Money(inv.TotalAmount),
+                    UiHelpers.Money(inv.DiscountAmount),
+                    UiHelpers.Money(inv.TaxAmount),
+                    UiHelpers.Money(inv.NetAmount),
+                    UiHelpers.Money(inv.PaidAmount),
+                    UiHelpers.Money(inv.RemainingAmount));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل تفاصيل الفاتورة.");
+                UiHelpers.ShowError(this, AppLang.T("InvoiceDetails.Msg.LoadFailed"));
             }
         }
 
@@ -217,34 +226,34 @@ namespace Sayl.UI.Forms
 
         internal static string TranslateType(string type) => type switch
         {
-            "sale" => "بيع",
-            "purchase" => "شراء",
-            "customer_return" => "مرتجع عميل",
-            "supplier_return" => "مرتجع مورد",
+            "sale" => AppLang.T("Common.Type.Sale"),
+            "purchase" => AppLang.T("Common.Type.Purchase"),
+            "customer_return" => AppLang.T("Common.Type.CustomerReturn"),
+            "supplier_return" => AppLang.T("Common.Type.SupplierReturn"),
             _ => type
         };
 
         internal static string TranslateStatus(string status) => status switch
         {
-            "completed" => "مكتملة",
-            "suspended" => "معلقة",
-            "cancelled" => "ملغاة",
+            "completed" => AppLang.T("Common.Status.Completed"),
+            "suspended" => AppLang.T("Common.Status.Suspended"),
+            "cancelled" => AppLang.T("Common.Status.Cancelled"),
             _ => status
         };
 
         internal static string TranslatePayment(string status) => status switch
         {
-            "paid" => "مدفوعة",
-            "partial" => "جزئية",
-            "unpaid" => "غير مدفوعة",
+            "paid" => AppLang.T("Common.Payment.Paid"),
+            "partial" => AppLang.T("Common.Payment.Partial"),
+            "unpaid" => AppLang.T("Common.Payment.Unpaid"),
             _ => status
         };
 
         internal static string TranslateMethod(string method) => method switch
         {
-            "cash" => "نقدي",
-            "card" => "شبكة",
-            "bank_transfer" => "تحويل بنكي",
+            "cash" => AppLang.T("Common.Method.Cash"),
+            "card" => AppLang.T("Common.Method.Card"),
+            "bank_transfer" => AppLang.T("Common.Method.BankTransfer"),
             _ => method
         };
     }

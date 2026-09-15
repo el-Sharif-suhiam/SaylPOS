@@ -99,46 +99,48 @@ namespace Sayl.UI.Forms
         // لوحة التحكم بلا بت (عرض فقط — للجميع)، وكل قسم إداري
         // يُضاف بشرط فحص البت: SessionState.Can(bit).
         // الشاشة بلا بت هنا = لا تظهر في الشريط إطلاقًا.
+        // مفتاح القسم (SectionKey.*) هو هوية الزر والتنقل —
+        // العنوان المُعرض يُشتق منه عند البناء عبر AppLang.
         // ─────────────────────────────────────────────────
         private void BuildSections()
         {
-            _sections["لوحة التحكم"] = () => new DashboardControl(); // بلا بت — للجميع
+            _sections[AppLang.T("Main.Section.Dashboard")] = () => new DashboardControl(); // بلا بت — للجميع
 
             if (SessionState.Can(AppPermissions.Products))
-                _sections["المنتجات"] = () => new ProductsControl();
+                _sections[AppLang.T("Main.Section.Products")] = () => new ProductsControl();
 
             if (SessionState.Can(AppPermissions.Inventory))
-                _sections["المخزون"] = () => new InventoryControl();
+                _sections[AppLang.T("Main.Section.Inventory")] = () => new InventoryControl();
 
             if (SessionState.Can(AppPermissions.Customers))
-                _sections["العملاء"] = () => new CustomersControl();
+                _sections[AppLang.T("Main.Section.Customers")] = () => new CustomersControl();
 
             if (SessionState.Can(AppPermissions.Suppliers))
-                _sections["الموردون"] = () => new SuppliersControl();
+                _sections[AppLang.T("Main.Section.Suppliers")] = () => new SuppliersControl();
 
             if (SessionState.Can(AppPermissions.SalesInvoices))
-                _sections["فواتير البيع"] = () => new InvoicesControl(enInvoicesType.sale);
+                _sections[AppLang.T("Main.Section.SalesInvoices")] = () => new InvoicesControl(enInvoicesType.sale);
 
             if (SessionState.Can(AppPermissions.PurchaseInvoices))
-                _sections["فواتير الشراء"] = () => new InvoicesControl(enInvoicesType.purchase);
+                _sections[AppLang.T("Main.Section.PurchaseInvoices")] = () => new InvoicesControl(enInvoicesType.purchase);
 
             if (SessionState.Can(AppPermissions.Expenses))
-                _sections["المصروفات"] = () => new ExpensesControl();
+                _sections[AppLang.T("Main.Section.Expenses")] = () => new ExpensesControl();
 
             if (SessionState.Can(AppPermissions.Reports))
-                _sections["التقارير"] = () => new ReportsControl();
+                _sections[AppLang.T("Main.Section.Reports")] = () => new ReportsControl();
 
             if (SessionState.Can(AppPermissions.Employees))
-                _sections["الموظفون والرواتب"] = () => new EmployeesControl();
+                _sections[AppLang.T("Main.Section.Employees")] = () => new EmployeesControl();
 
             if (SessionState.Can(AppPermissions.Users))
-                _sections["المستخدمون"] = () => new UsersControl();
+                _sections[AppLang.T("Main.Section.Users")] = () => new UsersControl();
 
             if (SessionState.Can(AppPermissions.Roles))
-                _sections["الأدوار والصلاحيات"] = () => new RolesControl();
+                _sections[AppLang.T("Main.Section.Roles")] = () => new RolesControl();
 
             if (SessionState.Can(AppPermissions.Settings))
-                _sections["الإعدادات"] = () => new SettingsControl();
+                _sections[AppLang.T("Main.Section.Settings")] = () => new SettingsControl();
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -170,7 +172,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "سيل — لوحة التحكم";
+            Text = AppLang.T("Main.Form.Title");
             WindowState = FormWindowState.Maximized;
             MinimumSize = new Size(960, 600);
             StartPosition = FormStartPosition.CenterScreen;
@@ -219,7 +221,7 @@ namespace Sayl.UI.Forms
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 124));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 154));
 
             // العلامة التجارية: شعار + اسم
             var brandPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
@@ -229,7 +231,7 @@ namespace Sayl.UI.Forms
 
             var lblApp = new Label
             {
-                Text = "سيل",
+                Text = AppLang.T("Main.App.Name"),
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.BottomRight,
                 ForeColor = Color.White,
@@ -266,26 +268,34 @@ namespace Sayl.UI.Forms
             menuLayout.RowCount = row + 1;
             layout.Controls.Add(menuLayout, 0, 1);
 
-            // أسفل الشريط: حول البرنامج + تسجيل الخروج (صف فاصل بينهما)
+            // أسفل الشريط: زر اللغة (فوق) ثم حول البرنامج ثم تسجيل الخروج
             var footer = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1
             };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 14));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));   // كبسولة اللغة
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));   // فاصل
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));   // حول البرنامج
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // تسجيل الخروج
 
-            var btnAbout = MakeGhostButton("حول البرنامج", AppTheme.TextOnDark);
+            var btnAbout = MakeGhostButton(AppLang.T("Main.Button.About"), AppTheme.TextOnDark);
             btnAbout.Click += (_, _) =>
                 Program.Services.GetRequiredService<AboutForm>().ShowDialog(this);
 
-            var btnLogout = MakeGhostButton("تسجيل الخروج", Color.FromArgb(248, 113, 113));
+            var btnLogout = MakeGhostButton(AppLang.T("Main.Button.Logout"), Color.FromArgb(248, 113, 113));
             btnLogout.Click += async (_, _) => await LogoutAsync();
 
-            footer.Controls.Add(btnAbout, 0, 0);
-            footer.Controls.Add(btnLogout, 0, 2);
+            // زر تبديل اللغة: أول صف بالتذييل — فوق «حول البرنامج» مباشرة،
+            // ممركز أفقيًا كعنصر هوية صغير (كبسولة Eng/Ara)
+            var btnLang = AppTheme.MakeLanguageSwitchButton();
+            btnLang.Anchor = AnchorStyles.None; // وسط الصف — لا يتمدد مع عرض الشريط
+            btnLang.Margin = new Padding(0);
+
+            footer.Controls.Add(btnLang, 0, 0);
+            footer.Controls.Add(btnAbout, 0, 2);
+            footer.Controls.Add(btnLogout, 0, 3);
             layout.Controls.Add(footer, 0, 2);
 
             sidebar.Controls.Add(layout);
@@ -466,8 +476,8 @@ namespace Sayl.UI.Forms
         // ─────────────────────────────────────────────────
         private async Task LogoutAsync()
         {
-            bool confirmed = ConfirmationDialog.Show(this, "تسجيل الخروج",
-                "هل أنت متأكد من رغبتك في تسجيل الخروج؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Main.Logout.Title"),
+                AppLang.T("Main.Logout.Msg"));
             if (!confirmed)
                 return;
 

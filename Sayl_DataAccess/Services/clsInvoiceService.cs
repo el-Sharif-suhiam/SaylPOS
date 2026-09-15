@@ -1,3 +1,4 @@
+using Common.DTOs;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
@@ -83,6 +84,92 @@ namespace Sayl.Core.Services
                 .ToListAsync();
 
             return Result<List<InvoiceVM>>.Ok(result);
+        }
+
+        /// <summary>
+        /// صفحة فواتير (ترقيم SQL): نفس فلاتر GetInvoicesListAsync + عدّ
+        /// كامل + Skip/Take — قائمة فواتير اليوم المزدحمة لا تُنقل كاملة.
+        /// </summary>
+        public async Task<Result<PagedResult<InvoiceVM>>> GetInvoicesPagedAsync(
+            enInvoicesType? type = null,
+            enInvoicesStatus? status = null,
+            enPaymentStatus? paymentStatus = null,
+            int? partyId = null,
+            int? userId = null,
+            int? sessionId = null,
+            DateOnly? fromDate = null,
+            DateOnly? toDate = null,
+            int page = 1,
+            int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Invoices.AsQueryable();
+
+            if (type.HasValue)
+                query = query.Where(i => i.Type == type.Value);
+
+            if (status.HasValue)
+                query = query.Where(i => i.Status == status.Value);
+
+            if (paymentStatus.HasValue)
+                query = query.Where(i => i.PaymentStatus == paymentStatus.Value);
+
+            if (partyId.HasValue)
+                query = query.Where(i => i.PartyId == partyId.Value);
+
+            if (userId.HasValue)
+                query = query.Where(i => i.UserId == userId.Value);
+
+            if (sessionId.HasValue)
+                query = query.Where(i => i.SessionId == sessionId.Value);
+
+            if (fromDate.HasValue)
+            {
+                DateTime start = fromDate.Value.ToDateTime(TimeOnly.MinValue);
+                query = query.Where(i => i.CreatedAt >= start);
+            }
+
+            if (toDate.HasValue)
+            {
+                DateTime end = toDate.Value.ToDateTime(TimeOnly.MaxValue);
+                query = query.Where(i => i.CreatedAt <= end);
+            }
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderByDescending(i => i.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(i => new InvoiceVM
+                {
+                    InvoiceId = i.InvoiceId,
+                    Type = i.Type.ToString(),
+                    Status = i.Status.ToString(),
+                    PaymentStatus = i.PaymentStatus.ToString(),
+                    PartyId = i.PartyId,
+                    PartyName = i.Party != null ? i.Party.Name : null,
+                    UserName = i.User.Username,
+                    SessionId = i.SessionId,
+                    OriginalInvoiceId = i.OriginalInvoiceId,
+                    TotalAmount = i.TotalAmount,
+                    DiscountAmount = i.DiscountAmount,
+                    TaxAmount = i.TaxAmount,
+                    NetAmount = i.NetAmount,
+                    Notes = i.Notes,
+                    CreatedAt = i.CreatedAt,
+                    ItemsCount = i.InvoiceItems.Count
+                })
+                .ToListAsync();
+
+            return Result<PagedResult<InvoiceVM>>.Ok(new PagedResult<InvoiceVM>
+            {
+                Items = items,
+                TotalCount = total,
+                Page = page,
+                PageSize = pageSize
+            });
         }
 
         public async Task<Result<InvoiceVM>> GetInvoiceByIdAsync(int invoiceId)

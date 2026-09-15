@@ -19,7 +19,7 @@ namespace Sayl.UI.UserControls
         private List<DtoEmployee> _employees = new();
         private Dictionary<int, (string username, int roleValue)> _linkedUsers = new();
 
-        protected override string Title => "الموظفون";
+        protected override string Title => AppLang.T("Employees.Section.Title");
 
         // مفتاح «عرض المعطّلين» — الافتراضي: النشطون وفي إجازة (بلا مستقيلين)
         protected override bool SupportsShowDeleted => true;
@@ -30,7 +30,12 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
-                _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await service.GetEmployeesPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _employees = paged.Items;
 
                 // خريطة الارتباط: (اسم الحساب + قيمة دوره) لكل موظف — تُستخدم
                 // للعرض ولحماية التحرير على موظفي الحسابات العليا
@@ -47,13 +52,13 @@ namespace Sayl.UI.UserControls
                 }
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colName", "الاسم");
-                Grid.Columns.Add("colPosition", "المسمى");
-                Grid.Columns.Add("colDept", "القسم");
-                Grid.Columns.Add("colType", "نوع الراتب");
-                Grid.Columns.Add("colSalary", "المعدل");
-                Grid.Columns.Add("colStatus", "الحالة");
-                Grid.Columns.Add("colAccount", "حساب مرتبط");
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+                Grid.Columns.Add("colPosition", AppLang.T("Employees.Label.Position"));
+                Grid.Columns.Add("colDept", AppLang.T("Employees.Label.Department"));
+                Grid.Columns.Add("colType", AppLang.T("Employees.Label.SalaryType"));
+                Grid.Columns.Add("colSalary", AppLang.T("Employees.Label.Rate"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+                Grid.Columns.Add("colAccount", AppLang.T("Employees.Label.LinkedAccount"));
                 Grid.Columns["colName"].FillWeight = 20;
                 Grid.Columns["colPosition"].FillWeight = 14;
                 Grid.Columns["colDept"].FillWeight = 12;
@@ -75,7 +80,7 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الموظفين.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.LoadFailed"));
             }
         }
 
@@ -105,23 +110,23 @@ namespace Sayl.UI.UserControls
                 return null;
 
             if (!AppPermissions.Outranks(SessionState.CurrentRoleValue, link.roleValue))
-                return $"الموظف '{emp.Name}' مربوط بحساب '{link.username}' الذي يوازي دورك أو أعلى منه — لا يمكنك تعديله. راجع مدير النظام.";
+                return AppLang.T("Employees.Msg.LinkGuard", emp.Name, link.username);
 
             return null;
         }
 
         internal static string TranslateSalaryType(Common.Enums.enSalaryType type) => type switch
         {
-            Common.Enums.enSalaryType.daily => "يومي",
-            Common.Enums.enSalaryType.hourly => "بالساعة",
-            _ => "شهري"
+            Common.Enums.enSalaryType.daily => AppLang.T("Employees.Salary.Daily"),
+            Common.Enums.enSalaryType.hourly => AppLang.T("Employees.Salary.Hourly"),
+            _ => AppLang.T("Employees.Salary.Monthly")
         };
 
         internal static string TranslateStatus(string status) => status switch
         {
-            "active" => "نشط",
-            "on_leave" => "في إجازة",
-            "resigned" => "مستقيل",
+            "active" => AppLang.T("Employees.Status.Active"),
+            "on_leave" => AppLang.T("Employees.Status.OnLeave"),
+            "resigned" => AppLang.T("Employees.Status.Resigned"),
             _ => status
         };
 
@@ -130,21 +135,21 @@ namespace Sayl.UI.UserControls
         // + «الشفتات والإجازات» للأدمن فقط (نمط الزر الشرطي).
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة موظف", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditEmployee(null), 140);
+            AddToolbarButton(AppLang.T("Employees.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditEmployee(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 100);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 100);
             AddToolbarGap();
-            AddToolbarButton("تعيين شفت", AppTheme.Accent, AppTheme.AccentDark, (_, _) => AssignShift(), 120);
+            AddToolbarButton(AppLang.T("Employees.Button.AssignShift"), AppTheme.Accent, AppTheme.AccentDark, (_, _) => AssignShift(), 120);
             AddToolbarGap();
-            AddToolbarButton("كشوف الرواتب", AppTheme.Success, Color.FromArgb(21, 128, 61),
+            AddToolbarButton(AppLang.T("Employees.Button.Payrolls"), AppTheme.Success, Color.FromArgb(21, 128, 61),
                 (_, _) => OpenPayroll(), 130);
             AddToolbarGap();
-            AddToolbarButton("ربط حساب مستخدم", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => LinkAccount(), 150);
+            AddToolbarButton(AppLang.T("Employees.Button.LinkAccount"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => LinkAccount(), 150);
 
             if (SessionState.Can(Common.Utils.AppPermissions.Users))
             {
                 AddToolbarGap();
-                AddToolbarButton("الشفتات والإجازات", AppTheme.SidebarBg, AppTheme.SidebarHover,
+                AddToolbarButton(AppLang.T("Employees.Button.Shifts"), AppTheme.SidebarBg, AppTheme.SidebarHover,
                     (_, _) => new ShiftsForm().ShowDialog(FindForm()), 150);
             }
         }
@@ -167,7 +172,7 @@ namespace Sayl.UI.UserControls
             var emp = Selected();
             if (emp == null)
             {
-                UiHelpers.ShowError(this, "اختر موظفًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.PickEmployee"));
                 return;
             }
 
@@ -187,7 +192,7 @@ namespace Sayl.UI.UserControls
             var emp = Selected();
             if (emp == null)
             {
-                UiHelpers.ShowError(this, "اختر موظفًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.PickEmployee"));
                 return;
             }
 
@@ -217,13 +222,13 @@ namespace Sayl.UI.UserControls
             var emp = Selected();
             if (emp == null)
             {
-                UiHelpers.ShowError(this, "اختر موظفًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.PickEmployee"));
                 return;
             }
 
             if (emp.Status == "resigned")
             {
-                UiHelpers.ShowError(this, "لا يمكن ربط موظف مستقيل بحساب.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.CantLinkResigned"));
                 return;
             }
 
@@ -249,7 +254,7 @@ namespace Sayl.UI.UserControls
 
                 if (freeUsers.Count == 0)
                 {
-                    UiHelpers.ShowInfo(this, "لا توجد حسابات متاحة (كل الحسابات مرتبطة بموظفين).");
+                    UiHelpers.ShowInfo(this, AppLang.T("Employees.Msg.NoFreeAccounts"));
                     return;
                 }
 
@@ -269,7 +274,7 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر ربط الحساب.");
+                UiHelpers.ShowError(this, AppLang.T("Employees.Msg.LinkFailed"));
             }
         }
     }

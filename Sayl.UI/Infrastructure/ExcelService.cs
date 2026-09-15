@@ -11,13 +11,13 @@ namespace Sayl.UI.Infrastructure
         public static void ExportTable(string title, string period, string[] headers, List<string[]> rows, string filePath)
         {
             using var workbook = new XLWorkbook();
-            var ws = workbook.Worksheets.Add("تقرير");
+            var ws = workbook.Worksheets.Add(AppLang.T("Excel.SheetName"));
 
             // الاتجاه من اليمين لليسار لكل الورقة
             ws.RightToLeft = true;
 
             // ── الترويسة ──
-            ws.Cell(1, 1).Value = $"{title}    ({period})    — سيل POS    {Sayl.UI.Infrastructure.AppClock.NowLocal:yyyy-MM-dd HH:mm}";
+            ws.Cell(1, 1).Value = AppLang.T("Excel.Header", title, period, Sayl.UI.Infrastructure.AppClock.NowLocal);
             ws.Cell(1, 1).Style.Font.Bold = true;
             ws.Cell(1, 1).Style.Font.FontSize = 14;
             ws.Cell(1, 1).Style.Font.FontColor = XLColor.White;

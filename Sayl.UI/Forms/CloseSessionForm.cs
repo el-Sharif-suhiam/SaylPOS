@@ -39,7 +39,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "إغلاق الجلسة";
+            Text = AppLang.T("CloseSession.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 520);
             BackColor = AppTheme.CardBg;
@@ -47,14 +47,14 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblTitle = new Label { Text = "إغلاق جلسة البيع (تقرير Z)", Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("CloseSession.Title"), Bounds = new Rectangle(0, 18, 460, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
             // بطاقة الملخص: خلفية FieldBg + Padding داخلي — تظهر كصندوق.
             // TextAlign=TopRight: الأسطر تبدأ يمينًا أعلى (عربي طبيعي).
             // ارتفاع 190 يحتوي 6 أسطر متوقعة من الملخص.
             _lblSummary = new Label
             {
-                Text = "جارٍ التحميل...",
+                Text = AppLang.T("CloseSession.Loading"),
                 Bounds = new Rectangle(30, 58, 400, 190),
                 TextAlign = ContentAlignment.TopRight,
                 Font = new Font("Segoe UI", 11.5F),
@@ -62,7 +62,7 @@ namespace Sayl.UI.Forms
                 Padding = new Padding(12, 10, 12, 10)
             };
 
-            var lblCounted = new Label { Text = "النقد المعدود فعليًا", Bounds = new Rectangle(30, 258, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblCounted = new Label { Text = AppLang.T("CloseSession.Label.Counted"), Bounds = new Rectangle(30, 258, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             // خط 14 عريض: أهم إدخال — الكاشير يضغط الآلة الحاسبة ويقرأ من بعيد
             _txtCounted = new TextBox { Bounds = new Rectangle(30, 282, 400, 42), Font = new Font("Segoe UI", 14F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
 
@@ -71,11 +71,11 @@ namespace Sayl.UI.Forms
             _lblDifference = new Label { Text = "", Bounds = new Rectangle(30, 334, 400, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading };
 
             // Danger أحمر: إغلاق الجلسة فعل نهائي (لا جلسة بيع تعود)
-            _btnClose = AppTheme.MakeButton("إغلاق الجلسة", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28));
+            _btnClose = AppTheme.MakeButton(AppLang.T("CloseSession.Button.Close"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28));
             _btnClose.Bounds = new Rectangle(30, 380, 240, 52);
             _btnClose.Click += async (_, _) => await CloseSessionAsync();
 
-            var btnCancel = AppTheme.MakeButton("رجوع", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("CloseSession.Button.Back"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 380, 140, 52);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = رجوع
 
@@ -100,16 +100,16 @@ namespace Sayl.UI.Forms
                 _summary = result.Data;
                 var s = _summary;
                 _lblSummary.Text =
-                    $"الافتتاحي: {UiHelpers.Money(s.OpeningAmount)}\n" +
-                    $"المبيعات نقدي: {UiHelpers.Money(s.CashSales)}\n" +
-                    $"المرتجعات نقدي: {UiHelpers.Money(s.CashReturns)}\n" +
-                    $"قبض نقد (داخل): {UiHelpers.Money(s.CashIn)}\n" +
-                    $"صرف نقد (خارج): {UiHelpers.Money(s.CashOut)}\n" +
-                    $"النقد المتوقع: {UiHelpers.Money(s.ExpectedCash)}";
+                    AppLang.T("CloseSession.Summary.Opening", UiHelpers.Money(s.OpeningAmount)) + "\n" +
+                    AppLang.T("CloseSession.Summary.CashSales", UiHelpers.Money(s.CashSales)) + "\n" +
+                    AppLang.T("CloseSession.Summary.CashReturns", UiHelpers.Money(s.CashReturns)) + "\n" +
+                    AppLang.T("CloseSession.Summary.CashIn", UiHelpers.Money(s.CashIn)) + "\n" +
+                    AppLang.T("CloseSession.Summary.CashOut", UiHelpers.Money(s.CashOut)) + "\n" +
+                    AppLang.T("CloseSession.Summary.Expected", UiHelpers.Money(s.ExpectedCash));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل ملخص الجلسة.");
+                UiHelpers.ShowError(this, AppLang.T("CloseSession.Msg.LoadFailed"));
             }
         }
 
@@ -117,23 +117,25 @@ namespace Sayl.UI.Forms
         {
             if (!decimal.TryParse(_txtCounted.Text?.Trim(), out decimal counted) || counted < 0)
             {
-                UiHelpers.ShowError(this, "أدخل المبلغ المعدود.");
+                UiHelpers.ShowError(this, AppLang.T("CloseSession.Msg.EnterCounted"));
                 return;
             }
 
             if (_summary == null)
             {
-                UiHelpers.ShowError(this, "لم يتم تحميل ملخص الجلسة.");
+                UiHelpers.ShowError(this, AppLang.T("CloseSession.Msg.SummaryNotLoaded"));
                 return;
             }
 
             decimal difference = counted - _summary.ExpectedCash;
             string diffText = difference == 0
-                ? "لا يوجد فرق."
-                : difference > 0 ? $"زيادة: {UiHelpers.Money(difference)}" : $"عجز: {UiHelpers.Money(-difference)}";
+                ? AppLang.T("CloseSession.Diff.None")
+                : difference > 0
+                    ? AppLang.T("CloseSession.Diff.Over", UiHelpers.Money(difference))
+                    : AppLang.T("CloseSession.Diff.Short", UiHelpers.Money(-difference));
 
-            bool confirmed = ConfirmationDialog.Show(this, "إغلاق الجلسة",
-                $"النقد المتوقع: {UiHelpers.Money(_summary.ExpectedCash)} — المعدود: {UiHelpers.Money(counted)}\n{diffText}\nهل تريد إغلاق الجلسة؟");
+            bool confirmed = ConfirmationDialog.Show(this, AppLang.T("CloseSession.Form.Title"),
+                AppLang.T("CloseSession.Confirm.Body", UiHelpers.Money(_summary.ExpectedCash), UiHelpers.Money(counted), diffText));
             if (!confirmed)
                 return;
 
@@ -144,7 +146,7 @@ namespace Sayl.UI.Forms
                 result = await posService.CloseSessionAsync(_sessionId, counted);
             }
 
-            UiHelpers.ShowResult(this, result, "تم إغلاق الجلسة بنجاح.");
+            UiHelpers.ShowResult(this, result, AppLang.T("CloseSession.Msg.Closed"));
             if (result.IsSuccess)
             {
                 Closed = true;

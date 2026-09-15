@@ -24,7 +24,7 @@ namespace Sayl.UI.Forms
         //  • SelectAll: يحدد «0» عند الفتح — الكتابة تستبدله فورًا.
         private void BuildUi()
         {
-            Text = "فتح جلسة بيع";
+            Text = AppLang.T("OpenSession.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 320);
             BackColor = AppTheme.CardBg;
@@ -32,19 +32,19 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblTitle = new Label { Text = "فتح جلسة بيع جديدة", Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("OpenSession.Title"), Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
-            var lblInfo = new Label { Text = "أدخل النقد الافتتاحي الموجود في الدرج", Bounds = new Rectangle(30, 62, 380, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblInfo = new Label { Text = AppLang.T("OpenSession.Label.Info"), Bounds = new Rectangle(30, 62, 380, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
 
             _txtOpening = new TextBox { Bounds = new Rectangle(30, 92, 380, 46), Font = new Font("Segoe UI", 15F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center, Text = "0" };
 
-            var lblHint = new Label { Text = "سيظهر هذا المبلغ في تقرير إغلاق الجلسة (Z)", Bounds = new Rectangle(30, 148, 380, 22), TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
+            var lblHint = new Label { Text = AppLang.T("OpenSession.Label.Hint"), Bounds = new Rectangle(30, 148, 380, 22), TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
 
-            var btnOpen = AppTheme.MakeButton("فتح الجلسة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOpen = AppTheme.MakeButton(AppLang.T("OpenSession.Button.Open"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOpen.Bounds = new Rectangle(30, 200, 240, 52);
             btnOpen.Click += (_, _) => Confirm();
 
-            var btnCancel = AppTheme.MakeButton("فتح بدون نقد افتتاحي", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("OpenSession.Button.OpenNoCash"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(30, 262, 380, 40);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -59,7 +59,7 @@ namespace Sayl.UI.Forms
         {
             if (!decimal.TryParse(_txtOpening.Text?.Trim(), out decimal amount) || amount < 0)
             {
-                UiHelpers.ShowError(this, "أدخل مبلغًا صحيحًا (صفر أو أكثر).");
+                UiHelpers.ShowError(this, AppLang.T("OpenSession.Msg.InvalidAmount"));
                 return;
             }
 

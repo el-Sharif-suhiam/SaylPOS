@@ -134,5 +134,77 @@ namespace Sayl.UI.Infrastructure
             b.MouseLeave += (_, _) => { hovered = false; b.Invalidate(); };
             return b;
         }
+
+        /// <summary>
+        /// زر تبديل اللغة (عربي/English) — كبسولة متناظرة (زوايا دائرية كاملة)
+        /// بحجم ثابت 64×34 تعرض لغة الهدف «Eng» أو «Ara» — النقر يحفظ
+        /// الاختيار ويعيد تشغيل البرنامج. الرسم متجهي Anti-Alias كامل
+        /// (نفس أسلوب أزرار «؟» و«×») فيظهر مستديرًا تمامًا في كل الدقة.
+        /// مصدر واحد لثلاث شاشات: الدخول/الرئيسية/POS.
+        /// ملاحظة الرسم: الاعتماد الكامل على Paint يدوي — إطار الزر
+        /// وخلفيته النظامية معطّلان (ButtonBase لا يرسم شيئًا)، وأثر
+        /// hover يُرسم داخل الكبسولة نفسها (تفتيح الحد + الحشوة) فلا
+        /// يظهر أي مستطيل أبيض حاد يكسر شكل الزر عند المرور.
+        /// </summary>
+        public static Button MakeLanguageSwitchButton()
+        {
+            bool toEnglish = !AppLang.IsEnglish;
+            string display = toEnglish ? "Eng" : "Ara";
+
+            var b = new Button
+            {
+                Size = new Size(64, 34),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+            // ⚠️ تعطيل أثر FlatAppearance النظامي: القيم الشفافة تمنع
+            // ويندوز من رسم خلفية hover زرقاء/بيضاء مربعة خلف الرسم اليدوي.
+            b.FlatAppearance.MouseOverBackColor = Color.Transparent;
+            b.FlatAppearance.MouseDownBackColor = Color.Transparent;
+
+            bool hovered = false;
+
+            b.Paint += (_, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                // الكبسولة: مستطيل بارتفاع كامل وعرض ناقص الارتفاع (زوايا نصف دائرة)
+                // — نصف القطر = الارتفاع÷2 يعطي تناظرًا مثاليًا في الزوايا الأربع.
+                int h = b.Height - 3;                       // 31 — نصف قطر الزاوية
+                int w = b.Width - 3;                        // 61 — جسم الكبسولة
+                var body = new Rectangle(1, 1, w, h);
+                using var path = CreateRoundedPath(body, h / 2);
+
+                // الحشوة: كحلي داكن → أفتح قليلًا عند المرور (hover)
+                using var fill = new SolidBrush(hovered ? Color.FromArgb(45, 90, 150) : Color.FromArgb(28, 66, 110));
+                g.FillPath(fill, path);
+
+                using var border = new Pen(hovered ? Color.FromArgb(147, 197, 253) : Color.FromArgb(191, 219, 254), 1.6f);
+                g.DrawPath(border, path);
+
+                using var font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+                TextRenderer.DrawText(g, display, font, body, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPadding);
+            };
+            b.MouseEnter += (_, _) => { hovered = true; b.Invalidate(); };
+            b.MouseLeave += (_, _) => { hovered = false; b.Invalidate(); };
+            b.Click += (_, _) =>
+            {
+                var confirm = MessageBox.Show(
+                    AppLang.T("Lang.Msg.RestartBody"),
+                    AppLang.T("Lang.Msg.RestartTitle"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1,
+                    MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                if (confirm == DialogResult.Yes)
+                    AppLang.SwitchAndRestart(toEnglish ? AppLanguage.English : AppLanguage.Arabic);
+            };
+            return b;
+        }
     }
 }

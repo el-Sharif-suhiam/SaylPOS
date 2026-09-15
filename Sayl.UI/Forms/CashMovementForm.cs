@@ -35,7 +35,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "قبض / صرف نقد";
+            Text = AppLang.T("CashMove.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 400);
             BackColor = AppTheme.CardBg;
@@ -43,26 +43,26 @@ namespace Sayl.UI.Forms
             Font = AppTheme.FontBody;
             ShowInTaskbar = false;
 
-            var lblTitle = new Label { Text = "حركة نقدية", Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
+            var lblTitle = new Label { Text = AppLang.T("CashMove.Title"), Bounds = new Rectangle(0, 18, 440, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading, ForeColor = AppTheme.TextPrimary };
 
             // زرا الخيار: قبض يمين (230..410)، صرف يسار (30..210) —
             // كلاهما في نفس الصف 62. لا Click handlers — القراءة عند الحفظ فقط.
-            _rbIn = new RadioButton { Text = "قبض (دخول نقد)", Bounds = new Rectangle(230, 62, 180, 30), Checked = true, ForeColor = AppTheme.TextPrimary };
-            _rbOut = new RadioButton { Text = "صرف (خروج نقد)", Bounds = new Rectangle(30, 62, 180, 30), ForeColor = AppTheme.TextPrimary };
+            _rbIn = new RadioButton { Text = AppLang.T("CashMove.In"), Bounds = new Rectangle(230, 62, 180, 30), Checked = true, ForeColor = AppTheme.TextPrimary };
+            _rbOut = new RadioButton { Text = AppLang.T("CashMove.Out"), Bounds = new Rectangle(30, 62, 180, 30), ForeColor = AppTheme.TextPrimary };
 
             // المبلغ: خط 13 عريض وسط — أكبر إدخال بالنافذة (قراءة الكاشير)
-            var lblAmount = new Label { Text = "المبلغ *", Bounds = new Rectangle(30, 104, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblAmount = new Label { Text = AppLang.T("Common.Label.Amount") + " *", Bounds = new Rectangle(30, 104, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtAmount = new TextBox { Bounds = new Rectangle(30, 128, 380, 42), Font = new Font("Segoe UI", 13F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
 
             // السبب: Multiline=true مع ارتفاع 60 — سطران بدل واحد (شرح الحركة)
-            var lblReason = new Label { Text = "السبب *", Bounds = new Rectangle(30, 180, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblReason = new Label { Text = AppLang.T("CashMove.Label.Reason"), Bounds = new Rectangle(30, 180, 380, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _txtReason = new TextBox { Bounds = new Rectangle(30, 204, 380, 60), Multiline = true, Font = AppTheme.FontBody };
 
-            var btnSave = AppTheme.MakeButton("حفظ الحركة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnSave = AppTheme.MakeButton(AppLang.T("CashMove.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnSave.Bounds = new Rectangle(30, 284, 240, 50);
             btnSave.Click += async (_, _) => await SaveAsync();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 284, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
 
@@ -77,13 +77,13 @@ namespace Sayl.UI.Forms
         {
             if (!decimal.TryParse(_txtAmount.Text?.Trim(), out decimal amount) || amount <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل مبلغًا صحيحًا أكبر من صفر.");
+                UiHelpers.ShowError(this, AppLang.T("Common.Msg.EnterValidAmountOverZero"));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_txtReason.Text))
             {
-                UiHelpers.ShowError(this, "السبب مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("CashMove.Msg.ReasonRequired"));
                 return;
             }
 

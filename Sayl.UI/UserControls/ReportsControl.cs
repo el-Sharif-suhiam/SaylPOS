@@ -1,6 +1,7 @@
 using Common.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Controls;
 using Sayl.UI.Forms;
 using Sayl.UI.Infrastructure;
 
@@ -28,6 +29,9 @@ namespace Sayl.UI.UserControls
         private string _currentTitle = "";
         private string _currentPeriod = "";
         private List<string[]> _currentRows = new();
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
 
         private const int ReportProfit = 0;
         private const int ReportTopProducts = 1;
@@ -69,21 +73,21 @@ namespace Sayl.UI.UserControls
             // الأزرار الأربعة مفصولة بفواصل Panel (8px) — الـ Margin لا يعمل مع Dock.
             var filterBar = new Panel { Dock = DockStyle.Top, Height = 70, BackColor = AppTheme.CardBg, Padding = new Padding(16, 14, 16, 10) };
 
-            var lblType = new Label { Text = "نوع التقرير", Dock = DockStyle.Right, Width = 78, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblType = new Label { Text = AppLang.T("Reports.Label.Type"), Dock = DockStyle.Right, Width = 78, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbReportType = new ComboBox { Dock = DockStyle.Right, Width = 172, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
             _cmbReportType.Items.AddRange(new object[]
             {
-                "ملخص الأرباح",
-                "الأكثر مبيعًا",
-                "حالة المخزون",
-                "المبيعات اليومية",
-                "قرب انتهاء الصلاحية",
-                "ربحية المنتجات",
-                "أفضل العملاء",
-                "أعمار الديون",
-                "حركة الصندوق",
-                "الرواتب",
-                "آخر جرد فعلي"
+                AppLang.T("Reports.Type.Profit"),
+                AppLang.T("Reports.Type.TopProducts"),
+                AppLang.T("Reports.Type.Inventory"),
+                AppLang.T("Reports.Type.DailySales"),
+                AppLang.T("Reports.Type.Expiry"),
+                AppLang.T("Reports.Type.ProductProfit"),
+                AppLang.T("Reports.Type.TopCustomers"),
+                AppLang.T("Reports.Type.Ageing"),
+                AppLang.T("Reports.Type.CashFlow"),
+                AppLang.T("Reports.Type.Payrolls"),
+                AppLang.T("Reports.Type.LastCount")
             });
             _cmbReportType.SelectedIndex = 0;
             // إصلاح العلة القديمة: تغيير النوع يعيد تشغيل التقرير فورًا (كان يخفي الحقول فقط)
@@ -93,12 +97,12 @@ namespace Sayl.UI.UserControls
                 await RunReportAsync();
             };
 
-            var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
+            var lblFrom = new Label { Text = AppLang.T("PeriodicReport.Label.From"), Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _lblFrom = lblFrom;
             _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date.AddMonths(-1), RightToLeftLayout = false };
             _dtpFrom.ValueChanged += async (_, _) => await RunReportAsync();
 
-            var lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
+            var lblTo = new Label { Text = AppLang.T("PeriodicReport.Label.To"), Dock = DockStyle.Right, Width = 38, TextAlign = ContentAlignment.MiddleCenter, ForeColor = AppTheme.TextMuted };
             _lblTo = lblTo;
             _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 126, Format = DateTimePickerFormat.Short, Value = AppClock.NowLocal.Date, RightToLeftLayout = false };
             _dtpTo.ValueChanged += async (_, _) => await RunReportAsync();
@@ -124,7 +128,7 @@ namespace Sayl.UI.UserControls
                 BackColor = Color.Transparent
             };
 
-            _btnRefresh = MakeToolButton("عرض", AppTheme.Primary, AppTheme.PrimaryDark, 110);
+            _btnRefresh = MakeToolButton(AppLang.T("Reports.Button.Show"), AppTheme.Primary, AppTheme.PrimaryDark, 110);
             _btnRefresh.Click += async (_, _) => await RunReportAsync();
 
             _btnPdf = MakeToolButton("PDF", AppTheme.Danger, Color.FromArgb(185, 28, 28), 100);
@@ -133,7 +137,7 @@ namespace Sayl.UI.UserControls
             _btnExcel = MakeToolButton("Excel", AppTheme.Success, Color.FromArgb(21, 128, 61), 100);
             _btnExcel.Click += (_, _) => ExportExcel();
 
-            _btnPeriodic = MakeToolButton("تقرير دوري", AppTheme.Accent, AppTheme.AccentDark, 140);
+            _btnPeriodic = MakeToolButton(AppLang.T("Reports.Button.Periodic"), AppTheme.Accent, AppTheme.AccentDark, 140);
             _btnPeriodic.Click += (_, _) =>
             {
                 using var form = new PeriodicReportForm();
@@ -162,7 +166,23 @@ namespace Sayl.UI.UserControls
             _grid = new DataGridView { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(12) };
             UiHelpers.StyleGrid(_grid);
 
+            // شريط الترقيم: التصدير يبقى على «كل الصفوف» (CurrentTable) —
+            // التنقل يعيد رسم الجدول من الشريحة فقط (RefreshDisplay).
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshDisplay();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshDisplay();
+            };
+
             Controls.Add(_grid);
+            Controls.Add(_pager);
             Controls.Add(filterBar);
         }
 
@@ -182,10 +202,11 @@ namespace Sayl.UI.UserControls
         {
             int idx = _cmbReportType.SelectedIndex;
             if (idx == ReportInventory || idx == ReportExpiry)
-                return idx == ReportInventory ? "لقطة حالية" : "خلال 90 يومًا";
+                return idx == ReportInventory ? AppLang.T("Reports.Period.Current") : AppLang.T("Reports.Period.Next90");
             if (idx == ReportDailySales)
                 return DateOnly.FromDateTime(_dtpFrom.Value).ToString("yyyy-MM-dd");
-            return $"{DateOnly.FromDateTime(_dtpFrom.Value):yyyy-MM-dd} ← {DateOnly.FromDateTime(_dtpTo.Value):yyyy-MM-dd}";
+            return AppLang.T("Reports.Period.Range",
+                DateOnly.FromDateTime(_dtpFrom.Value), DateOnly.FromDateTime(_dtpTo.Value));
         }
 
         private async Task RunReportAsync()
@@ -195,6 +216,7 @@ namespace Sayl.UI.UserControls
             _grid.Rows.Clear();
             _grid.Columns.Clear();
             _currentRows.Clear();
+            _currentPage = 1; // تقرير جديد = من أول صفحة
 
             try
             {
@@ -208,23 +230,23 @@ namespace Sayl.UI.UserControls
                         var r = await reportService.GetProfitSummaryAsync(from, to);
                         if (!CheckResult(r) || r.Data == null) return;
                         var d = r.Data;
-                        _currentTitle = "ملخص الأرباح";
-                        AddColumns(("البند", 60), ("القيمة", 40));
-                        AddRow("إيراد المبيعات", UiHelpers.Money(d.SalesRevenue));
-                        AddRow("المرتجعات", UiHelpers.Money(d.ReturnsAmount));
-                        AddRow("صافي الإيراد", UiHelpers.Money(d.NetRevenue));
-                        AddRow("تكلفة البضاعة المباعة", UiHelpers.Money(d.COGS));
-                        AddRow("الربح الإجمالي", UiHelpers.Money(d.GrossProfit));
-                        AddRow("المصروفات", UiHelpers.Money(d.Expenses));
-                        AddRow("صافي الربح", UiHelpers.Money(d.NetProfit));
+                        _currentTitle = AppLang.T("Reports.Type.Profit");
+                        AddColumns((AppLang.T("Common.Report.Item"), 60), (AppLang.T("Common.Report.Value"), 40));
+                        AddRow(AppLang.T("Reports.Profit.SalesRevenue"), UiHelpers.Money(d.SalesRevenue));
+                        AddRow(AppLang.T("Reports.Profit.Returns"), UiHelpers.Money(d.ReturnsAmount));
+                        AddRow(AppLang.T("Reports.Profit.NetRevenue"), UiHelpers.Money(d.NetRevenue));
+                        AddRow(AppLang.T("Reports.Profit.Cogs"), UiHelpers.Money(d.COGS));
+                        AddRow(AppLang.T("Reports.Profit.GrossProfit"), UiHelpers.Money(d.GrossProfit));
+                        AddRow(AppLang.T("Reports.Profit.Expenses"), UiHelpers.Money(d.Expenses));
+                        AddRow(AppLang.T("Reports.Profit.NetProfit"), UiHelpers.Money(d.NetProfit));
                         break;
                     }
                     case ReportTopProducts:
                     {
                         var r = await reportService.GetTopSellingProductsAsync(from, to, 20);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "الأكثر مبيعًا";
-                        AddColumns(("المنتج", 50), ("الكمية المباعة", 25), ("الإيراد", 25));
+                        _currentTitle = AppLang.T("Reports.Type.TopProducts");
+                        AddColumns((AppLang.T("Common.Label.Product"), 50), (AppLang.T("Reports.Top.SoldQty"), 25), (AppLang.T("Reports.Top.Revenue"), 25));
                         foreach (var p in r.Data)
                             AddRow(p.ProductName, p.TotalQuantitySold.ToString(), UiHelpers.Money(p.TotalRevenue));
                         break;
@@ -233,11 +255,12 @@ namespace Sayl.UI.UserControls
                     {
                         var r = await reportService.GetInventoryStatusAsync(lowStockOnly: false);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "حالة المخزون";
-                        AddColumns(("المنتج", 40), ("المتاح", 15), ("محجوز", 15), ("حد الطلب", 15), ("الحالة", 15));
+                        _currentTitle = AppLang.T("Reports.Type.Inventory");
+                        AddColumns((AppLang.T("Common.Label.Product"), 40), (AppLang.T("Inventory.Label.Available"), 15), (AppLang.T("Inventory.Label.Reserved"), 15), (AppLang.T("Common.Label.Reorder"), 15), (AppLang.T("Common.Label.Status"), 15));
                         foreach (var i in r.Data)
                             AddRow(i.ProductName, i.QuantityAvailable.ToString(), i.QuantityReserved.ToString(),
-                                i.ReorderLevel.ToString(), i.IsLowStock ? "منخفض" : "جيد");
+                                i.ReorderLevel.ToString(),
+                                i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"));
                         break;
                     }
                     case ReportDailySales:
@@ -245,35 +268,36 @@ namespace Sayl.UI.UserControls
                         var r = await reportService.GetDailySalesAsync(from);
                         if (!CheckResult(r) || r.Data == null) return;
                         var d = r.Data;
-                        _currentTitle = "المبيعات اليومية";
-                        AddColumns(("البند", 60), ("القيمة", 40));
-                        AddRow("عدد الفواتير", d.InvoiceCount.ToString());
-                        AddRow("إجمالي قبل الخصم", UiHelpers.Money(d.TotalGross));
-                        AddRow("الخصومات", UiHelpers.Money(d.TotalDiscount));
-                        AddRow("الضرائب", UiHelpers.Money(d.TotalTax));
-                        AddRow("صافي المبيعات (بعد المرتجعات)", UiHelpers.Money(d.TotalNet));
-                        AddRow("المحصل", UiHelpers.Money(d.TotalCollected));
-                        AddRow("غير المحصل", UiHelpers.Money(d.TotalOutstanding));
+                        _currentTitle = AppLang.T("Reports.Type.DailySales");
+                        AddColumns((AppLang.T("Common.Report.Item"), 60), (AppLang.T("Common.Report.Value"), 40));
+                        AddRow(AppLang.T("Dashboard.Series.InvoiceCount"), d.InvoiceCount.ToString());
+                        AddRow(AppLang.T("Reports.Daily.Gross"), UiHelpers.Money(d.TotalGross));
+                        AddRow(AppLang.T("Reports.Daily.Discounts"), UiHelpers.Money(d.TotalDiscount));
+                        AddRow(AppLang.T("Reports.Daily.Taxes"), UiHelpers.Money(d.TotalTax));
+                        AddRow(AppLang.T("Reports.Daily.NetSales"), UiHelpers.Money(d.TotalNet));
+                        AddRow(AppLang.T("Reports.Daily.Collected"), UiHelpers.Money(d.TotalCollected));
+                        AddRow(AppLang.T("Reports.Daily.Outstanding"), UiHelpers.Money(d.TotalOutstanding));
                         break;
                     }
                     case ReportExpiry:
                     {
                         var r = await reportService.GetExpiringBatchesAsync(90);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "قرب انتهاء الصلاحية";
-                        AddColumns(("المنتج", 30), ("الدفعة", 18), ("انتهاء الصلاحية", 18), ("الكمية", 12), ("متبقٍ (يوم)", 12), ("الحالة", 10));
+                        _currentTitle = AppLang.T("Reports.Type.Expiry");
+                        AddColumns((AppLang.T("Common.Label.Product"), 30), (AppLang.T("Reports.Expiry.Batch"), 18), (AppLang.T("Reports.Expiry.ExpiryDate"), 18), (AppLang.T("Common.Label.Qty"), 12), (AppLang.T("Reports.Expiry.DaysLeft"), 12), (AppLang.T("Common.Label.Status"), 10));
                         foreach (var b in r.Data)
                             AddRow(b.ProductName, b.BatchNumber, b.ExpiryDate.ToString("yyyy-MM-dd"),
                                 b.Quantity.ToString(), b.DaysUntilExpiry.ToString(),
-                                b.IsExpired ? "منتهية!" : b.DaysUntilExpiry <= 30 ? "قريب جدًا" : "قريب");
+                                b.IsExpired ? AppLang.T("Reports.Expiry.Expired")
+                                    : b.DaysUntilExpiry <= 30 ? AppLang.T("Reports.Expiry.VeryClose") : AppLang.T("Reports.Expiry.Close"));
                         break;
                     }
                     case ReportProductProfit:
                     {
                         var r = await reportService.GetProductProfitReportAsync(from, to);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "ربحية المنتجات";
-                        AddColumns(("المنتج", 28), ("الكمية", 10), ("الإيراد", 14), ("التكلفة", 14), ("الربح", 14), ("الهامش %", 10), ("حصة الربح %", 10));
+                        _currentTitle = AppLang.T("Reports.Type.ProductProfit");
+                        AddColumns((AppLang.T("Common.Label.Product"), 28), (AppLang.T("Reports.ProductProfit.Qty"), 10), (AppLang.T("Reports.Top.Revenue"), 14), (AppLang.T("Common.Label.Cost"), 14), (AppLang.T("Reports.ProductProfit.Profit"), 14), (AppLang.T("Reports.ProductProfit.Margin"), 10), (AppLang.T("Reports.ProductProfit.Share"), 10));
                         foreach (var p in r.Data)
                             AddRow(p.ProductName, p.Quantity.ToString(), UiHelpers.Money(p.Revenue),
                                 UiHelpers.Money(p.Cost), UiHelpers.Money(p.Profit),
@@ -284,8 +308,8 @@ namespace Sayl.UI.UserControls
                     {
                         var r = await reportService.GetTopCustomersReportAsync(from, to);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "أفضل العملاء";
-                        AddColumns(("العميل", 34), ("عدد الفواتير", 14), ("صافي الإيراد", 17), ("الربح", 17), ("الهامش %", 18));
+                        _currentTitle = AppLang.T("Reports.Type.TopCustomers");
+                        AddColumns((AppLang.T("Common.Label.Customer"), 34), (AppLang.T("Reports.TopCustomers.Invoices"), 14), (AppLang.T("Reports.TopCustomers.NetRevenue"), 17), (AppLang.T("Reports.ProductProfit.Profit"), 17), (AppLang.T("Reports.ProductProfit.Margin"), 18));
                         foreach (var c in r.Data)
                             AddRow(c.CustomerName, c.InvoiceCount.ToString(), UiHelpers.Money(c.NetRevenue),
                                 UiHelpers.Money(c.Profit), c.MarginPercent.ToString("0.#"));
@@ -295,8 +319,8 @@ namespace Sayl.UI.UserControls
                     {
                         var r = await reportService.GetDebtAgeingReportAsync(to);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "أعمار الديون";
-                        AddColumns(("العميل", 30), ("الرصيد", 14), ("0-30 يوم", 14), ("31-60", 14), ("61-90", 14), ("90+ يوم", 14));
+                        _currentTitle = AppLang.T("Reports.Type.Ageing");
+                        AddColumns((AppLang.T("Common.Label.Customer"), 30), (AppLang.T("Reports.Ageing.Balance"), 14), (AppLang.T("Reports.Ageing.0to30"), 14), (AppLang.T("Reports.Ageing.31to60"), 14), (AppLang.T("Reports.Ageing.61to90"), 14), (AppLang.T("Reports.Ageing.90plus"), 14));
                         foreach (var a in r.Data)
                             AddRow(a.CustomerName, UiHelpers.Money(a.Balance), UiHelpers.Money(a.Age0to30),
                                 UiHelpers.Money(a.Age31to60), UiHelpers.Money(a.Age61to90), UiHelpers.Money(a.Age90plus));
@@ -306,28 +330,28 @@ namespace Sayl.UI.UserControls
                     {
                         var r = await reportService.GetCashFlowReportAsync(from, to);
                         if (!CheckResult(r) || r.Data == null) return;
-                        _currentTitle = "حركة الصندوق";
-                        AddColumns(("البند", 60), ("القيمة", 40));
-                        AddRow("مبيعات نقدية", UiHelpers.Money(r.Data.CashSales));
-                        AddRow("مرتجعات نقدية", UiHelpers.Money(r.Data.CashReturns));
-                        AddRow("قبض من العملاء", UiHelpers.Money(r.Data.CustomerPayments));
-                        AddRow("سداد للموردين", UiHelpers.Money(r.Data.SupplierPayments));
-                        AddRow("صرف نقد (جلسات)", UiHelpers.Money(r.Data.CashOut));
-                        AddRow("نقد داخلي (جلسات)", UiHelpers.Money(r.Data.CashIn));
-                        AddRow("مصروفات مدفوعة نقديًا", UiHelpers.Money(r.Data.ExpensesPaid));
-                        AddRow("رواتب مصروفة", UiHelpers.Money(r.Data.SalariesPaid));
-                        AddRow("صافي حركة النقد", UiHelpers.Money(r.Data.NetMovement));
+                        _currentTitle = AppLang.T("Reports.Type.CashFlow");
+                        AddColumns((AppLang.T("Common.Report.Item"), 60), (AppLang.T("Common.Report.Value"), 40));
+                        AddRow(AppLang.T("Reports.CashFlow.CashSales"), UiHelpers.Money(r.Data.CashSales));
+                        AddRow(AppLang.T("Reports.CashFlow.CashReturns"), UiHelpers.Money(r.Data.CashReturns));
+                        AddRow(AppLang.T("Reports.CashFlow.CustomerPayments"), UiHelpers.Money(r.Data.CustomerPayments));
+                        AddRow(AppLang.T("Reports.CashFlow.SupplierPayments"), UiHelpers.Money(r.Data.SupplierPayments));
+                        AddRow(AppLang.T("Reports.CashFlow.SessionCashOut"), UiHelpers.Money(r.Data.CashOut));
+                        AddRow(AppLang.T("Reports.CashFlow.SessionCashIn"), UiHelpers.Money(r.Data.CashIn));
+                        AddRow(AppLang.T("Reports.CashFlow.ExpensesPaid"), UiHelpers.Money(r.Data.ExpensesPaid));
+                        AddRow(AppLang.T("Reports.CashFlow.SalariesPaid"), UiHelpers.Money(r.Data.SalariesPaid));
+                        AddRow(AppLang.T("Reports.CashFlow.NetMovement"), UiHelpers.Money(r.Data.NetMovement));
                         break;
                     }
                     case ReportPayrolls:
                     {
                         var payrollService = scope.ServiceProvider.GetRequiredService<clsPayrollService>();
                         var list = await payrollService.GetPayrollsAsync(from, to, null);
-                        _currentTitle = "الرواتب";
-                        AddColumns(("الموظف", 22), ("الفترة", 16), ("النوع", 10), ("أيام/ساعات", 12), ("الإجمالي", 13), ("خصم", 9), ("إضافة", 9), ("الصافي", 13));
+                        _currentTitle = AppLang.T("Reports.Type.Payrolls");
+                        AddColumns((AppLang.T("Reports.Payroll.Employee"), 22), (AppLang.T("Reports.Payroll.Period"), 16), (AppLang.T("Common.Label.Type"), 10), (AppLang.T("Reports.Payroll.WorkedUnits"), 12), (AppLang.T("Reports.Payroll.Gross"), 13), (AppLang.T("Reports.Payroll.Deduction"), 9), (AppLang.T("Reports.Payroll.Addition"), 9), (AppLang.T("Common.Label.Net"), 13));
                         foreach (var p in list)
                             AddRow(p.EmployeeName,
-                                $"{p.PeriodFrom:MM-dd} ← {p.PeriodTo:MM-dd}",
+                                AppLang.T("Payroll.Period.Line", p.PeriodFrom, p.PeriodTo),
                                 p.SalaryType.ToString(),
                                 p.WorkedUnits.ToString("0.##"),
                                 UiHelpers.Money(p.Gross),
@@ -340,11 +364,11 @@ namespace Sayl.UI.UserControls
                     {
                         var countService = scope.ServiceProvider.GetRequiredService<clsStockCountService>();
                         var lines = await countService.GetLastPostedSessionAsync();
-                        _currentTitle = "آخر جرد فعلي (مرحّل)";
-                        AddColumns(("المنتج", 32), ("الدفتري", 12), ("المعدود", 12), ("الفرق", 12), ("تكلفة الفرق", 16), ("الحالة", 16));
+                        _currentTitle = AppLang.T("StockCount.List.Posted");
+                        AddColumns((AppLang.T("Reports.Count.Product"), 32), (AppLang.T("Reports.Count.Book"), 12), (AppLang.T("Reports.Count.Counted"), 12), (AppLang.T("Reports.Count.Difference"), 12), (AppLang.T("Reports.Count.DiffCost"), 16), (AppLang.T("Common.Label.Status"), 16));
                         if (lines.Count == 0)
                         {
-                            AddRow("لا يوجد جرد مرحّل بعد", "", "", "", "", "");
+                            AddRow(AppLang.T("Reports.Count.None"), "", "", "", "", "");
                         }
                         else
                         {
@@ -352,18 +376,42 @@ namespace Sayl.UI.UserControls
                                 AddRow(l.ProductName, l.BookQuantity.ToString(), l.CountedQuantity?.ToString() ?? "-",
                                     l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
                                     l.DifferenceCost.ToString("N2"),
-                                    l.Difference is > 0 ? "فائض" : l.Difference is < 0 ? "عجز" : "مطابق");
+                                    l.Difference is > 0 ? AppLang.T("Reports.Count.Surplus")
+                                        : l.Difference is < 0 ? AppLang.T("Reports.Count.Shortage")
+                                        : AppLang.T("Reports.Count.Match"));
                         }
                         break;
                     }
                 }
 
                 _currentPeriod = CurrentPeriodText();
+                RefreshDisplay();
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر توليد التقرير.");
+                UiHelpers.ShowError(this, AppLang.T("Reports.Msg.GenerateFailed"));
             }
+        }
+
+        /// <summary>
+        /// يرسم شريحة الصفحة الحالية من _currentRows (الذي يحتفظ بكل
+        /// الصفوف للتصدير) — التنقل لا يمس بيانات التقرير أبدًا.
+        /// </summary>
+        private void RefreshDisplay()
+        {
+            _grid.Rows.Clear();
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_currentRows.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var row in _currentRows.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
+            {
+                var values = new List<object>();
+                for (int i = 0; i < _grid.Columns.Count; i++)
+                    values.Add(i < row.Length ? row[i] : "");
+                _grid.Rows.Add(values.ToArray());
+            }
+
+            _pager.SetNavigation(_currentRows.Count, _currentPage);
         }
 
         // ───────────────── التصدير: نفس ما يُعرض بالضبط ─────────────────
@@ -424,7 +472,7 @@ namespace Sayl.UI.UserControls
             var (headers, rows) = CurrentTable();
             if (rows.Count == 0)
             {
-                UiHelpers.ShowInfo(this, "لا توجد بيانات معروضة للتصدير.");
+                UiHelpers.ShowInfo(this, AppLang.T("Reports.Msg.NoData"));
                 return;
             }
 
@@ -438,7 +486,7 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر إنشاء مجلد الحفظ تلقائيًا.");
+                UiHelpers.ShowError(this, AppLang.T("Reports.Msg.DirFailed"));
                 return;
             }
 
@@ -448,12 +496,12 @@ namespace Sayl.UI.UserControls
 
             try
             {
-                string storeName = "سيل";
+                string storeName = AppLang.T("App.Store.Default");
                 try
                 {
                     using var scope = Program.Services.CreateScope();
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("App.Store.Default"));
                 }
                 catch { /* الترويسة الافتراضية كافية */ }
 
@@ -463,11 +511,11 @@ namespace Sayl.UI.UserControls
                 await Task.Run(() =>
                     PdfService.ExportTableReport(storeName, title, period, user, headers, rows, path));
 
-                UiHelpers.ShowInfo(this, $"تم إنشاء ملف PDF بنجاح:\n{fullPath}");
+                UiHelpers.ShowInfo(this, AppLang.T("Reports.Msg.PdfDone", fullPath));
             }
             catch (Exception ex)
             {
-                UiHelpers.ShowError(this, "تعذر إنشاء ملف PDF: " + ex.Message);
+                UiHelpers.ShowError(this, AppLang.T("Reports.Msg.PdfFailed", ex.Message));
             }
         }
 
@@ -503,7 +551,7 @@ namespace Sayl.UI.UserControls
             var (headers, rows) = CurrentTable();
             if (rows.Count == 0)
             {
-                UiHelpers.ShowInfo(this, "لا توجد بيانات معروضة للتصدير.");
+                UiHelpers.ShowInfo(this, AppLang.T("Reports.Msg.NoData"));
                 return;
             }
 
@@ -517,7 +565,7 @@ namespace Sayl.UI.UserControls
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر إنشاء مجلد الحفظ تلقائيًا.");
+                UiHelpers.ShowError(this, AppLang.T("Reports.Msg.DirFailed"));
                 return;
             }
 
@@ -528,11 +576,11 @@ namespace Sayl.UI.UserControls
             try
             {
                 ExcelService.ExportTable(_currentTitle, _currentPeriod, headers, rows, fullPath);
-                UiHelpers.ShowInfo(this, $"تم إنشاء ملف Excel بنجاح:\n{fullPath}");
+                UiHelpers.ShowInfo(this, AppLang.T("Reports.Msg.ExcelDone", fullPath));
             }
             catch (Exception ex)
             {
-                UiHelpers.ShowError(this, "تعذر إنشاء ملف Excel: " + ex.Message);
+                UiHelpers.ShowError(this, AppLang.T("Reports.Msg.ExcelFailed", ex.Message));
             }
         }
         private bool CheckResult<T>(Common.Results.Result<T> r)
@@ -554,11 +602,7 @@ namespace Sayl.UI.UserControls
         private void AddRow(params string[] cells)
         {
             var snapshot = cells.ToArray();
-            _currentRows.Add(snapshot);   // للتصدير
-            var values = new List<object>();
-            for (int i = 0; i < _grid.Columns.Count; i++)
-                values.Add(i < snapshot.Length ? snapshot[i] : "");
-            _grid.Rows.Add(values.ToArray());
+            _currentRows.Add(snapshot);   // للتصدير — الجدول يرسمه RefreshDisplay (ترقيم)
         }
     }
 }

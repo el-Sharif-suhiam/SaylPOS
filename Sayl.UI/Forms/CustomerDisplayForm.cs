@@ -154,14 +154,14 @@ namespace Sayl.UI.Forms
             _grid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             _grid.DefaultCellStyle.Padding = new Padding(10, 4, 10, 4);
 
-            _grid.Columns.Add("colName", "الصنف");
+            _grid.Columns.Add("colName", AppLang.T("Display.Label.Item"));
             _grid.Columns["colName"].FillWeight = 50;
-            _grid.Columns.Add("colQty", "كمية");
+            _grid.Columns.Add("colQty", AppLang.T("Display.Label.Qty"));
             _grid.Columns["colQty"].FillWeight = 16;
             _grid.Columns["colQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            _grid.Columns.Add("colPrice", "سعر");
+            _grid.Columns.Add("colPrice", AppLang.T("Display.Label.Price"));
             _grid.Columns["colPrice"].FillWeight = 17;
-            _grid.Columns.Add("colTotal", "إجمالي");
+            _grid.Columns.Add("colTotal", AppLang.T("Display.Label.Total"));
             _grid.Columns["colTotal"].FillWeight = 17;
             root.Controls.Add(_grid, 0, 1);
 
@@ -199,13 +199,13 @@ namespace Sayl.UI.Forms
             _lblUnits = new Label();
             _lblPayHint = new Label();
 
-            AddMoneyRow(new Label { Text = "الخصم" }, _lblDiscount, 0,
+            AddMoneyRow(new Label { Text = AppLang.T("Display.Label.Discount") }, _lblDiscount, 0,
                 new Font("Segoe UI", 14F, FontStyle.Bold), Color.FromArgb(252, 165, 165));
-            AddMoneyRow(new Label { Text = "الضريبة" }, _lblTax, 1,
+            AddMoneyRow(new Label { Text = AppLang.T("Display.Label.Tax") }, _lblTax, 1,
                 new Font("Segoe UI", 14F, FontStyle.Bold), Color.FromArgb(147, 197, 253));
-            AddMoneyRow(new Label { Text = "الإجمالي" }, _lblTotal, 2,
+            AddMoneyRow(new Label { Text = AppLang.T("Display.Label.Total") }, _lblTotal, 2,
                 new Font("Segoe UI", 30F, FontStyle.Bold), AppTheme.Accent);
-            AddMoneyRow(new Label { Text = "عدد القطع" }, _lblUnits, 3,
+            AddMoneyRow(new Label { Text = AppLang.T("Display.Label.Units") }, _lblUnits, 3,
                 new Font("Segoe UI", 13F), Color.FromArgb(203, 213, 225));
 
             // تلميح الدفع: يظهر تحت الأرقام عند طلب POS (يرجى تجهيز المبلغ)
@@ -241,7 +241,7 @@ namespace Sayl.UI.Forms
 
             _lblWelcomeTitle = new Label
             {
-                Text = "أهلاً بكم",
+                Text = AppLang.T("Display.Welcome"),
                 Dock = DockStyle.Top,
                 Height = 150,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -250,7 +250,7 @@ namespace Sayl.UI.Forms
             };
             _lblWelcomeSub = new Label
             {
-                Text = "ستظهر فاتورتكم على هذه الشاشة لحظة بلحظة",
+                Text = AppLang.T("Display.WelcomeSub"),
                 Dock = DockStyle.Top,
                 Height = 90,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -366,7 +366,7 @@ namespace Sayl.UI.Forms
             _lblTotal.Text = _cart.Total.ToString("N2");
             _lblUnits.Text = _cart.Items.Sum(i => i.Qty).ToString();
             _lblPayHint.Text = _cart.CheckoutRequested && _cart.Total > 0
-                ? $"يرجى تجهيز {_cart.Total:N2}"
+                ? AppLang.T("Display.PayHint", _cart.Total)
                 : "";
 
             if (_cart.Items.Count == 0)
@@ -389,20 +389,20 @@ namespace Sayl.UI.Forms
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<Sayl.Core.Services.clsSettingsService>();
 
-                string storeName = await settings.GetAsync(Sayl.Core.Services.clsSettingsService.KeyStoreName, "سيل");
+                string storeName = await settings.GetAsync(Sayl.Core.Services.clsSettingsService.KeyStoreName, AppLang.T("App.Store.Default"));
                 string footer = await settings.GetAsync(
-                    Sayl.Core.Services.clsSettingsService.KeyWelcomeMessage, "شكرًا لزيارتكم");
+                    Sayl.Core.Services.clsSettingsService.KeyWelcomeMessage, AppLang.T("Settings.Default.Welcome"));
 
                 _lblStoreName.Text = storeName;
-                _lblWelcomeTitle.Text = $"أهلاً بكم في {storeName}";
+                _lblWelcomeTitle.Text = AppLang.T("Display.WelcomeIn", storeName);
                 _lblFooter.Text = footer;
             }
             catch
             {
                 // الإعدادات غير متاحة؟ قيم افتراضية محترمة — العرض لا يتوقف
-                _lblStoreName.Text = "سيل";
-                _lblWelcomeTitle.Text = "أهلاً بكم";
-                _lblFooter.Text = "شكرًا لزيارتكم";
+                _lblStoreName.Text = AppLang.T("App.Store.Default");
+                _lblWelcomeTitle.Text = AppLang.T("Display.Welcome");
+                _lblFooter.Text = AppLang.T("Settings.Default.Welcome");
             }
         }
 

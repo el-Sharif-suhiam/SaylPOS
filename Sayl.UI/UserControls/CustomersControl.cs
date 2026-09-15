@@ -13,7 +13,7 @@ namespace Sayl.UI.UserControls
     {
         private List<Customer> _customers = new();
 
-        protected override string Title => "العملاء";
+        protected override string Title => AppLang.T("Customers.Section.Title");
 
         // مفتاح «عرض المعطّلين» — الافتراضي: العملاء النشطون فقط
         protected override bool SupportsShowDeleted => true;
@@ -24,14 +24,19 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var customerService = scope.ServiceProvider.GetRequiredService<clsCustomerService>();
-                _customers = await customerService.GetCustomersListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await customerService.GetCustomersPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _customers = paged.Items;
 
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colName", "الاسم");
-                Grid.Columns.Add("colPhone", "الجوال");
-                Grid.Columns.Add("colBalance", "الرصيد");
-                Grid.Columns.Add("colCredit", "حد الائتمان");
-                Grid.Columns.Add("colStatus", "الحالة");
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+                Grid.Columns.Add("colPhone", AppLang.T("Common.Label.Phone"));
+                Grid.Columns.Add("colBalance", AppLang.T("Customers.Label.Balance"));
+                Grid.Columns.Add("colCredit", AppLang.T("Customers.Label.CreditLimit"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
                 Grid.Columns["colName"].FillWeight = 30;
                 Grid.Columns["colPhone"].FillWeight = 20;
                 Grid.Columns["colBalance"].FillWeight = 15;
@@ -42,7 +47,7 @@ namespace Sayl.UI.UserControls
                 {
                     Name = "colDetails",
                     HeaderText = "",
-                    Text = "التفاصيل",
+                    Text = AppLang.T("Common.Button.Details"),
                     UseColumnTextForButtonValue = true,
                     FlatStyle = FlatStyle.Flat,
                     FillWeight = 8
@@ -54,11 +59,12 @@ namespace Sayl.UI.UserControls
                 Grid.Rows.Clear();
                 foreach (var c in _customers.Where(c => c.Party != null))
                     Grid.Rows.Add(c.Party!.Name, c.Party.Phone1 ?? "-", UiHelpers.Money(c.Balance ?? 0),
-                        UiHelpers.Money(c.CreditLimit ?? 0), c.Party.IsActive ? "نشط" : "معطل");
+                        UiHelpers.Money(c.CreditLimit ?? 0),
+                        c.Party.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل العملاء.");
+                UiHelpers.ShowError(this, AppLang.T("Customers.Msg.LoadFailed"));
             }
         }
 
@@ -70,18 +76,18 @@ namespace Sayl.UI.UserControls
         // كانت جاهزة وبلا مستدعٍ واحد). الزر يستدعيها بعد تحصيل المبلغ.
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة عميل", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);
+            AddToolbarButton(AppLang.T("Customers.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => EditParty(null), 140);
             AddToolbarGap();
-            AddToolbarButton("تحصيل دفعة", AppTheme.Success, Color.FromArgb(21, 128, 61), async (_, _) => await CollectPaymentAsync(), 130);
+            AddToolbarButton(AppLang.T("Customers.Button.Collect"), AppTheme.Success, Color.FromArgb(21, 128, 61), async (_, _) => await CollectPaymentAsync(), 130);
             AddToolbarGap();
-            AddToolbarButton("تعديل", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
+            AddToolbarButton(AppLang.T("Common.Button.Edit"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => EditSelected(), 110);
             AddToolbarGap();
-            AddToolbarButton("تعطيل", AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
+            AddToolbarButton(AppLang.T("Customers.Button.Deactivate"), AppTheme.Danger, Color.FromArgb(185, 28, 28), async (_, _) => await DeactivateAsync(), 110);
 
             if (SessionState.Can(Common.Utils.AppPermissions.Customers))
             {
                 AddToolbarGap();
-                AddToolbarButton("إعادة تفعيل", AppTheme.Success, Color.FromArgb(21, 128, 61),
+                AddToolbarButton(AppLang.T("Customers.Button.Activate"), AppTheme.Success, Color.FromArgb(21, 128, 61),
                     async (_, _) => await ActivateAsync(), 130);
             }
 
@@ -97,7 +103,7 @@ namespace Sayl.UI.UserControls
             var visible = _customers.Where(c => c.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Customers.Msg.PickCustomer"));
                 return;
             }
 
@@ -105,14 +111,14 @@ namespace Sayl.UI.UserControls
             decimal balance = customer.Balance ?? 0;
             if (balance <= 0)
             {
-                UiHelpers.ShowInfo(this, $"العميل '{customer.Party!.Name}' لا عليه رصيد مستحق.");
+                UiHelpers.ShowInfo(this, AppLang.T("Customers.Msg.NoDueBalance", customer.Party!.Name));
                 return;
             }
 
             // نافذة دفع مبسطة للتحصيل: المبلغ + الطريقة (نستخدم PaymentForm بلا تقسيم)
             using var form = new PaymentForm(balance, hasCustomer: true)
             {
-                Text = "تحصيل من العميل"
+                Text = AppLang.T("Customers.Collect.Title")
             };
             // نغلف النتيجة بدفعة واحدة مسماة «تحصيل دفعة رصيد»
             if (form.ShowDialog(FindForm()) != DialogResult.OK || form.PaymentsList.Count == 0)
@@ -128,7 +134,7 @@ namespace Sayl.UI.UserControls
                     Amount = form.PaymentsList.Sum(p => p.Amount),
                     Method = form.PaymentsList[0].Method,
                     PaymentDate = AppClock.Today,
-                    Notes = $"تحصيل دفعة من الرصيد — {customer.Party!.Name}"
+                    Notes = AppLang.T("Customers.Collect.Notes", customer.Party!.Name)
                 });
             }
 
@@ -148,8 +154,8 @@ namespace Sayl.UI.UserControls
             var customer = visible[e.RowIndex];
             var party = customer.Party!;
             using var form = new PartyDetailsForm(party,
-                ("الرصيد الحالي", UiHelpers.Money(customer.Balance ?? 0)),
-                ("حد الائتمان", UiHelpers.Money(customer.CreditLimit ?? 0)));
+                (AppLang.T("Customers.Details.Balance"), UiHelpers.Money(customer.Balance ?? 0)),
+                (AppLang.T("Customers.Details.CreditLimit"), UiHelpers.Money(customer.CreditLimit ?? 0)));
             form.ShowDialog(FindForm());
         }
 
@@ -159,19 +165,19 @@ namespace Sayl.UI.UserControls
             var visible = _customers.Where(c => c.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Customers.Msg.PickCustomer"));
                 return;
             }
 
             var party = visible[idx].Party!;
             if (party.IsActive)
             {
-                UiHelpers.ShowInfo(this, $"العميل '{party.Name}' نشط بالفعل.");
+                UiHelpers.ShowInfo(this, AppLang.T("Customers.Msg.AlreadyActive", party.Name));
                 return;
             }
 
-            if (!ConfirmationDialog.Show(this, "إعادة تفعيل عميل",
-                    $"سيتم إعادة تفعيل العميل '{party.Name}'. هل أنت متأكد؟", dangerStyle: false))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Customers.Title.Activate"),
+                    AppLang.T("Customers.Msg.ActivateConfirm", party.Name), dangerStyle: false))
                 return;
 
             Common.Results.Result result;
@@ -192,7 +198,7 @@ namespace Sayl.UI.UserControls
             var visible = _customers.Where(c => c.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Customers.Msg.PickCustomer"));
                 return;
             }
             EditParty(visible[idx].Party);
@@ -229,12 +235,13 @@ namespace Sayl.UI.UserControls
             var visible = _customers.Where(c => c.Party != null).ToList();
             if (idx < 0 || idx >= visible.Count)
             {
-                UiHelpers.ShowError(this, "اختر عميلًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Customers.Msg.PickCustomer"));
                 return;
             }
 
             var party = visible[idx].Party!;
-            if (!ConfirmationDialog.Show(this, "تعطيل عميل", $"سيتم تعطيل العميل '{party.Name}'. هل أنت متأكد؟"))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Customers.Title.Deactivate"),
+                    AppLang.T("Customers.Msg.DeactivateConfirm", party.Name)))
                 return;
 
             Common.Results.Result result;

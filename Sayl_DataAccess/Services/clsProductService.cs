@@ -61,6 +61,50 @@ namespace Sayl.Core.Services
                 .ToListAsync();
         }
 
+        /// <summary>
+        /// صفحة من المنتجات (الترقيم على مستوى SQL): نفس فلاتر
+        /// GetProductsListAsync + عدّ كامل + Skip/Take — عمود قوائم الشاشات.
+        /// </summary>
+        public async Task<PagedResult<DtoProduct>> GetProductsPagedAsync(
+            string search = "", bool includeInactive = false, int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Products.AsQueryable();
+
+            if (!includeInactive)
+                query = query.Where(p => p.IsActive);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                string like = search.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
+                query = query.Where(p => p.Name.Contains(like) || (p.Barcode != null && p.Barcode.Contains(like)));
+            }
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderBy(p => p.Name)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new DtoProduct
+                {
+                    ProductId = p.ProductId,
+                    Name = p.Name,
+                    Barcode = p.Barcode,
+                    Unit = p.Unit,
+                    Type = p.Type,
+                    BasePrice = p.BasePrice,
+                    CostPrice = p.CostPrice,
+                    ReorderLevel = p.ReorderLevel,
+                    IsActive = p.IsActive,
+                    CreatedAt = p.CreatedAt
+                })
+                .ToListAsync();
+
+            return new PagedResult<DtoProduct> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
+        }
+
         public async Task<Result<DtoProduct>> GetProductByIdAsync(int productId)
         {
             var product = await _dbContext.Products.FindAsync(productId);

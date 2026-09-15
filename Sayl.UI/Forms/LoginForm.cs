@@ -78,7 +78,7 @@ namespace Sayl.UI.Forms
             // KeyPreview=true: النافذة ترى المفاتيح قبل العناصر —
             // يسمح لـ AcceptButton/Escape بالعمل قبل تركيز أي عنصر.
             // CornerRadius=26: زوايا النافذة الدائرية (خاصية DialogForm).
-            Text = "تسجيل الدخول — سيل";
+            Text = AppLang.T("Login.Form.Title");
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(520, 660);
             BackColor = AppTheme.SidebarBg;
@@ -99,7 +99,7 @@ namespace Sayl.UI.Forms
 
             var lblBrand = new Label
             {
-                Text = "سيل",
+                Text = AppLang.T("Login.Brand"),
                 Bounds = new Rectangle(0, 105, 560, 38),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
@@ -109,7 +109,7 @@ namespace Sayl.UI.Forms
 
             var lblTagline = new Label
             {
-                Text = "نظام سيل لإدارة المبيعات المتدفقة",
+                Text = AppLang.T("Login.Tagline"),
                 Bounds = new Rectangle(0, 150, 560, 24),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(156, 163, 175),
@@ -137,7 +137,7 @@ namespace Sayl.UI.Forms
             // كل الإحداثيات هنا نسبية للبطاقة (24 = هامش داخلي)، لا للنافذة.
             var lblCardTitle = new Label
             {
-                Text = "تسجيل الدخول",
+                Text = AppLang.T("Login.Card.Title"),
                 Bounds = new Rectangle(24, 24, 432, 34),
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = AppTheme.FontHeading,
@@ -147,7 +147,7 @@ namespace Sayl.UI.Forms
 
             var lblUserCaption = new Label
             {
-                Text = "اختر المستخدم",
+                Text = AppLang.T("Login.Label.User"),
                 Bounds = new Rectangle(24, 66, 432, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -167,7 +167,7 @@ namespace Sayl.UI.Forms
 
             var lblPassCaption = new Label
             {
-                Text = "كلمة المرور",
+                Text = AppLang.T("Login.Label.Password"),
                 Bounds = new Rectangle(24, 148, 432, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -198,7 +198,7 @@ namespace Sayl.UI.Forms
 
             _btnTogglePassword = new Button
             {
-                Text = "إظهار",
+                Text = AppLang.T("Login.Button.Show"),
                 Dock = DockStyle.Left,
                 Width = 60,
                 FlatStyle = FlatStyle.Flat,
@@ -212,7 +212,7 @@ namespace Sayl.UI.Forms
             {
                 bool hidden = _txtPassword.UseSystemPasswordChar;
                 _txtPassword.UseSystemPasswordChar = !hidden;
-                _btnTogglePassword.Text = hidden ? "إخفاء" : "إظهار";
+                _btnTogglePassword.Text = hidden ? AppLang.T("Login.Button.Hide") : AppLang.T("Login.Button.Show");
             };
 
             // الترتيب مهم: المربع أولًا (Fill) ثم الزر (Left) —
@@ -221,7 +221,7 @@ namespace Sayl.UI.Forms
             passPanel.Controls.Add(_btnTogglePassword);
 
             // ── زر الدخول: Height=54 كبير قصدًا (زر أساسي) ──
-            _btnLogin = AppTheme.MakeButton("دخول", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            _btnLogin = AppTheme.MakeButton(AppLang.T("Login.Button.Login"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnLogin.Bounds = new Rectangle(24, 240, 432, 54);
 
             // ── أسفل البطاقة: رابط تغيير كلمة المرور (الشكل القوي —
@@ -230,7 +230,7 @@ namespace Sayl.UI.Forms
             // أضفناه INSIDE البطاقة أسفل زر الدخول مع رفع ارتفاعها.
             var lnkChangePassword = new Button
             {
-                Text = "تغيير كلمة المرور",
+                Text = AppLang.T("Login.Link.ChangePassword"),
                 Bounds = new Rectangle(24, 300, 432, 34),
                 FlatStyle = FlatStyle.Flat,
                 ForeColor = AppTheme.Primary,
@@ -279,6 +279,10 @@ namespace Sayl.UI.Forms
             btnClose.Bounds = new Rectangle(ClientSize.Width - 60, 16, 44, 44);
             btnClose.Click += (_, _) => Close();
 
+            // ── زر تبديل اللغة: تحت زر «؟» أعلى اليمين — كبسولة Eng/Ara ──
+            var btnLang = AppTheme.MakeLanguageSwitchButton();
+            btnLang.Bounds = new Rectangle(16, 68, btnLang.Width, btnLang.Height);
+
             // ── أسفل النافذة: ساعة البرنامج + حالة الاتصال ثم سطر الحقوق ──
             // 🕐 VULN-45: الساعة تُعرض من اللحظة الأولى — «توقيت البرنامج»
             // الموحد (UTC+3) الذي ستُخزن به كل الجلسات والفواتير.
@@ -294,7 +298,7 @@ namespace Sayl.UI.Forms
 
             _lblConnectionStatus = new Label
             {
-                Text = "جارٍ التحقق من الاتصال بقاعدة البيانات...",
+                Text = AppLang.T("Login.Msg.CheckingConnection"),
                 Bounds = new Rectangle(0, 586, 560, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.TextMuted
@@ -302,7 +306,7 @@ namespace Sayl.UI.Forms
 
             var lblFooter = new Label
             {
-                Text = "© سيل 2026 — جميع الحقوق محفوظة",
+                Text = AppLang.T("Login.Footer"),
                 Bounds = new Rectangle(0, 616, 560, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.FromArgb(107, 114, 128)
@@ -317,6 +321,7 @@ namespace Sayl.UI.Forms
             Controls.Add(card);
             Controls.Add(btnAbout);
             Controls.Add(btnClose);
+            Controls.Add(btnLang);
             Controls.Add(_lblConnectionStatus);
             Controls.Add(lblFooter);
 
@@ -352,7 +357,7 @@ namespace Sayl.UI.Forms
                 if (_cmbUsers.Items.Count == 0)
                 {
                     SetConnectionStatus(false);
-                    ShowError("لا يوجد مستخدمون نشطون في النظام.");
+                    ShowError(AppLang.T("Login.Msg.NoActiveUsers"));
                 }
                 else
                 {
@@ -362,7 +367,7 @@ namespace Sayl.UI.Forms
             catch
             {
                 SetConnectionStatus(false);
-                ShowError("تعذر تحميل قائمة المستخدمين. تحقق من الاتصال بقاعدة البيانات.");
+                ShowError(AppLang.T("Login.Msg.UsersLoadFailed"));
             }
             finally
             {
@@ -388,13 +393,13 @@ namespace Sayl.UI.Forms
 
             if (_cmbUsers.SelectedItem is not ComboItem selected)
             {
-                ShowError("اختر مستخدمًا من القائمة.");
+                ShowError(AppLang.T("Login.Msg.PickUser"));
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_txtPassword.Text))
             {
-                ShowError("أدخل كلمة المرور.");
+                ShowError(AppLang.T("Login.Msg.EnterPassword"));
                 _txtPassword.Focus();
                 return;
             }
@@ -417,13 +422,13 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
-                ShowError(string.IsNullOrEmpty(result.Message) ? "فشل تسجيل الدخول." : result.Message);
+                ShowError(string.IsNullOrEmpty(result.Message) ? AppLang.T("Login.Msg.LoginFailed") : result.Message);
                 _txtPassword.SelectAll();
                 _txtPassword.Focus();
             }
             catch
             {
-                ShowError("حدث خطأ غير متوقع أثناء الاتصال بالخادم.");
+                ShowError(AppLang.T("Login.Msg.UnexpectedError"));
             }
             finally
             {
@@ -443,7 +448,7 @@ namespace Sayl.UI.Forms
 
             using var dlg = new Form
             {
-                Text = "تغيير كلمة المرور",
+                Text = AppLang.T("Login.ChangePwd.Title"),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new Size(420, 300),
@@ -454,18 +459,18 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg
             };
 
-            var lblUser = new Label { Text = "اسم المستخدم *", Bounds = new Rectangle(30, 22, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblUser = new Label { Text = AppLang.T("Login.ChangePwd.User"), Bounds = new Rectangle(30, 22, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             var txtUser = new TextBox { Bounds = new Rectangle(30, 46, 360, 36), Font = AppTheme.FontBody, Text = presetUser };
 
-            var lblOld = new Label { Text = "كلمة المرور الحالية *", Bounds = new Rectangle(30, 92, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblOld = new Label { Text = AppLang.T("Login.ChangePwd.Old"), Bounds = new Rectangle(30, 92, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             var txtOld = new TextBox { Bounds = new Rectangle(30, 116, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
 
-            var lblNew = new Label { Text = "كلمة المرور الجديدة * (8 أحرف على الأقل، حروف وأرقام)", Bounds = new Rectangle(30, 162, 360, 40), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblNew = new Label { Text = AppLang.T("Login.ChangePwd.New"), Bounds = new Rectangle(30, 162, 360, 40), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             var txtNew = new TextBox { Bounds = new Rectangle(30, 200, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
 
-            var btnOk = AppTheme.MakeButton("تغيير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Login.ChangePwd.Button"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(30, 250, 220, 44);
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(270, 250, 120, 44);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -477,7 +482,7 @@ namespace Sayl.UI.Forms
                     string.IsNullOrWhiteSpace(txtOld.Text) ||
                     string.IsNullOrWhiteSpace(txtNew.Text))
                 {
-                    UiHelpers.ShowError(dlg, "جميع الحقول مطلوبة.");
+                    UiHelpers.ShowError(dlg, AppLang.T("Login.ChangePwd.Msg.AllFieldsRequired"));
                     return;
                 }
 
@@ -488,7 +493,7 @@ namespace Sayl.UI.Forms
                     result = await usersService.ChangePasswordAsync(txtUser.Text.Trim(), txtOld.Text, txtNew.Text);
                 }
 
-                UiHelpers.ShowResult(dlg, result, "تم تغيير كلمة المرور بنجاح.");
+                UiHelpers.ShowResult(dlg, result, AppLang.T("Login.ChangePwd.Msg.Success"));
                 if (result.IsSuccess)
                 {
                     dlg.DialogResult = DialogResult.OK;
@@ -527,8 +532,8 @@ namespace Sayl.UI.Forms
         private void SetConnectionStatus(bool connected)
         {
             _lblConnectionStatus.Text = connected
-                ? "متصل بقاعدة البيانات"
-                : "غير متصل بقاعدة البيانات";
+                ? AppLang.T("Login.Msg.Connected")
+                : AppLang.T("Login.Msg.NotConnected");
             _lblConnectionStatus.ForeColor = connected ? AppTheme.Success : AppTheme.Danger;
         }
 

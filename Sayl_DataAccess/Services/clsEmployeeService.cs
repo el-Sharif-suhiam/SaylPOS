@@ -57,6 +57,49 @@ namespace Sayl.Core.Services
                 .ToListAsync();
         }
 
+        /// <summary>صفحة موظفين (ترقيم SQL): نفس فلاتر القائمة + عدّ كامل + Skip/Take.</summary>
+        public async Task<PagedResult<DtoEmployee>> GetEmployeesPagedAsync(
+            string search = "", bool includeInactive = true, int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Employees.AsQueryable();
+
+            if (!includeInactive)
+                query = query.Where(e => e.Status == "active");
+
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(e => e.Name.Contains(search)
+                                       || e.Position.Contains(search)
+                                       || (e.Department != null && e.Department.Contains(search)));
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderBy(e => e.Name)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(e => new DtoEmployee
+                {
+                    EmployeeId = e.EmployeeId,
+                    Name = e.Name,
+                    Phone = e.Phone,
+                    Email = e.Email,
+                    Salary = e.Salary,
+                    SalaryType = e.SalaryType,
+                    HireDate = e.HireDate,
+                    ResignDate = e.ResignDate,
+                    Address = e.Address,
+                    Status = e.Status,
+                    Position = e.Position,
+                    Department = e.Department,
+                    CreatedAt = e.CreatedAt
+                })
+                .ToListAsync();
+
+            return new PagedResult<DtoEmployee> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
+        }
+
         public async Task<DtoEmployee?> GetEmployeeByIdAsync(int id)
         {
             var e = await _dbContext.Employees.FindAsync(id);

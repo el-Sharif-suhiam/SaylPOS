@@ -28,6 +28,12 @@ namespace Sayl.UI.Forms
         private Label _lblSummary = null!;
 
         private List<DtoPayrollRecord> _payrolls = new();
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
+
+        // فهرس الكشف الكامل لصف الشبكة المعروض (ترقيم العرض فقط — الخلفية كاملة)
+        private int VisibleIndex(int gridRow) => (_currentPage - 1) * _pageSize + gridRow;
 
         public PayrollForm(int? employeeId = null, string? employeeName = null)
         {
@@ -66,8 +72,8 @@ namespace Sayl.UI.Forms
             // ── قواعد النافذة (نفس نمط كل النوافذ الحوارية) ──
             // MinimumSize: أصغر مقاس مسموح — يمنع قصّ الأزرار عند التصغير.
             Text = _filterEmployeeId.HasValue
-                ? $"كشوف رواتب — {_filterEmployeeName}"
-                : "كشوف الرواتب";
+                ? AppLang.T("Payroll.Title.Filtered", _filterEmployeeName)
+                : AppLang.T("Payroll.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(1100, 700);
             MinimumSize = new Size(900, 560);
@@ -86,9 +92,10 @@ namespace Sayl.UI.Forms
             };
             // عمود واحد (العرض 100%) — هذه شاشة قوائم عمودية.
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            // الصفوف الثلاثة بالترتيب — الأرقام = الارتفاقات بالبكسل.
+            // الصفوف الأربعة بالترتيب — الأرقام = الارتفاقات بالبكسل.
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الفترة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));     // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));     // الأزرار
 
             // ── صف الفترة (يوضع لاحقًا في خلية الصف 0) ──
@@ -97,9 +104,9 @@ namespace Sayl.UI.Forms
             // أول Add يوضع أقصى اليمين، التالي إلى يساره... (اقرأ الأسطر بترتيبها)
             var topBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.FieldBg, Padding = new Padding(10, 8, 10, 8) };
 
-            var lblFrom = new Label { Text = "من", Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblFrom = new Label { Text = AppLang.T("Payroll.Label.From"), Dock = DockStyle.Right, Width = 40, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _dtpFrom = new DateTimePicker { Dock = DockStyle.Right, Width = 140, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd", RightToLeftLayout = false };
-            var lblTo = new Label { Text = "إلى", Dock = DockStyle.Right, Width = 34, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblTo = new Label { Text = AppLang.T("Payroll.Label.To"), Dock = DockStyle.Right, Width = 34, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _dtpTo = new DateTimePicker { Dock = DockStyle.Right, Width = 140, Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy-MM-dd", RightToLeftLayout = false };
 
             // افتراضي: الشهر الماضي كاملًا (فترة منتهية قابلة للتوليد فورًا)
@@ -108,7 +115,7 @@ namespace Sayl.UI.Forms
             _dtpFrom.Value = firstOfThisMonth.AddMonths(-1);
             _dtpTo.Value = firstOfThisMonth.AddDays(-1);
 
-            _btnGenerate = AppTheme.MakeButton("توليد كشوف الفترة", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
+            _btnGenerate = AppTheme.MakeButton(AppLang.T("Payroll.Button.Generate"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 44);
             _btnGenerate.Dock = DockStyle.Right;
             _btnGenerate.Width = 180;
             _btnGenerate.Click += async (_, _) => await GenerateAsync();
@@ -138,18 +145,18 @@ namespace Sayl.UI.Forms
             // الأزرار: Height=48 (حد اللمس الأدنى — لا تصغّره).
             // Width هو عرض الزر — عدّله لو غيّرت نصًا أطول.
             // لترتيب مختلف: غيّر ترتيب أسطر Add أسفل اللوحة (أول سطر = أقصى اليمين).
-            _btnPaySelected = AppTheme.MakeButton("صرف المحدد", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 48);
+            _btnPaySelected = AppTheme.MakeButton(AppLang.T("Payroll.Button.PaySelected"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61), height: 48);
             _btnPaySelected.Dock = DockStyle.Left;
             _btnPaySelected.Width = 140;
             _btnPaySelected.Click += async (_, _) => await PaySelectedAsync();
 
-            _btnRefresh = AppTheme.MakeButton("تحديث", AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 48);
+            _btnRefresh = AppTheme.MakeButton(AppLang.T("Payroll.Button.Refresh"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 48);
             _btnRefresh.Dock = DockStyle.Left;
             _btnRefresh.Width = 110;
             _btnRefresh.Click += async (_, _) => await LoadPayrollsAsync();
 
             // DialogResult=Cancel: يجعل Esc يغلق النافذة — أضفه لكل زر إغلاق.
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
             btnClose.Dock = DockStyle.Left;
             btnClose.Width = 120;
@@ -177,21 +184,21 @@ namespace Sayl.UI.Forms
             // FillWeight: نسبة عرض العمود من الجدول — مجموعها مئة تقريبًا
             //   (غيّرها لتوسيع/تضييق عمود دون كسر الباقي).
             // ReadOnly=true على العمود: عرض فقط (المحاسيب/الصافي محسوبة).
-            _grid.Columns.Add("colEmp", "الموظف");
-            _grid.Columns.Add("colType", "النوع");
-            _grid.Columns.Add("colWorked", "أيام/ساعات عمل");
-            _grid.Columns.Add("colHoliday", "إجازات رسمية");
-            _grid.Columns.Add("colRate", "المعدل");
-            _grid.Columns.Add("colGross", "إجمالي الراتب");
-            _grid.Columns.Add("colDed", "خصومات");
-            _grid.Columns.Add("colAdd", "إضافات");
-            _grid.Columns.Add("colNet", "الصافي");
-            _grid.Columns.Add("colStatus", "الحالة");
+            _grid.Columns.Add("colEmp", AppLang.T("Payroll.Col.Employee"));
+            _grid.Columns.Add("colType", AppLang.T("Payroll.Col.Type"));
+            _grid.Columns.Add("colWorked", AppLang.T("Payroll.Col.Worked"));
+            _grid.Columns.Add("colHoliday", AppLang.T("Payroll.Col.Holidays"));
+            _grid.Columns.Add("colRate", AppLang.T("Payroll.Col.Rate"));
+            _grid.Columns.Add("colGross", AppLang.T("Payroll.Col.Gross"));
+            _grid.Columns.Add("colDed", AppLang.T("Payroll.Col.Deductions"));
+            _grid.Columns.Add("colAdd", AppLang.T("Payroll.Col.Additions"));
+            _grid.Columns.Add("colNet", AppLang.T("Payroll.Col.Net"));
+            _grid.Columns.Add("colStatus", AppLang.T("Payroll.Col.Status"));
             var colUnpay = new DataGridViewButtonColumn
             {
                 Name = "colUnpay",
                 HeaderText = "",
-                Text = "عكس",
+                Text = AppLang.T("Payroll.Col.Unpay"),
                 UseColumnTextForButtonValue = true,
                 FlatStyle = FlatStyle.Flat,
                 FillWeight = 7
@@ -224,9 +231,24 @@ namespace Sayl.UI.Forms
             _grid.CellClick += async (_, args) => await UnpayCellClickAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };
 
+            // شريط الترقيم: تنقّل يعيد رسم العرض فقط (الخلفية _payrolls كاملة أوفر للإجماليات)
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshGrid();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshGrid();
+            };
+
             root.Controls.Add(topBar, 0, 0);
             root.Controls.Add(_grid, 0, 1);
-            root.Controls.Add(bottomBar, 0, 2);
+            root.Controls.Add(_pager, 0, 2);
+            root.Controls.Add(bottomBar, 0, 3);
 
             Controls.Add(root); // وحيد — الصفوف المطلقة لا تدخل التمرير أبدًا
         }
@@ -244,18 +266,23 @@ namespace Sayl.UI.Forms
                 DateOnly? to = _filterEmployeeId.HasValue ? null : DateOnly.FromDateTime(_dtpTo.Value);
                 _payrolls = await payrollService.GetPayrollsAsync(from, to, _filterEmployeeId);
 
+                _currentPage = 1; // فلتر جديد = من أول صفحة
                 RefreshGrid();
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل الكشوف.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Msg.LoadFailed"));
             }
         }
 
         private void RefreshGrid()
         {
             _grid.Rows.Clear();
-            foreach (var p in _payrolls)
+
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_payrolls.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var p in _payrolls.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
             {
                 bool paid = p.Status == enPayrollStatus.paid;
                 int row = _grid.Rows.Add(p.EmployeeName,
@@ -267,8 +294,8 @@ namespace Sayl.UI.Forms
                     p.Deductions.ToString("0.##"),
                     p.Additions.ToString("0.##"),
                     UiHelpers.Money(p.Net),
-                    paid ? "مصروف" : "معلق",
-                    paid ? "عكس" : "");   // زر العكس لكل صف — يظهر للمصروف فقط
+                    paid ? AppLang.T("Payroll.Status.Paid") : AppLang.T("Payroll.Status.Pending"),
+                    paid ? AppLang.T("Payroll.Col.Unpay") : "");   // زر العكس لكل صف — يظهر للمصروف فقط
                 _grid.Rows[row].Tag = p;
 
                 if (paid)
@@ -285,7 +312,9 @@ namespace Sayl.UI.Forms
 
             decimal pendingTotal = _payrolls.Where(p => p.Status == enPayrollStatus.pending).Sum(p => p.Net);
             decimal paidTotal = _payrolls.Where(p => p.Status == enPayrollStatus.paid).Sum(p => p.Net);
-            _lblSummary.Text = $"المعلق: {UiHelpers.Money(pendingTotal)}    المصروف: {UiHelpers.Money(paidTotal)}";
+            _lblSummary.Text = AppLang.T("Payroll.Summary", UiHelpers.Money(pendingTotal), UiHelpers.Money(paidTotal));
+
+            _pager.SetNavigation(_payrolls.Count, _currentPage);
         }
 
         // ───────────────── عكس صرف الصف (زر لكل سطر — نمط الشفتات) ─────────────────
@@ -294,15 +323,16 @@ namespace Sayl.UI.Forms
             if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colUnpay"].Index)
                 return;
 
-            if (args.RowIndex >= _payrolls.Count)
+            int pi = VisibleIndex(args.RowIndex);
+            if (pi < 0 || pi >= _payrolls.Count)
                 return;
 
-            var record = _payrolls[args.RowIndex];
+            var record = _payrolls[pi];
             if (record.Status != enPayrollStatus.paid)
                 return; // المعلق لا يظهر زر عكس أصلًا
 
-            if (!ConfirmationDialog.Show(this, "عكس صرف راتب",
-                    $"سيتم إرجاع كشف {record.EmployeeName} إلى معلق وحذف مصروفه ({UiHelpers.Money(record.Net)}).\nاستخدم هذا لتصحيح صرف خاطئ فقط.", dangerStyle: true))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Payroll.Unpay.Title"),
+                    AppLang.T("Payroll.Unpay.Confirm", record.EmployeeName, UiHelpers.Money(record.Net)), dangerStyle: true))
                 return;
 
             try
@@ -320,7 +350,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر عكس الصرف.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Unpay.Failed"));
             }
         }
 
@@ -330,8 +360,8 @@ namespace Sayl.UI.Forms
             var from = DateOnly.FromDateTime(_dtpFrom.Value);
             var to = DateOnly.FromDateTime(_dtpTo.Value);
 
-            if (!ConfirmationDialog.Show(this, "توليد كشوف",
-                    $"سيتم توليد كشوف لكل الموظفين النشطين للفترة {from:yyyy-MM-dd} ← {to:yyyy-MM-dd}.\nالموظفون الذين لديهم كشوف بالفعل سيُتجاوزون.", dangerStyle: false))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Payroll.Generate.Title"),
+                    AppLang.T("Payroll.Generate.Confirm", from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd")), dangerStyle: false))
                 return;
 
             try
@@ -349,17 +379,18 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر توليد الكشوف.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Generate.Failed"));
             }
         }
 
         // ───────────────── تحرير خلية (كشف معلق) ─────────────────
         private async Task CellEditedAsync(DataGridViewCellEventArgs args)
         {
-            if (args.RowIndex < 0 || args.RowIndex >= _payrolls.Count)
+            int pi = VisibleIndex(args.RowIndex);
+            if (args.RowIndex < 0 || pi >= _payrolls.Count)
                 return;
 
-            var record = _payrolls[args.RowIndex];
+            var record = _payrolls[pi];
             if (record.Status == enPayrollStatus.paid)
                 return; // محمي — الصف للعرض فقط
 
@@ -388,7 +419,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحديث الكشف.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Update.Failed"));
                 await LoadPayrollsAsync();
             }
         }
@@ -402,21 +433,22 @@ namespace Sayl.UI.Forms
         private async Task PaySelectedAsync()
         {
             int idx = _grid.CurrentRow?.Index ?? -1;
-            if (idx < 0 || idx >= _payrolls.Count)
+            int pi = VisibleIndex(idx);
+            if (pi < 0 || pi >= _payrolls.Count)
             {
-                UiHelpers.ShowError(this, "اختر كشفًا من الجدول.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Pay.PickFirst"));
                 return;
             }
 
-            var record = _payrolls[idx];
+            var record = _payrolls[pi];
             if (record.Status == enPayrollStatus.paid)
             {
-                UiHelpers.ShowInfo(this, "الكشف مصروف بالفعل.");
+                UiHelpers.ShowInfo(this, AppLang.T("Payroll.Pay.AlreadyPaid"));
                 return;
             }
 
-            if (!ConfirmationDialog.Show(this, "صرف راتب",
-                    $"سيتم صرف راتب {record.EmployeeName} بمبلغ {UiHelpers.Money(record.Net)} وتسجيله كمصروف.", dangerStyle: false))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Payroll.Pay.Title"),
+                    AppLang.T("Payroll.Pay.Confirm", record.EmployeeName, UiHelpers.Money(record.Net)), dangerStyle: false))
                 return;
 
             try
@@ -434,7 +466,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الصرف.");
+                UiHelpers.ShowError(this, AppLang.T("Payroll.Pay.Failed"));
             }
         }
 

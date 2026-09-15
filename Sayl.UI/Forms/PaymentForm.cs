@@ -49,7 +49,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "الدفع";
+            Text = AppLang.T("Payment.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 560);
             BackColor = AppTheme.CardBg;
@@ -59,7 +59,7 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label
             {
-                Text = "إتمام الدفع",
+                Text = AppLang.T("Payment.Title"),
                 Bounds = new Rectangle(0, 18, 460, 32),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -70,7 +70,7 @@ namespace Sayl.UI.Forms
             // بطاقة FieldBg (16pt Primary) — المطلوب هو المرجع البصري.
             var lblTotalCaption = new Label
             {
-                Text = "المطلوب",
+                Text = AppLang.T("Payment.Label.Due"),
                 Bounds = new Rectangle(30, 58, 400, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -88,7 +88,7 @@ namespace Sayl.UI.Forms
 
             var lblRows = new Label
             {
-                Text = "الدفعات",
+                Text = AppLang.T("Payment.Label.Payments"),
                 Bounds = new Rectangle(30, 130, 400, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -108,7 +108,7 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.CardBg
             };
 
-            var btnAddRow = AppTheme.MakeButton("+ إضافة دفعة أخرى (تقسيم)", AppTheme.SidebarBg,
+            var btnAddRow = AppTheme.MakeButton(AppLang.T("Payment.Button.AddRow"), AppTheme.SidebarBg,
                 hoverColor: AppTheme.SidebarHover, height: 40);
             btnAddRow.Bounds = new Rectangle(30, 330, 400, 40);
             // (null, 0): صف جديد فارخ بلا طريقة افتراضية — المستخدم يختار
@@ -128,18 +128,18 @@ namespace Sayl.UI.Forms
             // (نمط «عنصر يظهر شرطيًا» — لا حذف/إنشاء، مجرد تبديل ظهور).
             _lblCreditWarning = new Label
             {
-                Text = "المبلغ أقل من المطلوب: سيُسجَّل الباقي دينًا على العميل.",
+                Text = AppLang.T("Payment.CreditWarning"),
                 Bounds = new Rectangle(30, 410, 400, 24),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.Warning,
                 Visible = false
             };
 
-            _btnOk = AppTheme.MakeButton("تأكيد الدفع", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            _btnOk = AppTheme.MakeButton(AppLang.T("Payment.Button.Confirm"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnOk.Bounds = new Rectangle(30, 444, 240, 52);
             _btnOk.Click += (_, _) => Confirm();
 
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg,
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(290, 444, 140, 52);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = إلغاء
@@ -175,7 +175,12 @@ namespace Sayl.UI.Forms
                 Left = 242,
                 Top = 6
             };
-            cmb.Items.AddRange(new object[] { "نقدي", "شبكة (بطاقة)", "تحويل بنكي" });
+            cmb.Items.AddRange(new object[]
+            {
+                AppLang.T("Common.Method.Cash"),
+                AppLang.T("Common.Method.Card"),
+                AppLang.T("Common.Method.BankTransfer")
+            });
             cmb.SelectedIndex = method switch
             {
                 "card" => 1,
@@ -238,13 +243,13 @@ namespace Sayl.UI.Forms
 
             if (change >= 0)
             {
-                _lblChange.Text = $"الباقي: {UiHelpers.Money(change)}";
+                _lblChange.Text = AppLang.T("Payment.Label.Change", UiHelpers.Money(change));
                 _lblChange.ForeColor = AppTheme.Success;
                 _lblCreditWarning.Visible = false;
             }
             else
             {
-                _lblChange.Text = $"النقص: {UiHelpers.Money(-change)}";
+                _lblChange.Text = AppLang.T("Payment.Label.Short", UiHelpers.Money(-change));
                 _lblChange.ForeColor = AppTheme.Danger;
                 _lblCreditWarning.Visible = true;
             }
@@ -277,19 +282,19 @@ namespace Sayl.UI.Forms
 
             if (paid <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل مبلغ دفعة واحد على الأقل.");
+                UiHelpers.ShowError(this, AppLang.T("Payment.Msg.OnePaymentRequired"));
                 return;
             }
 
             if (paid > _netTotal + 0.005m)
             {
-                UiHelpers.ShowError(this, $"مجموع الدفعات ({UiHelpers.Money(paid)}) أكبر من المطلوب ({UiHelpers.Money(_netTotal)}).");
+                UiHelpers.ShowError(this, AppLang.T("Payment.Msg.Overpaid", UiHelpers.Money(paid), UiHelpers.Money(_netTotal)));
                 return;
             }
 
             if (paid < _netTotal - 0.005m && !_hasCustomer)
             {
-                UiHelpers.ShowError(this, "البيع بالدين يتطلب اختيار عميل أولًا.");
+                UiHelpers.ShowError(this, AppLang.T("Payment.Msg.CreditNeedsCustomer"));
                 return;
             }
 

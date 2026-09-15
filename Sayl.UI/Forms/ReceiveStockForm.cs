@@ -36,7 +36,7 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            Text = "استلام مخزون";
+            Text = AppLang.T("ReceiveStock.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(560, 620);
             BackColor = AppTheme.CardBg;
@@ -46,7 +46,7 @@ namespace Sayl.UI.Forms
 
             var lblTitle = new Label
             {
-                Text = "استلام مخزون جديد",
+                Text = AppLang.T("ReceiveStock.Title"),
                 Bounds = new Rectangle(0, 18, 560, 32),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -60,15 +60,15 @@ namespace Sayl.UI.Forms
                 Bounds = new Rectangle(30, 58, 380, 40),
                 Font = AppTheme.FontBody
             };
-            _txtSearch.PlaceholderText = "ابحث بالاسم أو الباركود ثم Enter";
+            _txtSearch.PlaceholderText = AppLang.T("ReceiveStock.Search.Placeholder");
 
-            var btnSearch = AppTheme.MakeButton("بحث", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnSearch = AppTheme.MakeButton(AppLang.T("Common.Button.Search"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnSearch.Bounds = new Rectangle(420, 58, 110, 40);
             btnSearch.Click += async (_, _) => await LoadProductsAsync(_txtSearch.Text?.Trim() ?? "");
 
             var lblProducts = new Label
             {
-                Text = "المنتج (المخزني)",
+                Text = AppLang.T("ReceiveStock.Label.Product"),
                 Bounds = new Rectangle(30, 106, 500, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -92,7 +92,7 @@ namespace Sayl.UI.Forms
             // علامة * = إلزامي — يتكرر التحقق منهما في ReceiveAsync.
             var lblBatch = new Label
             {
-                Text = "رقم الدفعة *",
+                Text = AppLang.T("ReceiveStock.Label.Batch"),
                 Bounds = new Rectangle(30, 312, 240, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -106,7 +106,7 @@ namespace Sayl.UI.Forms
 
             var lblQty = new Label
             {
-                Text = "الكمية *",
+                Text = AppLang.T("Common.Label.Qty") + " *",
                 Bounds = new Rectangle(290, 312, 240, 22),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -125,7 +125,7 @@ namespace Sayl.UI.Forms
             // لا نحذف/نخفي العنصر — تعطيله يبصر المستخدم بوجوده.
             _chkHasExpiry = new CheckBox
             {
-                Text = "له تاريخ انتهاء",
+                Text = AppLang.T("ReceiveStock.Label.HasExpiry"),
                 Bounds = new Rectangle(290, 388, 240, 26),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
@@ -141,11 +141,11 @@ namespace Sayl.UI.Forms
 
             // ── صف الأزرار: استلام (يمين) + إغلاق (يسار) ──
             // Height=52: أكبر من حد اللمس 48 — زر العمل الأساسي يبرز.
-            var btnReceive = AppTheme.MakeButton("استلام", AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
+            var btnReceive = AppTheme.MakeButton(AppLang.T("ReceiveStock.Button.Receive"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
             btnReceive.Bounds = new Rectangle(30, 452, 240, 52);
             btnReceive.Click += async (_, _) => await ReceiveAsync();
 
-            var btnClose = AppTheme.MakeButton("إغلاق", AppTheme.Bg,
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnClose.Bounds = new Rectangle(290, 452, 240, 52);
             btnClose.DialogResult = DialogResult.Cancel; // Esc = إغلاق
@@ -175,14 +175,14 @@ namespace Sayl.UI.Forms
                 _products = products;
                 _lstProducts.Items.Clear();
                 foreach (var p in products)
-                    _lstProducts.Items.Add($"{p.Name}  [{p.Barcode ?? "بدون باركود"}]");
+                    _lstProducts.Items.Add($"{p.Name}  [{p.Barcode ?? AppLang.T("ReceiveStock.NoBarcode")}]");
 
                 if (_products.Count == 0)
-                    UiHelpers.ShowInfo(this, "لا توجد منتجات مطابقة.");
+                    UiHelpers.ShowInfo(this, AppLang.T("ReceiveStock.Msg.NoMatches"));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المنتجات.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.LoadFailed"));
             }
         }
 
@@ -190,7 +190,7 @@ namespace Sayl.UI.Forms
         {
             if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
             {
-                UiHelpers.ShowError(this, "اختر منتجًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.PickProduct"));
                 return;
             }
 
@@ -198,14 +198,14 @@ namespace Sayl.UI.Forms
 
             if (string.IsNullOrWhiteSpace(_txtBatch.Text))
             {
-                UiHelpers.ShowError(this, "رقم الدفعة مطلوب.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.BatchRequired"));
                 _txtBatch.Focus();
                 return;
             }
 
             if (!int.TryParse(_txtQty.Text?.Trim(), out int qty) || qty <= 0)
             {
-                UiHelpers.ShowError(this, "أدخل كمية صحيحة أكبر من صفر.");
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.InvalidQty"));
                 _txtQty.Focus();
                 return;
             }
@@ -221,7 +221,7 @@ namespace Sayl.UI.Forms
             };
 
             Result result = await UiHelpers.UseServiceAsync(s => s.ReceiveStockAsync(request));
-            UiHelpers.ShowResult(this, result, $"تم استلام {qty} وحدة للمنتج {product.Name}.");
+            UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", qty, product.Name));
 
             if (result.IsSuccess)
             {

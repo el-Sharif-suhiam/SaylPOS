@@ -98,11 +98,11 @@ namespace Sayl.UI.Infrastructure
         {
             try
             {
-                string storeName = "سيل", storePhone = "", vatNumber = "", footer = "";
+                string storeName = AppLang.T("Common.Default.Store"), storePhone = "", vatNumber = "", footer = "";
                 using (var scope = Program.Services.CreateScope())
                 {
                     var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                    storeName = await settings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("Common.Default.Store"));
                     storePhone = await settings.GetAsync(clsSettingsService.KeyStorePhone);
                     vatNumber = await settings.GetAsync(clsSettingsService.KeyVatNumber);
                     footer = await settings.GetAsync(clsSettingsService.KeyReceiptFooter);
@@ -130,39 +130,39 @@ namespace Sayl.UI.Infrastructure
                 bytes.AddRange(new byte[] { 0x1D, 0x21, 0x11 });    // خط كبير
                 Line(storeName);
                 bytes.AddRange(new byte[] { 0x1D, 0x21, 0x00 });    // حجم عادي
-                if (!string.IsNullOrWhiteSpace(storePhone)) Line($"هاتف: {storePhone}");
-                if (!string.IsNullOrWhiteSpace(vatNumber)) Line($"الرقم الضريبي: {vatNumber}");
+                if (!string.IsNullOrWhiteSpace(storePhone)) Line(AppLang.T("Receipt.Line.Phone", storePhone));
+                if (!string.IsNullOrWhiteSpace(vatNumber)) Line(AppLang.T("Receipt.Line.Vat", vatNumber));
                 bytes.AddRange(new byte[] { 0x1B, 0x61, 0x00 });    // محاذاة يمين
                 Divider();
-                Line($"فاتورة: {invoice.InvoiceId}    {Sayl.UI.Infrastructure.AppClock.ToLocal(invoice.CreatedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}");
-                Line($"الكاشير: {invoice.CashierName}");
-                if (!string.IsNullOrWhiteSpace(invoice.PartyName)) Line($"العميل: {invoice.PartyName}");
+                Line(AppLang.T("Receipt.Line.Invoice", invoice.InvoiceId, Sayl.UI.Infrastructure.AppClock.ToLocal(invoice.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm")));
+                Line(AppLang.T("Common.Label.Cashier", invoice.CashierName));
+                if (!string.IsNullOrWhiteSpace(invoice.PartyName)) Line(AppLang.T("Receipt.Line.Customer", invoice.PartyName));
                 Divider();
 
                 // البنود
                 foreach (var item in invoice.Items)
                 {
                     Line(item.ProductName);
-                    Line($"  {item.Quantity} × {item.ItemPrice:N2} = {item.ItemPrice * item.Quantity:N2}");
+                    Line(AppLang.T("Receipt.Line.Item", item.Quantity, item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
                 }
 
                 Divider();
-                Line($"الإجمالي: {invoice.TotalAmount:N2}");
-                if (invoice.DiscountAmount > 0) Line($"الخصم: {invoice.DiscountAmount:N2}");
-                if (invoice.TaxAmount > 0) Line($"الضريبة: {invoice.TaxAmount:N2}");
+                Line(AppLang.T("Common.Label.Total", invoice.TotalAmount.ToString("N2")));
+                if (invoice.DiscountAmount > 0) Line(AppLang.T("Common.Label.Discount", invoice.DiscountAmount.ToString("N2")));
+                if (invoice.TaxAmount > 0) Line(AppLang.T("Common.Label.Tax", invoice.TaxAmount.ToString("N2")));
                 bytes.AddRange(new byte[] { 0x1B, 0x21, 0x20 });    // خط عريض
-                Line($"الصافي: {invoice.NetAmount:N2}");
+                Line(AppLang.T("Receipt.Line.Net", invoice.NetAmount.ToString("N2")));
                 bytes.AddRange(new byte[] { 0x1B, 0x21, 0x00 });
-                Line($"المدفوع: {invoice.PaidAmount:N2}");
+                Line(AppLang.T("Receipt.Line.Paid", invoice.PaidAmount.ToString("N2")));
                 if (invoice.RemainingAmount > 0)
-                    Line($"المتبقي: {invoice.RemainingAmount:N2}");
+                    Line(AppLang.T("Receipt.Line.Remaining", invoice.RemainingAmount.ToString("N2")));
                 Divider();
 
                 // المدفوعات
                 foreach (var p in invoice.Payments)
                     Line($"{TranslateMethod(p.PaymentMethod)}: {p.Amount:N2}");
 
-                Centered("شكرًا لتعاملكم معنا!");
+                Centered(AppLang.T("Receipt.Thanks"));
                 if (!string.IsNullOrWhiteSpace(footer)) Centered(footer);
 
                 // قص الورق
@@ -170,20 +170,20 @@ namespace Sayl.UI.Infrastructure
 
                 bool ok = SendBytesToPrinter(printerName, bytes.ToArray());
                 return ok
-                    ? (true, "تمت الطباعة.")
-                    : (false, $"تعذر الوصول للطابعة '{printerName}'.");
+                    ? (true, AppLang.T("Receipt.Msg.Printed"))
+                    : (false, AppLang.T("Receipt.Msg.PrinterUnavailable", printerName));
             }
             catch (Exception ex)
             {
-                return (false, $"خطأ في الطباعة: {ex.Message}");
+                return (false, AppLang.T("Receipt.Msg.PrintError", ex.Message));
             }
         }
 
         private static string TranslateMethod(string method) => method switch
         {
-            "cash" => "نقدي",
-            "card" => "شبكة",
-            "bank_transfer" => "تحويل بنكي",
+            "cash" => AppLang.T("Common.Method.Cash"),
+            "card" => AppLang.T("Common.Method.Card"),
+            "bank_transfer" => AppLang.T("Common.Method.BankTransfer"),
             _ => method
         };
     }

@@ -33,8 +33,17 @@ namespace Sayl.UI
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
                 .Build();
 
+            // لغة الواجهة: تُقرأ قبل بناء أي نافذة وتبقى ثابتة طوال الجلسة.
+            // المصدر: اختيار المستخدم المحفوظ في LocalAppData (زر تبديل اللغة)؛
+            // وإن لم يوجد بعد (أول تشغيل) فقيمة "Language" من appsettings.
+            var savedLang = AppLang.LoadSaved();
+            AppLang.Init(savedLang == AppLanguage.Arabic
+                && string.Equals(configuration["Language"], "en", StringComparison.OrdinalIgnoreCase)
+                    ? AppLanguage.English
+                    : savedLang);
+
             var connectionString = configuration.GetConnectionString("SaylDb")
-                ?? throw new InvalidOperationException("لم يتم العثور على جملة الاتصال 'SaylDb' في appsettings.json.");
+                ?? throw new InvalidOperationException("Connection string 'SaylDb' not found in appsettings.json.");
 
             var services = new ServiceCollection();
             services.AddSaylServices(connectionString);
@@ -114,9 +123,8 @@ namespace Sayl.UI
             try
             {
                 MessageBox.Show(
-                    "حدث خطأ غير متوقع:\n" + ex.Message +
-                    "\n\nتم تسجيل التفاصيل في ملف ui-error.log داخل مجلد Sayl_POS في بيانات التطبيق.",
-                    "خطأ", MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    AppLang.T("Program.Msg.UnexpectedError", ex.Message),
+                    AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Error,
                     MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
             }
             catch

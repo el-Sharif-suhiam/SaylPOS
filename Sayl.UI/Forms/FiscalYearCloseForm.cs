@@ -30,7 +30,7 @@ namespace Sayl.UI.Forms
 
         public FiscalYearCloseForm()
         {
-            Text = "إغلاق السنة المالية";
+            Text = AppLang.T("Fiscal.Title");
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(760, 560);
             BackColor = AppTheme.Bg;
@@ -81,18 +81,18 @@ namespace Sayl.UI.Forms
 
             var navBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 
-            _btnNext = AppTheme.MakeButton("التالي", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 48);
+            _btnNext = AppTheme.MakeButton(AppLang.T("Fiscal.Button.Next"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 48);
             _btnNext.Dock = DockStyle.Left;
             _btnNext.Width = 150;
             _btnNext.Click += async (_, _) => await NextAsync();
 
-            _btnBack = AppTheme.MakeButton("رجوع", AppTheme.Bg,
+            _btnBack = AppTheme.MakeButton(AppLang.T("Fiscal.Button.Back"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor, height: 48);
             _btnBack.Dock = DockStyle.Left;
             _btnBack.Width = 110;
             _btnBack.Click += (_, _) => Go(_step - 1);
 
-            var btnClose = AppTheme.MakeButton("إلغاء", AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 48);
+            var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28), height: 48);
             btnClose.Dock = DockStyle.Left;
             btnClose.Width = 110;
             btnClose.DialogResult = DialogResult.Cancel;
@@ -115,8 +115,8 @@ namespace Sayl.UI.Forms
                 _fiscalStart = await fiscal.GetFiscalYearStartAsync();
                 var lastClose = await fiscal.GetLastCloseDateAsync();
                 _lblStep.Text = lastClose == null
-                    ? $"إغلاق السنة المالية — السنة الحالية تبدأ {_fiscalStart:yyyy-MM-dd}"
-                    : $"إغلاق السنة المالية — الحالية تبدأ {_fiscalStart:yyyy-MM-dd} (آخر إغلاق {lastClose:yyyy-MM-dd})";
+                    ? AppLang.T("Fiscal.Step.Header", _fiscalStart)
+                    : AppLang.T("Fiscal.Step.HeaderWithLast", _fiscalStart, lastClose.Value);
                 Go(0);
             };
         }
@@ -136,7 +136,7 @@ namespace Sayl.UI.Forms
             _step = step;
             _btnBack.Visible = _step > 0;
             _pageBody.Controls.Clear();
-            _btnNext.Text = _step == 3 ? "إغلاق السنة الآن" : "التالي";
+            _btnNext.Text = _step == 3 ? AppLang.T("Fiscal.Button.CloseNow") : AppLang.T("Fiscal.Button.Next");
 
             switch (_step)
             {
@@ -151,7 +151,7 @@ namespace Sayl.UI.Forms
         {
             if (_step == 1 && (_checks == null || !_checks.CanClose))
             {
-                UiHelpers.ShowError(this, "صحّح الأخطاء المانعة أولاً ثم أعد الفحص.");
+                UiHelpers.ShowError(this, AppLang.T("Fiscal.Msg.FixErrorsFirst"));
                 return;
             }
             if (_step == 3)
@@ -170,14 +170,7 @@ namespace Sayl.UI.Forms
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopRight,
                 ForeColor = AppTheme.TextPrimary,
-                Text =
-                    "إغلاق السنة المالية يحاكي «البداية الجديدة» دون حذف سجل واحد:\n\n" +
-                    "• الخطوة 1 — الجرد الفعلي: عدّ البضاعة وترحيل الفروق (ركن الإغلاق).\n" +
-                    "• الخطوة 2 — فحوصات الجاهزية: لا جلسات مفتوحة، لا فواتير معلقة قديمة، لا رواتب معلقة.\n" +
-                    "• الخطوة 3 — الأرشفة: نسخة احتياطية كاملة تلقائية + التقرير السنوي PDF.\n" +
-                    "• الخطوة 4 — قلب السنة: التقارير الافتراضية تبدأ من السنة الجديدة،\n" +
-                    "   والتاريخ القديم يبقى للقراءة والمقارنة السنوية — والتعديل قبله يُقفل.\n\n" +
-                    $"السنة الحالية: من {_fiscalStart:yyyy-MM-dd} إلى اليوم."
+                Text = AppLang.T("Fiscal.Intro.Body", _fiscalStart)
             };
             _pageBody.Controls.Add(lbl);
         }
@@ -186,7 +179,7 @@ namespace Sayl.UI.Forms
         private async Task BuildChecksPageAsync()
         {
             _pageBody.Controls.Clear();
-            var lblLoading = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Text = "جارٍ الفحص...", ForeColor = AppTheme.TextMuted };
+            var lblLoading = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Text = AppLang.T("Fiscal.Checks.Loading"), ForeColor = AppTheme.TextMuted };
             _pageBody.Controls.Add(lblLoading);
 
             try
@@ -198,7 +191,7 @@ namespace Sayl.UI.Forms
             catch
             {
                 _checks = null;
-                UiHelpers.ShowError(this, "تعذر الفحص.");
+                UiHelpers.ShowError(this, AppLang.T("Fiscal.Checks.MsgFailed"));
                 return;
             }
 
@@ -206,8 +199,8 @@ namespace Sayl.UI.Forms
 
             var grid = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(grid);
-            grid.Columns.Add("colType", "النوع");
-            grid.Columns.Add("colItem", "البند");
+            grid.Columns.Add("colType", AppLang.T("Fiscal.Checks.ColType"));
+            grid.Columns.Add("colItem", AppLang.T("Fiscal.Checks.ColItem"));
             grid.Columns["colType"].FillWeight = 16;
             grid.Columns["colItem"].FillWeight = 84;
 
@@ -219,12 +212,12 @@ namespace Sayl.UI.Forms
             }
 
             if (_checks!.Errors.Count == 0 && _checks.Warnings.Count == 0)
-                AddLine("جاهز", "كل الفحوصات ناجحة — يمكنك المتابعة.", AppTheme.Success);
+                AddLine(AppLang.T("Fiscal.Checks.Ready"), AppLang.T("Fiscal.Checks.ReadyBody"), AppTheme.Success);
 
             foreach (var e in _checks.Errors)
-                AddLine("مانع", e, AppTheme.Danger);
+                AddLine(AppLang.T("Fiscal.Checks.Blocker"), e, AppTheme.Danger);
             foreach (var w in _checks.Warnings)
-                AddLine("تحذير", w, AppTheme.Warning);
+                AddLine(AppLang.T("Fiscal.Checks.Warning"), w, AppTheme.Warning);
 
             var hint = new Label
             {
@@ -234,8 +227,8 @@ namespace Sayl.UI.Forms
                 ForeColor = _checks.CanClose ? AppTheme.Success : AppTheme.Danger,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 Text = _checks.CanClose
-                    ? "✔ النظام جاهز للإغلاق"
-                    : "✖ لا يمكن الإغلاق حتى تُحل البنود المانعة (الحمراء)"
+                    ? AppLang.T("Fiscal.Checks.CanClose")
+                    : AppLang.T("Fiscal.Checks.CannotClose")
             };
 
             _pageBody.Controls.Add(grid);
@@ -253,18 +246,15 @@ namespace Sayl.UI.Forms
                 Height = 100,
                 TextAlign = ContentAlignment.TopRight,
                 ForeColor = AppTheme.TextPrimary,
-                Text =
-                    "الأرشفة قبل القلب — لا شيء يُحذف:\n\n" +
-                    "• نسخة احتياطية كاملة لقاعدة البيانات (مستعادة وقت تشاء)\n" +
-                    "• تقرير سنوي PDF ختامي (الأرباح والمصروفات والجلسات)"
+                Text = AppLang.T("Fiscal.Archive.Intro")
             };
             _pageBody.Controls.Add(lbl);
 
-            var btnBackup = AppTheme.MakeButton("أخذ النسخة الاحتياطية الآن", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 46);
+            var btnBackup = AppTheme.MakeButton(AppLang.T("Fiscal.Archive.BackupNow"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark, height: 46);
             btnBackup.Dock = DockStyle.Top;
             btnBackup.Click += async (_, _) => await TakeBackupAsync(btnBackup);
 
-            var btnReport = AppTheme.MakeButton("توليد التقرير السنوي PDF", AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 46);
+            var btnReport = AppTheme.MakeButton(AppLang.T("Fiscal.Archive.GenerateReport"), AppTheme.Accent, hoverColor: AppTheme.AccentDark, height: 46);
             btnReport.Dock = DockStyle.Top;
             btnReport.Click += async (_, _) => await GenerateAnnualReportAsync(btnReport);
 
@@ -275,7 +265,7 @@ namespace Sayl.UI.Forms
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted,
                 Name = "lblArchiveStatus",
-                Text = "الحالة: لم تُؤخذ النسخة بعد."
+                Text = AppLang.T("Fiscal.Archive.StatusMissing")
             };
 
             _pageBody.Controls.Add(lblStatus);
@@ -302,7 +292,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر النسخ الاحتياطي.");
+                UiHelpers.ShowError(this, AppLang.T("Fiscal.Archive.MsgBackupFailed"));
             }
             finally
             {
@@ -325,26 +315,26 @@ namespace Sayl.UI.Forms
 
                 if (!r.IsSuccess || r.Data == null)
                 {
-                    UiHelpers.ShowError(this, "تعذر توليد التقرير السنوي: " + r.Message);
+                    UiHelpers.ShowError(this, AppLang.T("Fiscal.Archive.MsgReportFailed", r.Message));
                     return;
                 }
 
                 using var save = new SaveFileDialog
                 {
-                    Title = "حفظ التقرير السنوي الختامي",
-                    Filter = "ملفات PDF (*.pdf)|*.pdf",
-                    FileName = $"التقرير_السنوي_الختامي_{_fiscalStart:yyyy}_{today:yyyy}.pdf"
+                    Title = AppLang.T("Fiscal.Archive.SaveTitle"),
+                    Filter = AppLang.T("Fiscal.Archive.PdfFilter"),
+                    FileName = AppLang.T("Fiscal.Archive.FileName", _fiscalStart, today) + ".pdf"
                 };
                 if (save.ShowDialog(this) != DialogResult.OK) return;
 
                 // 📖 التوليد خارج مؤشر الواجهة — تقرير سنة كاملة قد يستغرق ثوانيًا
                 // (استدعاؤه متزامنًا هنا كان يجمّد النافذة بالكامل)
-                string storeName = "سيل";
+                string storeName = AppLang.T("Common.Default.Store");
                 try
                 {
                     using var nameScope = Program.Services.CreateScope();
                     var nameSettings = nameScope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    storeName = await nameSettings.GetAsync(clsSettingsService.KeyStoreName, "سيل");
+                    storeName = await nameSettings.GetAsync(clsSettingsService.KeyStoreName, AppLang.T("Common.Default.Store"));
                 }
                 catch { /* الترويسة الافتراضية كافية */ }
 
@@ -352,11 +342,11 @@ namespace Sayl.UI.Forms
                 await Task.Run(() => PdfService.ExportPeriodicReport(data, storeName, save.FileName));
 
                 _reportFile = save.FileName;
-                UiHelpers.ShowInfo(this, $"تم إنشاء التقرير الختامي:\n{save.FileName}");
+                UiHelpers.ShowInfo(this, AppLang.T("Fiscal.Archive.ReportDone", save.FileName));
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر التقرير.");
+                UiHelpers.ShowError(this, AppLang.T("Fiscal.Archive.MsgReportFailedShort"));
             }
             finally
             {
@@ -369,8 +359,8 @@ namespace Sayl.UI.Forms
         {
             var lbl = _pageBody.Controls.Find("lblArchiveStatus", false).FirstOrDefault() as Label;
             if (lbl == null) return;
-            string b = _backupFile != null ? "✔ نسخة احتياطية: " + System.IO.Path.GetFileName(_backupFile) : "✖ لا نسخة احتياطية";
-            string r = _reportFile != null ? "✔ تقرير سنوي: " + System.IO.Path.GetFileName(_reportFile) : "— التقرير السنوي اختياري";
+            string b = _backupFile != null ? AppLang.T("Fiscal.Archive.BackupOk", System.IO.Path.GetFileName(_backupFile)) : AppLang.T("Fiscal.Archive.BackupMissing");
+            string r = _reportFile != null ? AppLang.T("Fiscal.Archive.ReportOk", System.IO.Path.GetFileName(_reportFile)) : AppLang.T("Fiscal.Archive.ReportOptional");
             lbl.Text = $"{b}\n{r}";
             lbl.ForeColor = _backupFile != null ? AppTheme.Success : AppTheme.Warning;
         }
@@ -386,15 +376,12 @@ namespace Sayl.UI.Forms
                 Height = 84,
                 TextAlign = ContentAlignment.TopRight,
                 ForeColor = AppTheme.TextPrimary,
-                Text =
-                    "الخطوة الأخيرة: قلب السنة المالية.\n\n" +
-                    "حدد تاريخ بداية السنة الجديدة (عادة اليوم). التقارير الافتراضية ستبدأ منه،\n" +
-                    "وما قبله للقراءة والمقارنة فقط — تعديل كشوف الرواتب القديمة سيُرفض."
+                Text = AppLang.T("Fiscal.Close.Intro")
             };
             _pageBody.Controls.Add(lbl);
 
             var row = new Panel { Dock = DockStyle.Top, Height = 60 };
-            var lblDate = new Label { Text = "تبدأ السنة الجديدة من", Dock = DockStyle.Right, Width = 170, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblDate = new Label { Text = AppLang.T("Fiscal.Close.NewYearFrom"), Dock = DockStyle.Right, Width = 170, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _dtpNewYear = new DateTimePicker
             {
                 Dock = DockStyle.Right,
@@ -414,12 +401,12 @@ namespace Sayl.UI.Forms
             var newStart = DateOnly.FromDateTime(_dtpNewYear.Value);
 
             if (_backupFile == null &&
-                !ConfirmationDialog.Show(this, "بدون نسخة احتياطية؟",
-                    "لم تُؤخذ نسخة احتياطية هذه الجلسة!\nالإغلاق دون نسخة احتياطية مخاطرة — متابعة رغم ذلك؟", dangerStyle: true))
+                !ConfirmationDialog.Show(this, AppLang.T("Fiscal.Close.NoBackup.Title"),
+                    AppLang.T("Fiscal.Close.NoBackup.Body"), dangerStyle: true))
                 return;
 
-            if (!ConfirmationDialog.Show(this, "تأكيد الإغلاق النهائي",
-                    $"سيتم قلب السنة المالية إلى {newStart:yyyy-MM-dd}.\nهذا قرار سنوي كبير — متابعة؟", dangerStyle: true))
+            if (!ConfirmationDialog.Show(this, AppLang.T("Fiscal.Close.ConfirmTitle"),
+                    AppLang.T("Fiscal.Close.ConfirmBody", newStart), dangerStyle: true))
                 return;
 
             try
@@ -436,7 +423,7 @@ namespace Sayl.UI.Forms
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر الإغلاق.");
+                UiHelpers.ShowError(this, AppLang.T("Fiscal.Close.MsgFailed"));
             }
         }
     }

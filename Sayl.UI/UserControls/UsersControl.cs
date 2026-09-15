@@ -24,7 +24,7 @@ namespace Sayl.UI.UserControls
         private List<UserVM> _users = new();
         private List<DtoRole> _roles = new();
 
-        protected override string Title => "المستخدمون";
+        protected override string Title => AppLang.T("Users.Section.Title");
 
         // مفتاح «عرض المعطّلين» — الافتراضي: الحسابات النشطة فقط
         protected override bool SupportsShowDeleted => true;
@@ -54,15 +54,21 @@ namespace Sayl.UI.UserControls
                 var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
 
-                _users = await usersService.GetUsersAsync(includeInactive: ShowInactive);
                 _roles = await roleService.GetRolesListAsync();
 
+                var pagedUsers = await usersService.GetUsersPagedAsync(
+                    includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(pagedUsers))
+                    return;
+                _users = pagedUsers.Items;
+
                 Grid.Columns.Clear();
-                Grid.Columns.Add("colId", "الرقم");
-                Grid.Columns.Add("colUser", "اسم المستخدم");
-                Grid.Columns.Add("colName", "الاسم");
-                Grid.Columns.Add("colRole", "الدور");
-                Grid.Columns.Add("colStatus", "الحالة");
+                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+                Grid.Columns.Add("colUser", AppLang.T("Common.Label.Username"));
+                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+                Grid.Columns.Add("colRole", AppLang.T("Common.Label.Role"));
+                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
                 Grid.Columns["colId"].FillWeight = 10;
                 Grid.Columns["colUser"].FillWeight = 22;
                 Grid.Columns["colName"].FillWeight = 30;
@@ -73,12 +79,13 @@ namespace Sayl.UI.UserControls
                 foreach (var u in _users)
                 {
                     string name = string.IsNullOrWhiteSpace(u.Name) || u.Name == "No Employee" ? "-" : u.Name;
-                    Grid.Rows.Add(u.UserId, u.UserName, name, u.RoleName, u.IsActive ? "نشط" : "معطل");
+                    Grid.Rows.Add(u.UserId, u.UserName, name, u.RoleName,
+                        u.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
                 }
             }
             catch
             {
-                UiHelpers.ShowError(this, "تعذر تحميل المستخدمين.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.LoadFailed"));
             }
         }
 
@@ -86,16 +93,16 @@ namespace Sayl.UI.UserControls
         // «تغيير كلمة المرور» للمدير وحده (IsAdmin بالهوية 4095).
         protected override void BuildToolbar()
         {
-            AddToolbarButton("إضافة مستخدم", AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => AddUser(), 150);
+            AddToolbarButton(AppLang.T("Users.Button.Add"), AppTheme.Primary, AppTheme.PrimaryDark, (_, _) => AddUser(), 150);
             AddToolbarGap();
-            AddToolbarButton("تعديل الدور", AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => ChangeRole(), 130);
+            AddToolbarButton(AppLang.T("Users.Button.ChangeRole"), AppTheme.SidebarBg, AppTheme.SidebarHover, (_, _) => ChangeRole(), 130);
             AddToolbarGap();
-            AddToolbarButton("تفعيل/تعطيل", AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
+            AddToolbarButton(AppLang.T("Common.Button.ToggleActive"), AppTheme.Warning, Color.FromArgb(180, 83, 9), async (_, _) => await ToggleActiveAsync(), 140);
 
             if (SessionState.IsAdmin)
             {
                 AddToolbarGap();
-                AddToolbarButton("تغيير كلمة المرور", AppTheme.SidebarBg, AppTheme.SidebarHover, async (_, _) => await ResetPasswordAsync(), 180);
+                AddToolbarButton(AppLang.T("Users.Button.ResetPassword"), AppTheme.SidebarBg, AppTheme.SidebarHover, async (_, _) => await ResetPasswordAsync(), 180);
             }
         }
 
@@ -105,27 +112,27 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _users.Count)
             {
-                UiHelpers.ShowError(this, "اختر مستخدمًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.PickUser"));
                 return;
             }
 
             var user = _users[idx];
             if (!CanManage(user))
             {
-                UiHelpers.ShowError(this, $"لا يمكنك إدارة حساب '{user.UserName}' — دوره يوازي دورك أو أعلى منه.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.CantManage", user.UserName));
                 return;
             }
 
             var assignable = AssignableRoles();
             if (assignable.Count == 0)
             {
-                UiHelpers.ShowError(this, "لا توجد أدوار متاحة لك للإسناد.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.NoRoles"));
                 return;
             }
 
             using var cmb = new Form
             {
-                Text = $"تغيير دور المستخدم '{user.UserName}'",
+                Text = AppLang.T("Users.ChangeRole.Title", user.UserName),
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new Size(420, 220),
@@ -136,16 +143,16 @@ namespace Sayl.UI.UserControls
                 BackColor = AppTheme.CardBg
             };
 
-            var lbl = new Label { Text = "الدور الجديد", Bounds = new Rectangle(30, 26, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lbl = new Label { Text = AppLang.T("Users.ChangeRole.Label"), Bounds = new Rectangle(30, 26, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             var cmbRole = new ComboBox { Bounds = new Rectangle(30, 52, 360, 36), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
             foreach (var r in assignable)
-                cmbRole.Items.Add($"{r.Name} ({AppPermissions.Describe(r.RoleValue)})");
+                cmbRole.Items.Add($"{r.Name} ({AppLang.PermDescribe(r.RoleValue)})");
             int current = assignable.FindIndex(r => r.RoleId == user.RoleId);
             cmbRole.SelectedIndex = current >= 0 ? current : 0;
 
-            var btnOk = AppTheme.MakeButton("تغيير", AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Change"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             btnOk.Bounds = new Rectangle(30, 120, 220, 48);
-            var btnCancel = AppTheme.MakeButton("إلغاء", AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
+            var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
             btnCancel.Bounds = new Rectangle(270, 120, 120, 48);
             btnCancel.DialogResult = DialogResult.Cancel;
 
@@ -155,14 +162,14 @@ namespace Sayl.UI.UserControls
             {
                 if (cmbRole.SelectedIndex < 0 || cmbRole.SelectedIndex >= assignable.Count)
                 {
-                    UiHelpers.ShowError(cmb, "اختر دورًا.");
+                    UiHelpers.ShowError(cmb, AppLang.T("Users.ChangeRole.Msg.PickRole"));
                     return;
                 }
 
                 var newRole = assignable[cmbRole.SelectedIndex];
                 if (newRole.RoleId == user.RoleId)
                 {
-                    UiHelpers.ShowInfo(cmb, "لم يتغير الدور.");
+                    UiHelpers.ShowInfo(cmb, AppLang.T("Users.ChangeRole.Msg.NoChange"));
                     cmb.Close();
                     return;
                 }
@@ -192,7 +199,7 @@ namespace Sayl.UI.UserControls
             var assignable = AssignableRoles();
             if (assignable.Count == 0)
             {
-                UiHelpers.ShowError(this, "لا توجد أدوار متاحة لك للإسناد.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.NoRoles"));
                 return;
             }
 
@@ -206,25 +213,28 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _users.Count)
             {
-                UiHelpers.ShowError(this, "اختر مستخدمًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.PickUser"));
                 return;
             }
 
             var user = _users[idx];
             if (user.UserId == SessionState.CurrentUser?.UserId)
             {
-                UiHelpers.ShowError(this, "لا يمكنك تعطيل حسابك الحالي.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.CantDeactivateSelf"));
                 return;
             }
 
             if (!CanManage(user))
             {
-                UiHelpers.ShowError(this, $"لا يمكنك إدارة حساب '{user.UserName}' — دوره يوازي دورك أو أعلى منه.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.CantManage", user.UserName));
                 return;
             }
 
-            if (!ConfirmationDialog.Show(this, user.IsActive ? "تعطيل مستخدم" : "تفعيل مستخدم",
-                    user.IsActive ? $"سيتم تعطيل المستخدم '{user.UserName}'. هل أنت متأكد؟" : $"سيتم تفعيل المستخدم '{user.UserName}'. متابعة؟"))
+            if (!ConfirmationDialog.Show(this,
+                    user.IsActive ? AppLang.T("Users.Title.Deactivate") : AppLang.T("Users.Title.Activate"),
+                    user.IsActive
+                        ? AppLang.T("Users.Msg.DeactivateConfirm", user.UserName)
+                        : AppLang.T("Users.Msg.ActivateConfirm", user.UserName)))
                 return;
 
             Result result;
@@ -247,18 +257,18 @@ namespace Sayl.UI.UserControls
             int idx = Grid.CurrentRow?.Index ?? -1;
             if (idx < 0 || idx >= _users.Count)
             {
-                UiHelpers.ShowError(this, "اختر مستخدمًا من القائمة.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.PickUser"));
                 return;
             }
 
             var user = _users[idx];
             if (!CanManage(user))
             {
-                UiHelpers.ShowError(this, $"لا يمكنك إدارة حساب '{user.UserName}' — دوره يوازي دورك أو أعلى منه.");
+                UiHelpers.ShowError(this, AppLang.T("Users.Msg.CantManage", user.UserName));
                 return;
             }
 
-            using var input = new PasswordInputForm($"كلمة مرور جديدة للمستخدم '{user.UserName}'");
+            using var input = new PasswordInputForm(AppLang.T("Users.ResetPwd.Title", user.UserName));
             if (input.ShowDialog(FindForm()) != DialogResult.OK || string.IsNullOrWhiteSpace(input.Value))
                 return;
 
@@ -270,7 +280,7 @@ namespace Sayl.UI.UserControls
                     actorUserId: SessionState.CurrentUser?.UserId);
             }
 
-            UiHelpers.ShowResult(this, result, "تم تغيير كلمة المرور.");
+            UiHelpers.ShowResult(this, result, AppLang.T("Users.ResetPwd.Done"));
         }
     }
 }
