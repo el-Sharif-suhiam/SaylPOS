@@ -24,7 +24,12 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var customerService = scope.ServiceProvider.GetRequiredService<clsCustomerService>();
-                _customers = await customerService.GetCustomersListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await customerService.GetCustomersPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _customers = paged.Items;
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));

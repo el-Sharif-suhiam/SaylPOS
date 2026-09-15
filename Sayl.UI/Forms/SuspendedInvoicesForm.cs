@@ -19,6 +19,12 @@ namespace Sayl.UI.Forms
         private Label _lblCount = null!;
 
         private List<Common.DTOs.ViewModel.InvoiceVM> _invoices = new();
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
+
+        // فهرس الفاتورة الكامل لصف الشبكة المعروض (ترقيم العرض فقط)
+        private int VisibleInvoiceIndex(int gridRow) => (_currentPage - 1) * _pageSize + gridRow;
 
         /// <summary>VULN-05: جلسة الدرج النشطة — دفعات الاستكمال تُنسب لها في Z اليوم.
         /// يمرَّر من PosForm؛ null (الافتراضي) = شاشة من خارج جلسة بيع.</summary>
@@ -78,6 +84,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));   // العنوان + العداد
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));   // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الأزرار
 
             // ── العنوان وسطًا + عدّاد معلقات يساره (تسمية حية) ──
@@ -161,9 +168,23 @@ namespace Sayl.UI.Forms
             buttons.Controls.Add(btnClose, 0, 0);
 
             // ── تجميع صفوف الجذر ──
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshGrid();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshGrid();
+            };
+
             root.Controls.Add(header, 0, 0);
             root.Controls.Add(_grid, 0, 1);
-            root.Controls.Add(buttons, 0, 2);
+            root.Controls.Add(_pager, 0, 2);
+            root.Controls.Add(buttons, 0, 3);
 
             Controls.Add(root);
             CancelButton = btnClose;
@@ -183,15 +204,8 @@ namespace Sayl.UI.Forms
                 }
 
                 _invoices = result.Data;
-                _grid.Rows.Clear();
-                foreach (var inv in _invoices)
-                {
-                    _grid.Rows.Add(inv.InvoiceId,
-                        inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
-                        inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
-                        inv.ItemsCount,
-                        UiHelpers.Money(inv.NetAmount));
-                }
+                _currentPage = 1;
+                RefreshGrid();
 
                 // العداد + تلميح فراغ: القائمة الفارغة لا تترك الشاشة ميتة
                 _lblCount.Text = _invoices.Count > 0 ? AppLang.T("Suspended.Count", _invoices.Count) : "";
@@ -204,15 +218,41 @@ namespace Sayl.UI.Forms
             }
         }
 
+        /// <summary>يرسم شريحة صفحة المعلقات الحالية (الخلفية كاملة في _invoices).</summary>
+        private void RefreshGrid()
+        {
+            _grid.Rows.Clear();
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_invoices.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var inv in _invoices.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
+            {
+                _grid.Rows.Add(inv.InvoiceId,
+                    inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
+                    inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
+                    inv.ItemsCount,
+                    UiHelpers.Money(inv.NetAmount));
+            }
+
+            _pager.SetNavigation(_invoices.Count, _currentPage);
+        }
+
         private async Task ResumeAsync()
         {
-            if (_grid.CurrentRow == null || _grid.CurrentRow.Index >= _invoices.Count)
+            if (_grid.CurrentRow == null)
             {
                 UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
                 return;
             }
 
-            var invoice = _invoices[_grid.CurrentRow.Index];
+            int pi = VisibleInvoiceIndex(_grid.CurrentRow.Index);
+            if (pi < 0 || pi >= _invoices.Count)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
+                return;
+            }
+
+            var invoice = _invoices[pi];
 
             using var payment = new PaymentForm(invoice.NetAmount, hasCustomer: invoice.PartyId.HasValue);
             if (payment.ShowDialog(this) != DialogResult.OK || payment.PaymentsList.Count == 0)
@@ -244,13 +284,20 @@ namespace Sayl.UI.Forms
 
         private async Task CancelInvoiceAsync()
         {
-            if (_grid.CurrentRow == null || _grid.CurrentRow.Index >= _invoices.Count)
+            if (_grid.CurrentRow == null)
             {
                 UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
                 return;
             }
 
-            var invoice = _invoices[_grid.CurrentRow.Index];
+            int pi = VisibleInvoiceIndex(_grid.CurrentRow.Index);
+            if (pi < 0 || pi >= _invoices.Count)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Suspended.Msg.PickInvoice"));
+                return;
+            }
+
+            var invoice = _invoices[pi];
             bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Suspended.Cancel.Title"),
                 AppLang.T("Suspended.Cancel.Confirm", invoice.InvoiceId));
             if (!confirmed)

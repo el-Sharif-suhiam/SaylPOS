@@ -30,7 +30,12 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<clsEmployeeService>();
-                _employees = await service.GetEmployeesListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await service.GetEmployeesPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _employees = paged.Items;
 
                 // خريطة الارتباط: (اسم الحساب + قيمة دوره) لكل موظف — تُستخدم
                 // للعرض ولحماية التحرير على موظفي الحسابات العليا

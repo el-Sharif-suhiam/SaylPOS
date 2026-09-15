@@ -1,6 +1,7 @@
 using Common.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Controls;
 using Sayl.UI.Forms;
 using Sayl.UI.Infrastructure;
 
@@ -28,6 +29,9 @@ namespace Sayl.UI.UserControls
         private string _currentTitle = "";
         private string _currentPeriod = "";
         private List<string[]> _currentRows = new();
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
 
         private const int ReportProfit = 0;
         private const int ReportTopProducts = 1;
@@ -162,7 +166,23 @@ namespace Sayl.UI.UserControls
             _grid = new DataGridView { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(12) };
             UiHelpers.StyleGrid(_grid);
 
+            // شريط الترقيم: التصدير يبقى على «كل الصفوف» (CurrentTable) —
+            // التنقل يعيد رسم الجدول من الشريحة فقط (RefreshDisplay).
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshDisplay();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshDisplay();
+            };
+
             Controls.Add(_grid);
+            Controls.Add(_pager);
             Controls.Add(filterBar);
         }
 
@@ -196,6 +216,7 @@ namespace Sayl.UI.UserControls
             _grid.Rows.Clear();
             _grid.Columns.Clear();
             _currentRows.Clear();
+            _currentPage = 1; // تقرير جديد = من أول صفحة
 
             try
             {
@@ -364,11 +385,33 @@ namespace Sayl.UI.UserControls
                 }
 
                 _currentPeriod = CurrentPeriodText();
+                RefreshDisplay();
             }
             catch
             {
                 UiHelpers.ShowError(this, AppLang.T("Reports.Msg.GenerateFailed"));
             }
+        }
+
+        /// <summary>
+        /// يرسم شريحة الصفحة الحالية من _currentRows (الذي يحتفظ بكل
+        /// الصفوف للتصدير) — التنقل لا يمس بيانات التقرير أبدًا.
+        /// </summary>
+        private void RefreshDisplay()
+        {
+            _grid.Rows.Clear();
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_currentRows.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var row in _currentRows.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
+            {
+                var values = new List<object>();
+                for (int i = 0; i < _grid.Columns.Count; i++)
+                    values.Add(i < row.Length ? row[i] : "");
+                _grid.Rows.Add(values.ToArray());
+            }
+
+            _pager.SetNavigation(_currentRows.Count, _currentPage);
         }
 
         // ───────────────── التصدير: نفس ما يُعرض بالضبط ─────────────────
@@ -559,11 +602,7 @@ namespace Sayl.UI.UserControls
         private void AddRow(params string[] cells)
         {
             var snapshot = cells.ToArray();
-            _currentRows.Add(snapshot);   // للتصدير
-            var values = new List<object>();
-            for (int i = 0; i < _grid.Columns.Count; i++)
-                values.Add(i < snapshot.Length ? snapshot[i] : "");
-            _grid.Rows.Add(values.ToArray());
+            _currentRows.Add(snapshot);   // للتصدير — الجدول يرسمه RefreshDisplay (ترقيم)
         }
     }
 }

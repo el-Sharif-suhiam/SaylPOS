@@ -28,6 +28,12 @@ namespace Sayl.UI.Forms
         private Label _lblSummary = null!;
 
         private List<DtoPayrollRecord> _payrolls = new();
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
+
+        // فهرس الكشف الكامل لصف الشبكة المعروض (ترقيم العرض فقط — الخلفية كاملة)
+        private int VisibleIndex(int gridRow) => (_currentPage - 1) * _pageSize + gridRow;
 
         public PayrollForm(int? employeeId = null, string? employeeName = null)
         {
@@ -86,9 +92,10 @@ namespace Sayl.UI.Forms
             };
             // عمود واحد (العرض 100%) — هذه شاشة قوائم عمودية.
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            // الصفوف الثلاثة بالترتيب — الأرقام = الارتفاقات بالبكسل.
+            // الصفوف الأربعة بالترتيب — الأرقام = الارتفاقات بالبكسل.
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الفترة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));     // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));     // الأزرار
 
             // ── صف الفترة (يوضع لاحقًا في خلية الصف 0) ──
@@ -224,9 +231,24 @@ namespace Sayl.UI.Forms
             _grid.CellClick += async (_, args) => await UnpayCellClickAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };
 
+            // شريط الترقيم: تنقّل يعيد رسم العرض فقط (الخلفية _payrolls كاملة أوفر للإجماليات)
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshGrid();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshGrid();
+            };
+
             root.Controls.Add(topBar, 0, 0);
             root.Controls.Add(_grid, 0, 1);
-            root.Controls.Add(bottomBar, 0, 2);
+            root.Controls.Add(_pager, 0, 2);
+            root.Controls.Add(bottomBar, 0, 3);
 
             Controls.Add(root); // وحيد — الصفوف المطلقة لا تدخل التمرير أبدًا
         }
@@ -244,6 +266,7 @@ namespace Sayl.UI.Forms
                 DateOnly? to = _filterEmployeeId.HasValue ? null : DateOnly.FromDateTime(_dtpTo.Value);
                 _payrolls = await payrollService.GetPayrollsAsync(from, to, _filterEmployeeId);
 
+                _currentPage = 1; // فلتر جديد = من أول صفحة
                 RefreshGrid();
             }
             catch
@@ -255,7 +278,11 @@ namespace Sayl.UI.Forms
         private void RefreshGrid()
         {
             _grid.Rows.Clear();
-            foreach (var p in _payrolls)
+
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_payrolls.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var p in _payrolls.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
             {
                 bool paid = p.Status == enPayrollStatus.paid;
                 int row = _grid.Rows.Add(p.EmployeeName,
@@ -286,6 +313,8 @@ namespace Sayl.UI.Forms
             decimal pendingTotal = _payrolls.Where(p => p.Status == enPayrollStatus.pending).Sum(p => p.Net);
             decimal paidTotal = _payrolls.Where(p => p.Status == enPayrollStatus.paid).Sum(p => p.Net);
             _lblSummary.Text = AppLang.T("Payroll.Summary", UiHelpers.Money(pendingTotal), UiHelpers.Money(paidTotal));
+
+            _pager.SetNavigation(_payrolls.Count, _currentPage);
         }
 
         // ───────────────── عكس صرف الصف (زر لكل سطر — نمط الشفتات) ─────────────────
@@ -294,10 +323,11 @@ namespace Sayl.UI.Forms
             if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colUnpay"].Index)
                 return;
 
-            if (args.RowIndex >= _payrolls.Count)
+            int pi = VisibleIndex(args.RowIndex);
+            if (pi < 0 || pi >= _payrolls.Count)
                 return;
 
-            var record = _payrolls[args.RowIndex];
+            var record = _payrolls[pi];
             if (record.Status != enPayrollStatus.paid)
                 return; // المعلق لا يظهر زر عكس أصلًا
 
@@ -356,10 +386,11 @@ namespace Sayl.UI.Forms
         // ───────────────── تحرير خلية (كشف معلق) ─────────────────
         private async Task CellEditedAsync(DataGridViewCellEventArgs args)
         {
-            if (args.RowIndex < 0 || args.RowIndex >= _payrolls.Count)
+            int pi = VisibleIndex(args.RowIndex);
+            if (args.RowIndex < 0 || pi >= _payrolls.Count)
                 return;
 
-            var record = _payrolls[args.RowIndex];
+            var record = _payrolls[pi];
             if (record.Status == enPayrollStatus.paid)
                 return; // محمي — الصف للعرض فقط
 
@@ -402,13 +433,14 @@ namespace Sayl.UI.Forms
         private async Task PaySelectedAsync()
         {
             int idx = _grid.CurrentRow?.Index ?? -1;
-            if (idx < 0 || idx >= _payrolls.Count)
+            int pi = VisibleIndex(idx);
+            if (pi < 0 || pi >= _payrolls.Count)
             {
                 UiHelpers.ShowError(this, AppLang.T("Payroll.Pay.PickFirst"));
                 return;
             }
 
-            var record = _payrolls[idx];
+            var record = _payrolls[pi];
             if (record.Status == enPayrollStatus.paid)
             {
                 UiHelpers.ShowInfo(this, AppLang.T("Payroll.Pay.AlreadyPaid"));

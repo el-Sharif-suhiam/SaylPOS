@@ -24,7 +24,12 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-                _products = await productService.GetProductsListAsync(TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive);
+                var paged = await productService.GetProductsPagedAsync(
+                    TxtSearch.Text?.Trim() ?? "", includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _products = paged.Items;
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));

@@ -46,6 +46,38 @@ namespace Sayl.Core.Services
                 .ToListAsync();
         }
 
+        /// <summary>صفحة أدوار (ترقيم SQL): نفس فلاتر القائمة + عدّ كامل + Skip/Take.</summary>
+        public async Task<PagedResult<DtoRole>> GetRolesPagedAsync(
+            string search = "", bool includeInactive = false, int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Roles.AsQueryable();
+
+            if (!includeInactive)
+                query = query.Where(r => r.IsActive);
+
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(r => r.Name.Contains(search));
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderBy(r => r.RoleId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(r => new DtoRole
+                {
+                    RoleId = r.RoleId,
+                    Name = r.Name,
+                    RoleValue = r.RoleValue,
+                    IsActive = r.IsActive
+                })
+                .ToListAsync();
+
+            return new PagedResult<DtoRole> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
+        }
+
         public async Task<Result<DtoRole>> GetRoleByIdAsync(byte roleId)
         {
             var role = await _dbContext.Roles.FindAsync(roleId);

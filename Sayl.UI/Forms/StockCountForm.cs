@@ -22,6 +22,12 @@ namespace Sayl.UI.Forms
 
         private List<StockCountVM> _lines = new();
         private bool _sessionOpen;
+        private PagerControl _pager = null!;
+        private int _currentPage = 1;
+        private int _pageSize = 20;
+
+        // فهرس السطر الكامل لصف الشبكة المعروض (ترقيم العرض — الإدخال يحفظ فوريًا للقاعدة)
+        private int VisibleLineIndex(int gridRow) => (_currentPage - 1) * _pageSize + gridRow;
 
         public StockCountForm()
         {
@@ -51,6 +57,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));    // أزرار القيادة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));     // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));     // الملخص + الترحيل
 
             // ═══════════════════════════════════════════════════════════════
@@ -121,6 +128,19 @@ namespace Sayl.UI.Forms
             _grid.CellEndEdit += async (_, args) => await CountedEditedAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };
 
+            _pager = new PagerControl();
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                RefreshGrid();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                RefreshGrid();
+            };
+
             // ── الشريط السفلي ──
             var bottomBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 
@@ -151,7 +171,8 @@ namespace Sayl.UI.Forms
 
             root.Controls.Add(topBar, 0, 0);
             root.Controls.Add(_grid, 0, 1);
-            root.Controls.Add(bottomBar, 0, 2);
+            root.Controls.Add(_pager, 0, 2);
+            root.Controls.Add(bottomBar, 0, 3);
 
             Controls.Add(root);
         }
@@ -167,6 +188,7 @@ namespace Sayl.UI.Forms
                 _sessionOpen = await countService.HasOpenSessionAsync();
                 _lines = _sessionOpen ? await countService.GetOpenSessionAsync() : new List<StockCountVM>();
 
+                _currentPage = 1; // جلسة جديدة = من أول صفحة
                 RefreshGrid();
             }
             catch
@@ -178,7 +200,11 @@ namespace Sayl.UI.Forms
         private void RefreshGrid()
         {
             _grid.Rows.Clear();
-            foreach (var l in _lines)
+
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_lines.Count / (double)Math.Max(1, _pageSize)));
+            _currentPage = Math.Clamp(_currentPage, 1, totalPages);
+
+            foreach (var l in _lines.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
             {
                 int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString(),
                     l.CountedQuantity?.ToString() ?? "",
@@ -196,6 +222,7 @@ namespace Sayl.UI.Forms
                     _grid.Rows[row].Cells["colCounted"].Style.BackColor = Color.FromArgb(254, 243, 199); // لم يُعد — تمييز بصري
             }
 
+            _pager.SetNavigation(_lines.Count, _currentPage);
             UpdateSummary();
             _btnStart.Enabled = !_sessionOpen;
             _btnPost.Enabled = _sessionOpen;
@@ -226,10 +253,11 @@ namespace Sayl.UI.Forms
         // ───────────────── إدخال المعدود ─────────────────
         private async Task CountedEditedAsync(DataGridViewCellEventArgs args)
         {
-            if (args.RowIndex < 0 || args.RowIndex >= _lines.Count)
+            int pi = VisibleLineIndex(args.RowIndex);
+            if (args.RowIndex < 0 || pi < 0 || pi >= _lines.Count)
                 return;
 
-            var line = _lines[args.RowIndex];
+            var line = _lines[pi];
             string? raw = _grid.Rows[args.RowIndex].Cells["colCounted"].Value?.ToString()?.Trim();
 
             int? counted = null;

@@ -48,6 +48,39 @@ namespace Sayl.Core.Services
                 .ToListAsync();
         }
 
+        /// <summary>صفحة مصروفات (ترقيم SQL): نفس فلاتر القائمة + عدّ كامل + Skip/Take.</summary>
+        public async Task<PagedResult<DtoExpense>> GetExpensesPagedAsync(
+            string search = "", int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = _dbContext.Expenses.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(search))
+                query = query.Where(e => e.Description.Contains(search) || (e.Notes != null && e.Notes.Contains(search)));
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderByDescending(e => e.ExpenseDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(e => new DtoExpense
+                {
+                    ExpenseId = e.ExpenseId,
+                    Description = e.Description,
+                    Amount = e.Amount,
+                    ExpenseDate = e.ExpenseDate,
+                    Category = e.Category,
+                    Notes = e.Notes,
+                    UserId = e.UserId,
+                    CreatedAt = e.CreatedAt
+                })
+                .ToListAsync();
+
+            return new PagedResult<DtoExpense> { Items = items, TotalCount = total, Page = page, PageSize = pageSize };
+        }
+
         public async Task<Result<DtoExpense>> GetExpenseByIdAsync(int expenseId)
         {
             var expense = await _dbContext.Expenses.FindAsync(expenseId);

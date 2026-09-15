@@ -1,3 +1,5 @@
+using Common.DTOs;
+using Sayl.UI.Controls;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.UserControls
@@ -11,6 +13,11 @@ namespace Sayl.UI.UserControls
         protected DataGridView Grid = null!;
         protected TextBox TxtSearch = null!;
         protected readonly Panel _toolbar = new();
+        protected readonly PagerControl _pager = new();
+
+        // ── حالة الترقيم: المصدر الوحيد في القسم (الشريط يعرض ما هنا) ──
+        protected int _currentPage = 1;
+        protected int _pageSize = 20;
 
         /// <summary>الأقسام التي تدعم soft-delete: مفتاح «عرض المعطّلين» يظهر في شريط الأدوات.</summary>
         protected virtual bool SupportsShowDeleted => false;
@@ -67,9 +74,36 @@ namespace Sayl.UI.UserControls
 
         protected abstract Task LoadDataAsync();
 
-        protected virtual void OnSearch() => _ = LoadDataAsync();
+        protected virtual void OnSearch()
+        {
+            _currentPage = 1; // بحث جديد = من أول صفحة
+            _ = LoadDataAsync();
+        }
         // ^ «_ =» discard: استدعاء async بلا انتظار (fire-and-forget) —
         // يمنع تحذير المترجم دون async void (التي تبتلع الاستثناءات).
+
+        /// <summary>
+        /// بوابة الترقيم الموحدة — كل قسم يستدعيها بعد الصفحة المؤرشفة:
+        ///   • صفحة ناقصة (حُذف آخر سجلات الصفحة) → يصحّح العداد ويعيد
+        ///     التحميل من الصفحة الصحيحة ويعيد false (لا تُربط بيانات هذه الدفعة).
+        ///   • صفحة سليمة → يحدّث _currentPage/_pageSize ويعرض حالة الشريط
+        ///     ويعيد true، فيربط الابن Items فقط ويبني الجدول.
+        /// </summary>
+        protected bool ApplyPaged<T>(PagedResult<T> paged)
+        {
+            int totalPages = Math.Max(1, (int)Math.Ceiling(paged.TotalCount / (double)Math.Max(1, paged.PageSize)));
+            if (paged.Page > totalPages)
+            {
+                _currentPage = totalPages;
+                _ = LoadDataAsync();
+                return false;
+            }
+
+            _currentPage = paged.Page;
+            _pageSize = paged.PageSize;
+            _pager.SetNavigation(paged.TotalCount, _currentPage);
+            return true;
+        }
 
         // 📖 AddToolbarButton: زر شريط أدوات قسم — Height=42 (لمس مريح)،
         // Dock=Left + BringToFront (انظر الحيلة أعلى الفصل). Width معامل:
@@ -120,6 +154,7 @@ namespace Sayl.UI.UserControls
             {
                 ShowInactive = chk.Checked;
                 chk.ForeColor = chk.Checked ? AppTheme.Warning : AppTheme.TextPrimary;
+                _currentPage = 1;
                 _ = LoadDataAsync();
             };
 
@@ -171,7 +206,23 @@ namespace Sayl.UI.UserControls
             Grid = new DataGridView { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(12) };
             UiHelpers.StyleGrid(Grid);
 
+            // شريط الترقيم: أسفل القائمة — تنقّل يعيد التحميل، وتغيير
+            // الحجم يعود لصفحة 1. الحالة الفعلية يعرضها ApplyPaged بعد كل تحميل.
+            _pager.PageRequested += page =>
+            {
+                _currentPage = page;
+                _ = LoadDataAsync();
+            };
+            _pager.PageSizeSelected += size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                _ = LoadDataAsync();
+            };
+
+            // ترتيب الإرساء الخلفي: الشريط (أعلى) ← الصفحات (أسفل) ← الجدول (يملأ)
             Controls.Add(Grid);
+            Controls.Add(_pager);
             Controls.Add(_toolbar);
         }
     }

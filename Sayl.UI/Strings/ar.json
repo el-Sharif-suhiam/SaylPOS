@@ -379,6 +379,13 @@
   "Section.Search.Placeholder": "بحث... ثم Enter",
   "Section.ShowInactive": "عرض المعطّلين",
 
+  "Paging.Info": "صفحة {0} من {1} — الإجمالي {2}",
+  "Paging.First": "الأولى",
+  "Paging.Prev": "السابق",
+  "Paging.Next": "التالي",
+  "Paging.Last": "الأخيرة",
+  "Paging.Label": "عدد الصفوف",
+
   "Common.Button.Add": "إضافة",
   "Common.Button.Edit": "تعديل",
   "Common.Button.Delete": "حذف",

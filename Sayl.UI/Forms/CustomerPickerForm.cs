@@ -1,6 +1,7 @@
 using Common.DTOs;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Controls;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.Forms
@@ -14,8 +15,12 @@ namespace Sayl.UI.Forms
         private TextBox _txtSearch = null!;
         private DataGridView _grid = null!;
         private Button _btnPick = null!;
+        private PagerControl _pager = null!;
 
         private List<(int PartyId, string Name)> _rows = new();
+        private int _currentPage = 1;
+        private int _pageSize = 20;
+        private string _lastSearch = "";
 
         public int? SelectedCustomerId { get; private set; }
         public string? SelectedCustomerName { get; private set; }
@@ -57,6 +62,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // العنوان + البحث
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الشبكة
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));   // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));   // الأزرار
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, BackColor = AppTheme.CardBg, Margin = new Padding(0) };
@@ -131,13 +137,67 @@ namespace Sayl.UI.Forms
             footer.Controls.Add(_btnPick, 0, 0);
             footer.Controls.Add(btnClose, 1, 0);
 
+            // ── الترقيم: بحث جديد = أول صفحة ──
+            _pager = new PagerControl();
+            _pager.PageRequested += async page =>
+            {
+                _currentPage = page;
+                await LoadCustomersAsync(_lastSearch);
+            };
+            _pager.PageSizeSelected += async size =>
+            {
+                _pageSize = size;
+                _currentPage = 1;
+                await LoadCustomersAsync(_lastSearch);
+            };
+
             root.Controls.Add(header, 0, 0);
             root.Controls.Add(_grid, 0, 1);
-            root.Controls.Add(footer, 0, 2);
+            root.Controls.Add(_pager, 0, 2);
+            root.Controls.Add(footer, 0, 3);
 
             Controls.Add(root);
             CancelButton = btnClose;
             AcceptButton = btnSearch;
+        }
+
+        private async Task LoadCustomersAsync(string search)
+        {
+            try
+            {
+                _lastSearch = search;
+                using var scope = Program.Services.CreateScope();
+                var customerService = scope.ServiceProvider.GetRequiredService<clsCustomerService>();
+                var paged = await customerService.GetCustomersPagedAsync(search,
+                    includeInactive: false, page: _currentPage, pageSize: _pageSize);
+
+                // صفحة ناقصة بعد تضييق البحث → أعد من آخر صفحة صحيحة
+                int totalPages = Math.Max(1, (int)Math.Ceiling(paged.TotalCount / (double)Math.Max(1, _pageSize)));
+                if (_currentPage > totalPages)
+                {
+                    _currentPage = totalPages;
+                    await LoadCustomersAsync(search);
+                    return;
+                }
+
+                _rows = paged.Items
+                    .Where(c => c.Party != null)
+                    .Select(c => (c.PartyId, c.Party.Name))
+                    .ToList();
+
+                _grid.Rows.Clear();
+                foreach (var c in paged.Items)
+                {
+                    if (c.Party == null) continue;
+                    _grid.Rows.Add(c.PartyId, c.Party.Name, c.Party.Phone1 ?? "-");
+                }
+
+                _pager.SetNavigation(paged.TotalCount, _currentPage);
+            }
+            catch
+            {
+                UiHelpers.ShowError(this, AppLang.T("CustomerPicker.Msg.LoadFailed"));
+            }
         }
 
         private void Grid_CellClick(object? sender, DataGridViewCellEventArgs e)
@@ -158,32 +218,6 @@ namespace Sayl.UI.Forms
             SelectedCustomerId = row.PartyId;
             SelectedCustomerName = row.Name;
             DialogResult = DialogResult.OK;
-        }
-
-        private async Task LoadCustomersAsync(string search)
-        {
-            try
-            {
-                using var scope = Program.Services.CreateScope();
-                var customerService = scope.ServiceProvider.GetRequiredService<clsCustomerService>();
-                var customers = await customerService.GetCustomersListAsync(search);
-
-                _rows = customers
-                    .Where(c => c.Party != null && c.Party.IsActive)
-                    .Select(c => (c.PartyId, c.Party.Name))
-                    .ToList();
-
-                _grid.Rows.Clear();
-                foreach (var row in _rows)
-                {
-                    var party = customers.First(c => c.PartyId == row.PartyId).Party;
-                    _grid.Rows.Add(row.PartyId, row.Name, party!.Phone1 ?? "-");
-                }
-            }
-            catch
-            {
-                UiHelpers.ShowError(this, AppLang.T("CustomerPicker.Msg.LoadFailed"));
-            }
         }
 
         private async Task QuickAddCustomerAsync()

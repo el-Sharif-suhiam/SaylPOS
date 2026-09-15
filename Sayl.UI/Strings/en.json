@@ -379,6 +379,13 @@
   "Section.Search.Placeholder": "Search... then Enter",
   "Section.ShowInactive": "Show Inactive",
 
+  "Paging.Info": "Page {0} of {1} - total {2}",
+  "Paging.First": "First",
+  "Paging.Prev": "Prev",
+  "Paging.Next": "Next",
+  "Paging.Last": "Last",
+  "Paging.Label": "Rows/page",
+
   "Common.Button.Add": "Add",
   "Common.Button.Edit": "Edit",
   "Common.Button.Delete": "Delete",

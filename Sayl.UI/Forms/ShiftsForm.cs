@@ -18,6 +18,13 @@ namespace Sayl.UI.Forms
         private Button _btnAddHoliday = null!;
         private Button _btnDeleteHoliday = null!;
         private Button _btnEndAssignment = null!;
+        private PagerControl _pagerAssign = null!;
+        private List<DtoEmployeeShift> _assignments = new();
+        private int _assignmentsPage = 1;
+        private int _assignmentsPageSize = 20;
+
+        // فهرس التعيين الكامل لصف الشبكة المعروض (ترقيم العرض فقط)
+        private int VisibleAssignmentIndex(int gridRow) => (_assignmentsPage - 1) * _assignmentsPageSize + gridRow;
 
         public ShiftsForm()
         {
@@ -145,7 +152,21 @@ namespace Sayl.UI.Forms
             _gridAssignments.Columns["colDays"].FillWeight = 28;
             _gridAssignments.Columns["colFrom"].FillWeight = 20;
 
+            _pagerAssign = new PagerControl();
+            _pagerAssign.PageRequested += page =>
+            {
+                _assignmentsPage = page;
+                RenderAssignments();
+            };
+            _pagerAssign.PageSizeSelected += size =>
+            {
+                _assignmentsPageSize = size;
+                _assignmentsPage = 1;
+                RenderAssignments();
+            };
+
             tabAssign.Controls.Add(_gridAssignments);
+            tabAssign.Controls.Add(_pagerAssign);
             tabAssign.Controls.Add(barAssign);
 
             _tabs.TabPages.Add(tabShifts);
@@ -227,15 +248,27 @@ namespace Sayl.UI.Forms
                         h.DurationDays, h.IsAnnual ? AppLang.T("Common.Label.Yes") : "");
 
                 var assignments = await shiftService.GetEmployeeShiftsAsync();
-                _gridAssignments.Rows.Clear();
-                foreach (var a in assignments)
-                    _gridAssignments.Rows.Add(a.EmployeeName, a.ShiftName, DaysText(a.DaysOfWeek),
-                        a.EffectiveFrom.ToString("yyyy-MM-dd"));
+                _assignments = assignments;
+                RenderAssignments();
             }
             catch
             {
                 UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.LoadFailed"));
             }
+        }
+
+        /// <summary>يرسم شريحة صفحة التعيينات الحالية (الخلفية كاملة في _assignments).</summary>
+        private void RenderAssignments()
+        {
+            _gridAssignments.Rows.Clear();
+            int totalPages = Math.Max(1, (int)Math.Ceiling(_assignments.Count / (double)Math.Max(1, _assignmentsPageSize)));
+            _assignmentsPage = Math.Clamp(_assignmentsPage, 1, totalPages);
+
+            foreach (var a in _assignments.Skip((_assignmentsPage - 1) * _assignmentsPageSize).Take(_assignmentsPageSize))
+                _gridAssignments.Rows.Add(a.EmployeeName, a.ShiftName, DaysText(a.DaysOfWeek),
+                    a.EffectiveFrom.ToString("yyyy-MM-dd"));
+
+            _pagerAssign.SetNavigation(_assignments.Count, _assignmentsPage);
         }
 
         // ───────────── إضافة شفت (حوار مبسط) ─────────────
@@ -298,7 +331,12 @@ namespace Sayl.UI.Forms
         private async Task EndAssignmentAsync()
         {
             int idx = _gridAssignments.CurrentRow?.Index ?? -1;
-            if (idx < 0) { UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.PickAssignment")); return; }
+            int pi = VisibleAssignmentIndex(idx);
+            if (idx < 0 || pi < 0 || pi >= _assignments.Count)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Shifts.Msg.PickAssignment"));
+                return;
+            }
 
             if (!ConfirmationDialog.Show(this, AppLang.T("Shifts.EndAssign.Title"),
                     AppLang.T("Shifts.EndAssign.Confirm")))
@@ -308,8 +346,7 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var shiftService = scope.ServiceProvider.GetRequiredService<clsShiftService>();
-                var assignments = await shiftService.GetEmployeeShiftsAsync();
-                var result = await shiftService.EndAssignmentAsync(assignments[idx].EmployeeShiftId);
+                var result = await shiftService.EndAssignmentAsync(_assignments[pi].EmployeeShiftId);
                 UiHelpers.ShowResult(this, result);
                 if (result.IsSuccess)
                     await LoadAllAsync();

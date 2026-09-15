@@ -28,14 +28,17 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                var result = await invoiceService.GetInvoicesListAsync(type: _type);
+                var result = await invoiceService.GetInvoicesPagedAsync(
+                    type: _type, page: _currentPage, pageSize: _pageSize);
                 if (!result.IsSuccess || result.Data == null)
                 {
                     UiHelpers.ShowError(this, result.Message);
                     return;
                 }
+                if (!ApplyPaged(result.Data))
+                    return;
 
-                _invoices = result.Data;
+                _invoices = result.Data.Items;
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
                 Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));

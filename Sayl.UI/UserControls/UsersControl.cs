@@ -54,8 +54,14 @@ namespace Sayl.UI.UserControls
                 var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
                 var roleService = scope.ServiceProvider.GetRequiredService<clsRoleService>();
 
-                _users = await usersService.GetUsersAsync(includeInactive: ShowInactive);
                 _roles = await roleService.GetRolesListAsync();
+
+                var pagedUsers = await usersService.GetUsersPagedAsync(
+                    includeInactive: ShowInactive,
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(pagedUsers))
+                    return;
+                _users = pagedUsers.Items;
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));

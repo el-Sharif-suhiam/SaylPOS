@@ -1,3 +1,4 @@
+using Common.DTOs;
 using Common.DTOs.ViewModel;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
@@ -10,6 +11,7 @@ namespace Sayl.UI.UserControls
     internal class InventoryControl : SectionListControl
     {
         private List<InventoryStatusVM> _items = new();
+        private List<InventoryStatusVM> _shown = new();
         private CheckBox _chkLowOnly = null!;
 
         protected override string Title => AppLang.T("Inventory.Section.Title");
@@ -29,6 +31,10 @@ namespace Sayl.UI.UserControls
                 }
 
                 _items = result.Data;
+                var paged = SliceCurrentPage(_items);
+                ApplyPaged(paged);
+                _shown = paged.Items;
+
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colName", AppLang.T("Common.Label.Product"));
                 Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
@@ -46,7 +52,7 @@ namespace Sayl.UI.UserControls
                 Grid.Columns["colCounted"].FillWeight = 10;
 
                 Grid.Rows.Clear();
-                foreach (var i in _items)
+                foreach (var i in _shown)
                     Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.QuantityReserved,
                         i.ReorderLevel, i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"),
                         i.LastCountedAt?.ToString("yyyy-MM-dd") ?? "-");
@@ -55,6 +61,20 @@ namespace Sayl.UI.UserControls
             {
                 UiHelpers.ShowError(this, AppLang.T("Inventory.Msg.LoadFailed"));
             }
+        }
+
+        /// <summary>شريحة الصفحة الحالية من قائمة مادّة كاملة (ترقيم على الذاكرة).</summary>
+        private PagedResult<InventoryStatusVM> SliceCurrentPage(List<InventoryStatusVM> all)
+        {
+            int totalPages = Math.Max(1, (int)Math.Ceiling(all.Count / (double)Math.Max(1, _pageSize)));
+            int page = Math.Clamp(_currentPage, 1, totalPages);
+            return new PagedResult<InventoryStatusVM>
+            {
+                TotalCount = all.Count,
+                Page = page,
+                PageSize = _pageSize,
+                Items = all.Skip((page - 1) * _pageSize).Take(_pageSize).ToList()
+            };
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.
@@ -71,7 +91,7 @@ namespace Sayl.UI.UserControls
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
-            _chkLowOnly.CheckedChanged += (_, _) => _ = LoadDataAsync();
+            _chkLowOnly.CheckedChanged += (_, _) => { _currentPage = 1; _ = LoadDataAsync(); };
             _toolbar.Controls.Add(_chkLowOnly);
             _chkLowOnly.BringToFront();
 
@@ -98,7 +118,7 @@ namespace Sayl.UI.UserControls
         private void AdjustStock()
         {
             int idx = Grid.CurrentRow?.Index ?? -1;
-            int? productId = idx >= 0 && idx < _items.Count ? _items[idx].ProductId : null;
+            int? productId = idx >= 0 && idx < _shown.Count ? _shown[idx].ProductId : null;
 
             using var form = new AdjustStockForm(productId);
             if (form.ShowDialog(FindForm()) == DialogResult.OK)

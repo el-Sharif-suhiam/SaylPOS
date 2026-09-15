@@ -21,7 +21,12 @@ namespace Sayl.UI.UserControls
             {
                 using var scope = Program.Services.CreateScope();
                 var expenseService = scope.ServiceProvider.GetRequiredService<clsExpenseService>();
-                _expenses = await expenseService.GetExpensesListAsync(search: TxtSearch.Text?.Trim() ?? "");
+                var paged = await expenseService.GetExpensesPagedAsync(
+                    search: TxtSearch.Text?.Trim() ?? "",
+                    page: _currentPage, pageSize: _pageSize);
+                if (!ApplyPaged(paged))
+                    return;
+                _expenses = paged.Items;
 
                 Grid.Columns.Clear();
                 Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
