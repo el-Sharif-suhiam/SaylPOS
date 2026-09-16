@@ -62,7 +62,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // العنوان + البحث
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الشبكة
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));   // الترقيم
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));   // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));   // الأزرار
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, BackColor = AppTheme.CardBg, Margin = new Padding(0) };

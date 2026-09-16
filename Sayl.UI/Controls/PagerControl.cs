@@ -34,7 +34,7 @@ namespace Sayl.UI.Controls
         public PagerControl()
         {
             Dock = DockStyle.Bottom;
-            Height = 38;
+            Height = 48;
             BackColor = AppTheme.CardBg;
             Padding = new Padding(8, 4, 8, 4);
 
@@ -73,7 +73,15 @@ namespace Sayl.UI.Controls
             nav.Controls.Add(flow);
 
             // ── حجم الصفحة: مجموعة يسرى (عنوان + قائمة 10/20/50) ──
-            var sizePanel = new Panel { Dock = DockStyle.Left, Width = 165, BackColor = AppTheme.CardBg, Padding = new Padding(0, 2, 0, 2) };
+            // كان التحديد (58px عرضًا داخل حاضنة 165px وارتفاعًا يقتطع
+            // القائمة المنسدلة أسفل الشريط) شبه مختفي — وسّعنا الحاضنة
+            // والعنصر وأضفنا مساحة عمودية تكفي ارتفاع القائمة.
+            var sizePanel = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 200,
+                BackColor = AppTheme.CardBg
+            };
             var sizeFlow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -87,7 +95,7 @@ namespace Sayl.UI.Controls
                 Text = AppLang.T("Paging.Label"),
                 AutoSize = true,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0, 7, 0, 0),
+                Margin = new Padding(0, 9, 0, 0),
                 ForeColor = AppTheme.TextMuted
             };
             _cmbSize.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -95,8 +103,9 @@ namespace Sayl.UI.Controls
             _cmbSize.Font = AppTheme.FontBody;
             _cmbSize.Items.AddRange(new object[] { 10, 20, 50 });
             _cmbSize.SelectedItem = 20;
-            _cmbSize.Width = 58;
+            _cmbSize.Width = 78;
             _cmbSize.Margin = new Padding(6, 5, 0, 5);
+            _cmbSize.Cursor = Cursors.Hand;
             _cmbSize.SelectedValueChanged += (_, _) =>
             {
                 if (_suppress) return;
@@ -128,12 +137,13 @@ namespace Sayl.UI.Controls
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                MinimumSize = new Size(48, 28),
+                MinimumSize = new Size(46, 30),
                 Padding = new Padding(10, 0, 10, 0),
                 Margin = new Padding(2),
                 Cursor = Cursors.Hand
             };
             b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.BorderColor = AppTheme.PrimaryDark;
             b.FlatAppearance.MouseOverBackColor = AppTheme.PrimaryLight;
             return b;
         }

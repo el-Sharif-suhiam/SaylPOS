@@ -95,7 +95,7 @@ namespace Sayl.UI.Forms
             // الصفوف الأربعة بالترتيب — الأرقام = الارتفاقات بالبكسل.
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));    // الفترة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));     // الترقيم
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));     // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));     // الأزرار
 
             // ── صف الفترة (يوضع لاحقًا في خلية الصف 0) ──

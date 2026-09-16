@@ -353,7 +353,7 @@ namespace Sayl.UI.Forms
                 IntegralHeight = false
             };
             _lstResults.DrawItem += LstResults_DrawItem;
-            _lstResults.Click += (_, _) => AddSelectedResult();
+            _lstResults.Click += async (_, _) => await AddSelectedResult();
             _lstResults.KeyDown += LstResults_KeyDown;
             _searchPopup.Controls.Add(_lstResults);
 
@@ -431,7 +431,9 @@ namespace Sayl.UI.Forms
         private void ShowSearchPopup(int resultCount)
         {
             RepositionSearchPopup();
-            _searchPopup.Height = Math.Min(resultCount * _lstResults.ItemHeight + 8, 380);
+            // السقف 440 = 8 صفوف × 54 + هامش: كانت القيمة 380 تقتطع الصف
+            // الأخير (نتائج البحث تُقص بـ8 — الكاشير كان يفقد آخر منتج دون مسح)
+            _searchPopup.Height = Math.Min(resultCount * _lstResults.ItemHeight + 8, 440);
             _searchPopup.Visible = true;
             _searchPopup.BringToFront();
         }
@@ -528,7 +530,7 @@ namespace Sayl.UI.Forms
                     if (seq != _searchSeq) return;
                     if (byBarcode.IsSuccess && byBarcode.Data != null)
                     {
-                        AddToCart(byBarcode.Data);
+                        await AddToCartAsync(byBarcode.Data);
                         FinishSearchInput();
                         return;
                     }
@@ -597,7 +599,7 @@ namespace Sayl.UI.Forms
         {
             if (_searchPopup.Visible && _lstResults.SelectedIndex >= 0)
             {
-                AddSelectedResult();
+                await AddSelectedResult();
                 return;
             }
 
@@ -616,7 +618,7 @@ namespace Sayl.UI.Forms
                 var byBarcode = await productService.GetProductByBarcodeAsync(term);
                 if (byBarcode.IsSuccess && byBarcode.Data != null)
                 {
-                    AddToCart(byBarcode.Data);
+                    await AddToCartAsync(byBarcode.Data);
                     FinishSearchInput();
                     return;
                 }
@@ -631,7 +633,7 @@ namespace Sayl.UI.Forms
 
                 await RunLiveSearchAsync();
                 if (_lstResults.Items.Count == 1)
-                    AddSelectedResult();
+                    await AddSelectedResult();
             }
             catch
             {
@@ -647,7 +649,7 @@ namespace Sayl.UI.Forms
             if (e.KeyCode == Keys.Enter)
             {
                 e.SuppressKeyPress = true;
-                AddSelectedResult();
+                _ = AddSelectedResult();
             }
             else if (e.KeyCode == Keys.Escape)
             {
@@ -661,7 +663,7 @@ namespace Sayl.UI.Forms
             }
         }
 
-        private void AddSelectedResult()
+        private async Task AddSelectedResult()
         {
             if (_lstResults.SelectedIndex < 0 || _lstResults.SelectedIndex >= _lstResults.Items.Count)
                 return;
@@ -669,7 +671,7 @@ namespace Sayl.UI.Forms
             if (_lstResults.Items[_lstResults.SelectedIndex] is not SearchItem item)
                 return;
 
-            AddToCart(item.Product);
+            await AddToCartAsync(item.Product);
             FinishSearchInput();
         }
 
@@ -1178,10 +1180,12 @@ namespace Sayl.UI.Forms
             }
         }
 
-        // 📖 RefreshStockAsync: لقطة أرصدة المخزون كاملة للذاكرة
-        // (_stockByProduct: معرف → متاح). تُقرأ عند الفتح وبعد كل
-        // بيع/مرتجع/استلام — هي مصدر «سقف الكمية» في السلة بأكملها.
-        // فشلها لا يعطل البيع: القيم تصفر ببساطة (فقط تفقد التقييد).
+        // 📖 RefreshStockAsync: لقطة أرصدة المخزون للذاكرة (_stockByProduct:
+// معرف → «متاح صافٍ» = QuantityAvailable − QuantityReserved — محجوز
+// المعلّقات يخصم من السقف حتى لا نبيع ما هو محجوز أصلًا). تُقرأ عند
+// الفتح وبعد كل بيع/مرتجع/استلام، وهي مصدر «سقف الكمية» لأزرار +/−
+// وللكمية المكتوبة في السطر. (مسار الإضافة نفسه يعيد قراءة القاعدة
+// لحظيًا في AddToCartAsync — اللقطة هنا للشاشة والأزرار فقط.)
         private async Task RefreshStockAsync()
         {
             try
@@ -1190,7 +1194,8 @@ namespace Sayl.UI.Forms
                 var reports = scope.ServiceProvider.GetRequiredService<clsReportService>();
                 var result = await reports.GetInventoryStatusAsync();
                 if (result.IsSuccess && result.Data != null)
-                    _stockByProduct = result.Data.ToDictionary(x => x.ProductId, x => x.QuantityAvailable);
+                    _stockByProduct = result.Data.ToDictionary(x => x.ProductId,
+                        x => Math.Max(0, x.QuantityAvailable - x.QuantityReserved));
             }
             catch
             {
@@ -1199,22 +1204,49 @@ namespace Sayl.UI.Forms
         }
 
         // ───────────────── البحث والإضافة للسلة ─────────────────
-        // 📖 AddToCart: قلب السلة — قاعدتان:
-        //  1) «دمج أو إضافة»: منتج موجود؟ كمية++ (سطر واحد لكل منتج —
-        //     الفاتورة تبقى قصيرة)؛ جديد؟ CartItem بكمية 1.
-        //  2) «سقف ناعم ثم تنبيه»: تجاوز المتاح يمنع الزيادة أصلًا
-        //     (منع مسبق أفضل من فشل لاحق)، والوصول للحد ينبّه دون منع —
-        //     لاحظ الفرق: AddToCart الموجود = منع، الجديد الذي نال
-        //     الكمية كاملة = تنبيه فقط (بيع خدمي/صفر مخزون ممكن).
-        private void AddToCart(DtoProduct product)
+        // 📖 AddToCartAsync: قلب السلة — إضافة محمية بتحديث المخزون الحي:
+        // عند كل إضافة يُقرأ «متاح» المنتج لحظيًا من قاعدة البيانات
+        // (QuantityAvailable − QuantityReserved) — لا نعتمد على لقطة قديمة
+        // وإضافة شاشة ثانية من جهاز آخر تنعكس فورًا على السقف. القواعد:
+        //  1) منتج مخزّن بلا متاح (0) → يمنع الإضافة أصلًا — لا يبيع
+        //     الكاشير ما لا يملك منه شيئًا.
+        //  2) وصل الكمية إلى السقف → تمنع الزيادة (رسالة CannotExceed).
+        //  3) الحد الأدنى 1 ثابت — محرر السطر (CellEndEdit) لا يسمح
+        //     بالصفر أو السالب، وزر «−» يتوقف عند 1.
+        private async Task AddToCartAsync(DtoProduct product)
         {
+            int stock = -1; // غير مخزّن = بلا سقف (خدمات/مصنّع)
+            if (product.Type == "stock")
+            {
+                try
+                {
+                    using var scope = Program.Services.CreateScope();
+                    var products = scope.ServiceProvider.GetRequiredService<clsProductService>();
+                    stock = await products.GetNetAvailableQuantityAsync(product.ProductId);
+                    // حدّث لقطة الجلسة (أزرار +/− والكمية المكتوبة تتبعها)
+                    _stockByProduct[product.ProductId] = stock;
+                }
+                catch
+                {
+                    // انقطاع لحظي للقاعدة: نرجع لسقف الجلسة إن وُجد — وإلا بلا سقف
+                    // (لا نوقف عمل الكاشير؛ الحسم النهائي في السداد بالمعاملة)
+                    if (!_stockByProduct.TryGetValue(product.ProductId, out stock))
+                        stock = -1;
+                }
+            }
+
+            if (stock == 0)
+            {
+                ShowStockWarn(AppLang.T("Pos.Warn.NoStock", product.Name));
+                return;
+            }
+
             var existing = _cart.FirstOrDefault(i => i.ProductId == product.ProductId);
             if (existing != null)
             {
-                if (_stockByProduct.TryGetValue(product.ProductId, out int stockAvail) &&
-                    stockAvail > 0 && existing.Quantity >= stockAvail)
+                if (stock > 0 && existing.Quantity >= stock)
                 {
-                    ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stockAvail));
+                    ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stock));
                     return;
                 }
                 existing.Quantity++;
@@ -1227,14 +1259,6 @@ namespace Sayl.UI.Forms
                     Price = product.BasePrice,
                     Quantity = 1
                 });
-
-            if (_stockByProduct.TryGetValue(product.ProductId, out int stock) &&
-                product.Type == "stock")
-            {
-                int inCart = _cart.First(i => i.ProductId == product.ProductId).Quantity;
-                if (inCart > stock)
-                    ShowStockWarn(AppLang.T("Pos.Warn.LowStock", product.Name, stock));
-            }
 
             RefreshCart();
         }

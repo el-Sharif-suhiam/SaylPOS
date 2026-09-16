@@ -84,7 +84,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));   // العنوان + العداد
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // الجدول
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));   // الترقيم
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));   // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));   // الأزرار
 
             // ── العنوان وسطًا + عدّاد معلقات يساره (تسمية حية) ──

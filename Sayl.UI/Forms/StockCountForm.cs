@@ -57,7 +57,7 @@ namespace Sayl.UI.Forms
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));    // أزرار القيادة
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));      // الجدول
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));     // الترقيم
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));     // الترقيم
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));     // الملخص + الترحيل
 
             // ═══════════════════════════════════════════════════════════════

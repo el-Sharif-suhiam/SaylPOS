@@ -162,7 +162,7 @@
   "Pos.Clear.Confirm": "هل تريد مسح جميع بنود الفاتورة؟",
   "Pos.Warn.QtyCapped": "تم تقييد الكمية إلى المتاح من '{0}' ({1})",
   "Pos.Warn.CannotExceed": "لا يمكن تجاوز المتاح من '{0}' ({1})",
-  "Pos.Warn.LowStock": "تنبيه: المتاح من '{0}' هو {1} فقط",
+  "Pos.Warn.NoStock": "لا يمكن إضافة '{0}' — المخزون غير متوفر",
   "Pos.Msg.NoOpenSession": "لا توجد جلسة مفتوحة.",
   "Pos.CloseSession.Title": "إغلاق الجلسة",
   "Pos.CloseSession.Confirm": "سيتم عرض تقرير الجلسة وطلب عدّ النقد. متابعة؟",

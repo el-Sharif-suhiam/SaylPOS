@@ -152,6 +152,19 @@ namespace Sayl.Core.Services
             });
         }
 
+        /// <summary>المتاح الفعلي للبيع من قاعدة البيانات لحظيًا:
+        /// (QuantityAvailable − QuantityReserved) — المحجوز للمعلّقات يخصم من السقف.
+        /// غير سالب دائمًا (لا نبيع ما لا نملك). المنتج غير المخزّن = غير محدود.</summary>
+        public async Task<int> GetNetAvailableQuantityAsync(int productId)
+        {
+            var net = await _dbContext.Inventories
+                .Where(i => i.ProductId == productId)
+                .Select(i => (i.QuantityAvailable ?? 0) - (i.QuantityReserved ?? 0))
+                .FirstOrDefaultAsync();
+
+            return Math.Max(0, net);
+        }
+
         public async Task<List<DtoBatch>> GetProductBatchesAsync(int productId)
         {
             return await _dbContext.Batches
