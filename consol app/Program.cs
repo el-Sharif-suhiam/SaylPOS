@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.Core.Models;
 
 namespace consol_app
 {
@@ -92,20 +93,38 @@ namespace consol_app
             var users = Svc<clsUsersService>(s);
             var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
 
-            // إعادة تعيين كلمات مرور مستخدمي الاختبار إلى قيم معروفة
-            // (الإعادة للآخرين: بوابة المدير — نمرر فاعلًا أدمن)
-            var cashier1 = await db.Users.FirstAsync(u => u.Username == "cashier1");
-            var adminUser = await db.Users.FirstAsync(u => u.Username == "admin");
-            await users.ResetPasswordAsync(cashier1.UserId, "Cashier123", adminUser.UserId);
+            // VULN-47: لا يوجد حسابات افتراضية معروفة — الهارنس ينشئ حساباته الصالحة أولًا
+            var adminRole = await db.Roles.FirstAsync(r => r.RoleValue == AppPermissions.AdminRoleValue);
+            var cashierRole = await db.Roles.FirstAsync(r => r.RoleValue == AppPermissions.CashierRoleValue);
 
-            string[] candidates = { "admin123", "Admin@123", "12345678", "admin1234", "password1" };
-            Result<UserVM>? adminLogin = null;
-            foreach (var pwd in candidates)
+            User? adminUser;
+            if (!await db.Users.AnyAsync(u => u.IsActive))
             {
-                adminLogin = await users.LoginAsync("admin", pwd);
-                if (adminLogin.IsSuccess) { Console.WriteLine($"(admin password found: '{pwd}')"); break; }
+                // أول تشغيل / قاعدة نظيفة: ننشئ المدير ثم الكاشير
+                var ownerResult = await users.CreateOwnerAsync("admin", "Admin@123");
+                if (!ownerResult.IsSuccess)
+                    throw new Exception("CreateOwner failed: " + ownerResult.Message);
+
+                adminUser = await db.Users.FirstAsync(u => u.UserId == ownerResult.Data!.UserId);
+
+                var cashierResult = await users.AddNewUserAsync(
+                    new NewUserRequest("cashier1", "Cashier123", cashierRole.RoleId, null),
+                    actorUserId: adminUser.UserId);
+                if (!cashierResult.IsSuccess)
+                    throw new Exception("Add cashier failed: " + cashierResult.Message);
             }
-            Check("admin login", adminLogin?.IsSuccess == true);
+            else
+            {
+                adminUser = await db.Users.FirstAsync(u => u.Username == "admin");
+                var cashierUser = await db.Users.FirstAsync(u => u.Username == "cashier1");
+                await users.ResetPasswordAsync(cashierUser.UserId, "Cashier123", adminUser.UserId);
+            }
+
+            if (adminUser == null)
+                throw new Exception("Admin user could not be resolved.");
+
+            var adminLogin = await users.LoginAsync("admin", "Admin@123");
+            Check("admin login", adminLogin.IsSuccess);
 
             var cashierLogin = await users.LoginAsync("cashier1", "Cashier123");
             Check("cashier1 login (after reset)", cashierLogin.IsSuccess, cashierLogin.Message);

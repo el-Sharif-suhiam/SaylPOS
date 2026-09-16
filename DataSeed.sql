@@ -152,20 +152,22 @@ VALUES
 SET IDENTITY_INSERT Roles OFF;
 
 -- ===============================================
--- 7) Users (passwords hashed with BCrypt)
---    السياسة: حسابان أساسيان فقط عند التثبيت —
---    admin (مدير النظام) و cashier1 (كاشير).
---    المحاسب دور جاهز بلا حساب؛ يُنشئ المدير حسابه
---    من شاشة المستخدمين عند الحاجة (دور واحد لكل محل).
--- Demo login credentials:
---   admin    / Admin@123
---   cashier1 / Cashier@123
+-- 7) Users — VULN-47: لا يُزرع أي حساب بكلمة مرور معروفة.
+--    سابقًا كان (admin/Admin@123 و cashier1/Cashier@123) يُزرَعان
+--    مع كل تركيب جديد = باب مفتوح بمعرّف معلوم لكل النسخ الموزعة.
+--    الآن: حسابان «أدوات نظام» فقط (IsActive=0، ومن دون كلمة مرور صحيحة
+--    — تجزئة مسطّحة لا تطابق أي كلمة) لتبقى مراجع فواتير الديمو
+--    (UserId في Invoices/SystemLogs) سليمة دون فتح أي طريق دخول.
+--    حسابات التشغيل الحقيقية ينشئها المالك: شاشة «إنشاء المدير»
+--    في معالج التثبيت (أو عند أول تشغيل للتركيب الصامت) — لا معرّف
+--    افتراضي في أي مكان (الأدوار الثابتة: مدير/كاشير/محاسب موجودة أعلاه).
 -- ===============================================
 SET IDENTITY_INSERT Users ON;
-INSERT INTO Users (UserId, Username, PasswordHash, EmployeeId, RoleId, CreatedAt)
+-- تجزئة BCrypt لا تطابق أي كلمة مرور (تعويض توقيت فقط مثل سجل الدخول)
+INSERT INTO Users (UserId, Username, PasswordHash, EmployeeId, RoleId, IsActive, CreatedAt)
 VALUES
-(1, N'admin', N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, '2025-02-01 08:00:00'),     -- مدير النظام الوحيد
-(2, N'cashier1', N'$2a$11$qEzXqA3D4ohz3k8xNjKGyON9buLjMGPcWXmMqsbbf2tb0QSnX2SmW', 2, 2, '2025-02-01 09:00:00'); -- الكاشير الأساسي
+(1, N'demo_system_1', N'$2a$11$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890123456789012', 1, 1, 0, '2025-02-01 08:00:00'), -- غير نشط، بلا كلمة دالة
+(2, N'demo_system_2', N'$2a$11$abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890123456789012', 2, 2, 0, '2025-02-01 09:00:00'); -- غير نشط، بلا كلمة دالة
 SET IDENTITY_INSERT Users OFF;
 
 -- ===============================================

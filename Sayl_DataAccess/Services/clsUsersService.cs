@@ -214,6 +214,78 @@ namespace Sayl.Core.Services
             return saved ? Result.Ok("تم إضافة المستخدم بنجاح.") : Result.Fail("فشل حفظ المستخدم.");
         }
 
+        /// <summary>هل يوجد أي مستخدم نشط على الإطلاق؟ — بوابة إنشاء حساب المدير الأول.</summary>
+        public async Task<bool> HasActiveUsersAsync()
+            => await _dbContext.Users.AnyAsync(u => u.IsActive);
+
+        /// <summary>VULN-47: إنشاء «حساب المدير» في أول تركيب — الاستبدال الآمن
+        /// للحساب الديمو (admin/Admin@123) الذي كان يُزرَع بكلمة مرور معروفة في كل
+        /// تثبيت جديد. القاعدة: أول حساب نشط في النظام هو مالكه — ومنذ وجود أي
+        /// مستخدم نشط يُغلق هذا المسار إلى الأبد (لا يعاد تشغيله فوق بيانات حية).</summary>
+        public async Task<Result<UserVM>> CreateOwnerAsync(string username, string password)
+        {
+            if (await HasActiveUsersAsync())
+                return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
+
+            username = username?.Trim() ?? "";
+            if (username.Length < 3 || username.Length > 50)
+                return Result<UserVM>.Fail("اسم المستخدم يجب أن يكون بين 3 و50 حرفًا.");
+
+            if (string.IsNullOrWhiteSpace(password))
+                return Result<UserVM>.Fail("كلمة المرور مطلوبة.");
+
+            string? policyError = ValidatePasswordPolicy(password);
+            if (policyError != null)
+                return Result<UserVM>.Fail(policyError);
+
+            if (await _dbContext.Users.AnyAsync(u => u.Username == username))
+                return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
+
+            var adminRole = await _dbContext.Roles
+                .FirstOrDefaultAsync(r => r.RoleValue == AppPermissions.AdminRoleValue && r.IsActive);
+            if (adminRole == null)
+                return Result<UserVM>.Fail("دور المدير غير متوفر — لا يمكن إنشاء حساب المدير.");
+
+            var owner = new User
+            {
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+                RoleId = adminRole.RoleId,
+                EmployeeId = null
+            };
+
+            _dbContext.Users.Add(owner);
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
+            }
+
+            clsAudit.Log(_dbContext, owner.UserId, "OwnerSetup",
+                $"إنشاء حساب المدير الأول '{owner.Username}'");
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch
+            {
+                // فشل سجل التدقيق لا يمنع إنشاء المالك
+            }
+
+            return Result<UserVM>.Ok(new UserVM
+            {
+                UserId = owner.UserId,
+                UserName = owner.Username,
+                RoleId = adminRole.RoleId,
+                RoleName = adminRole.Name,
+                RoleValue = adminRole.RoleValue,
+                IsActive = true
+            });
+        }
+
         // VULN-43: كان بلا سياسة كلمة مرور إطلاقًا (يقبل "a") — كود ميت لكنه
         // لغم مفخخ لأول من يوصله (مسار "فرض تغيير" مستقبلي مثلًا). الآن
         // يخضع لنفس سياسة الإضافة/الإعادة/التغيير — يظل بلا مستدعٍ لكنه آمن.

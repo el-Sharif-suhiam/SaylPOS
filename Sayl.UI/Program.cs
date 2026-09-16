@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.UI.Forms;
 using Sayl.UI.Infrastructure;
+using Common.DTOs.ViewModel;
+using Common.Results;
 
 namespace Sayl.UI
 {
@@ -10,6 +12,15 @@ namespace Sayl.UI
     {
         public static IServiceProvider Services { get; private set; } = default!;
         public static AppNavigator Navigator { get; private set; } = default!;
+
+        /// <summary>ملف مؤجل: المثبّت يكتب بيانات الحساب (اسم المستخدم وكلمة المرور)
+        /// عند اختيار المستخدم إنشاء المدير من معالج التثبيت. يقرأه هذا المسار
+        /// ويُحذف بعد الاستخدام أو عند وجود حسابات نشطة بالفعل (إعادة تثبيت على
+        /// قاعدة حية).</summary>
+        private static readonly string PendingOwnerFile =
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Sayl_POS", "pending-owner.json");
 
         [STAThread]
         static void Main()
@@ -71,6 +82,10 @@ namespace Sayl.UI
                     return;
             }
 
+            // VULN-47: بوابة إنشاء المدير — ملف مؤجل من المثبّت أو شاشة مباشرة
+            if (!EnsureOwnerSetup())
+                return;
+
             Navigator = new AppNavigator(Services.GetRequiredService<LoginForm>());
             Application.Run(Navigator);
         }
@@ -131,6 +146,81 @@ namespace Sayl.UI
             {
                 // لا شيء أخطر من فشل إظهار رسالة الخطأ نفسها
             }
+        }
+
+        // ── VULN-47: بوابة إنشاء حساب المدير الأول ──────────────────────────
+        private sealed record PendingOwner(string Username, string Password);
+
+        /// <summary>
+        /// تُفحص ملف pending-owner (كتبه المثبّت) أو تُظهر شاشة الإنشاء
+        /// حين لا يوجد مستخدمون نشطون. تُرجع false لإيقاف التشغيل إذا ألغى
+        /// المستخدم الإجراء.
+        /// </summary>
+        private static bool EnsureOwnerSetup()
+        {
+            try
+            {
+                using var scope = Services.CreateScope();
+                var usersService = scope.ServiceProvider.GetRequiredService<Core.Services.clsUsersService>();
+
+                // ملف مؤجل من المثبّت؟ اقرأه أولًا.
+                PendingOwner? pending = null;
+                try
+                {
+                    if (File.Exists(PendingOwnerFile))
+                    {
+                        var json = File.ReadAllText(PendingOwnerFile);
+                        var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                        pending = System.Text.Json.JsonSerializer.Deserialize<PendingOwner>(json, opts);
+                    }
+                }
+                catch
+                {
+                    pending = null;
+                }
+
+                // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا ننشئ، نحذف الملف المؤجل فقط.
+                if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())
+                {
+                    SafeDelete(PendingOwnerFile);
+                    return true;
+                }
+
+                // مسار المثبّت: إنشاء فوري من بيانات الملف المؤجل
+                if (pending != null && !string.IsNullOrWhiteSpace(pending.Username) && !string.IsNullOrWhiteSpace(pending.Password))
+                {
+                    var result = usersService.CreateOwnerAsync(pending.Username, pending.Password)
+                        .GetAwaiter().GetResult();
+                    SafeDelete(PendingOwnerFile);
+                    if (result.IsSuccess)
+                        return true;
+
+                    // فشل الملف المؤجل (_conflict_ مثلاً): نكمل بالشاشة التفاعلية بدل الإنهاء
+                }
+
+                // مسار صامت أو الملف مفقود: الشاشة التفاعلية
+                using var dlg = new OwnerSetupForm(pending?.Username ?? "");
+                if (dlg.ShowDialog() != DialogResult.OK)
+                    return false;
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError("OWNER_SETUP", ex);
+                // لا نمنع الدخول إذا فشل المسار غير الحرج — التحذير يكفي
+                MessageBox.Show(
+                    AppLang.T("Owner.Err.Unexpected"),
+                    AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button1,
+                    MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                return true;
+            }
+        }
+
+        private static void SafeDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { /* حذف الملف ليس حرجًا */ }
         }
     }
 }
