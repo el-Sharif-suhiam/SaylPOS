@@ -114,6 +114,9 @@ namespace Sayl.Core.Services
             if (!AppPermissions.Has(creatorRole, AppPermissions.Expenses))
                 return Result<int>.Fail("إضافة مصروف يتطلب صلاحية شاشة المصروفات.");
 
+            if (await IsBeforeCurrentFiscalYearAsync(dtoExpense.ExpenseDate))
+                return Result<int>.Fail("مصروف من سنة مالية مغلقة — لا يمكن إضافته (مؤرشف).");
+
             if (dtoExpense.UserId.HasValue)
             {
                 bool userExists = await _dbContext.Users.AnyAsync(u => u.UserId == dtoExpense.UserId.Value);
@@ -153,6 +156,9 @@ namespace Sayl.Core.Services
             int editorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
             if (!AppPermissions.Has(editorRole, AppPermissions.Expenses))
                 return Result.Fail("تعديل المصروفات يتطلب صلاحية شاشة المصروفات.");
+
+            if (dtoExpense.ExpenseDate != default && await IsBeforeCurrentFiscalYearAsync(dtoExpense.ExpenseDate))
+                return Result.Fail("مصروف من سنة مالية مغلقة — لا يمكن تعديله (مؤرشف).");
 
             if (!string.IsNullOrWhiteSpace(dtoExpense.Description))
                 expense.Description = clsValidation.ValidateString(dtoExpense.Description, "Description", 255);
@@ -206,6 +212,16 @@ namespace Sayl.Core.Services
             var user = await _dbContext.Users.Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.UserId == userId);
             return user?.Role.RoleValue ?? 0;
+        }
+
+        private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date)
+        {
+            var setting = await _dbContext.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
+                return date < fiscalYearStart;
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            return date < new DateOnly(today.Year, 1, 1);
         }
     }
 }

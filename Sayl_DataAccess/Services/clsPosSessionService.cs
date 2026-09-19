@@ -1,6 +1,7 @@
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -14,6 +15,17 @@ namespace Sayl.Core.Services
         public clsPosSessionService(SaylDbContext dbContext)
         {
             _dbContext = dbContext;
+        }
+
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
         }
 
         public async Task<Result<PosSessionVM>> GetOpenSessionByUserAsync(int userId)
@@ -96,8 +108,13 @@ namespace Sayl.Core.Services
             return false;
         }
 
-        public async Task<Result> CloseSessionAsync(int sessionId, decimal closingAmount)
+        public async Task<Result> CloseSessionAsync(int sessionId, decimal closingAmount, int actorUserId = 0)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || (!AppPermissions.IsCashier(actorRole)
+                && !AppPermissions.Has(actorRole, AppPermissions.SalesInvoices)))
+                return Result.Fail("إغلاق الجلسة يتطلب صلاحية الكاشير أو شاشة فواتير البيع.");
+
             if (closingAmount < 0)
                 return Result.Fail("مبلغ الإغلاق يجب أن يكون صفرا أو أكثر.");
 
@@ -110,6 +127,12 @@ namespace Sayl.Core.Services
 
             // الانتقال الذري داخل معاملة: أول من يصل يفوز — يمنع إغلاقين متوازيين
             // ويلتقط حركات نقد تُسجَّل الآن (سيرفضها AddMovementAsync على جلسة مغلقة)
+            //
+            // B3 (تنسيق الإغلاق): Serializable يجعل كل عملية بيع/إكمال/حركة نقد تقرأ
+            // الجلسة أن تنتظر فتح قفل هذا الصف — إن كانت عملية بيع التزمت الصف
+            // قبل الإغلاق فإنها تعالج وتُثبَّت أولًا ثم يغلق؛ وإن جاءت بعد الإغلاق
+            // ترى الحالة المغلقة فترفض الدفع. لا يمكن أن يلتزم دفع بعد الإغلاق
+            // لأن الالتزامات على نفس صف الجلسة متسلسلة تمامًا.
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
@@ -170,7 +193,8 @@ namespace Sayl.Core.Services
                                  - (cashOutcomeNew + cashOutcomeLegacy)
                                  + cashIn - cashOut;
 
-                session.ExpectedAmount = expected;
+                // B16: التقريب مرة واحدة على القيمة المخزنة — Z-report يطابق ما قُرئ
+                session.ExpectedAmount = Math.Round(expected, 2, MidpointRounding.AwayFromZero);
                 session.ClosingAmount = closingAmount;
                 session.ClosedAt = DateTime.UtcNow;
                 session.Status = enPosSessionStatusType.closed;

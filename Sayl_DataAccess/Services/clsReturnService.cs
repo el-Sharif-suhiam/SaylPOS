@@ -7,6 +7,24 @@ using Sayl.Core.Models;
 
 namespace Sayl.Core.Services
 {
+    public class DtoRefundPayment
+    {
+        public string Method { get; }
+        public decimal Amount { get; }
+
+        public DtoRefundPayment(string method, decimal amount)
+        {
+            Method = method;
+            Amount = amount;
+        }
+    }
+
+    public class DtoRefundPlan
+    {
+        public List<DtoRefundPayment> Payments { get; } = new();
+        public decimal BalanceRefund { get; set; }
+    }
+
     public class clsReturnService
     {
         private readonly SaylDbContext _dbContext;
@@ -32,6 +50,7 @@ namespace Sayl.Core.Services
 
             var originalInvoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
+                    .ThenInclude(ii => ii.Batch)
                 .FirstOrDefaultAsync(i => i.InvoiceId == request.OriginalInvoiceId
                                        && i.Type == enInvoicesType.sale
                                        && i.Status == enInvoicesStatus.completed);
@@ -47,15 +66,14 @@ namespace Sayl.Core.Services
             // ومخزون وهمي. التجميع أولاً يجعل الفحص ضد المجموع لا ضد كل سطر وحده.
             foreach (var g in GroupRequestItems(request.Items))
             {
-                var originalItem = originalInvoice.InvoiceItems
-                    .FirstOrDefault(ii => ii.ProductId == g.ProductId);
-
-                if (originalItem == null)
+                var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
+                if (originalItems.Count == 0)
                     return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
-                if (returnedSoFar + g.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                long sold = originalItems.Sum(ii => (long)ii.Quantity);
+                long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                if (g.Quantity > sold - returnedSoFar)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
             }
 
             // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
@@ -68,12 +86,11 @@ namespace Sayl.Core.Services
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
                 foreach (var g in GroupRequestItems(request.Items))
                 {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
-                    if (returnedSoFar + g.Quantity > originalItem.Quantity)
-                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                    var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
+                    long sold = originalItems.Sum(ii => (long)ii.Quantity);
+                    long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                    if (g.Quantity > sold - returnedSoFar)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
                 }
 
                 // ══ VULN-03 (الحل ب): الاسترداد النسبي الدقيق ══
@@ -97,14 +114,8 @@ namespace Sayl.Core.Services
                 decimal invNet = originalInvoice.NetAmount;
                 decimal netRatio = invTotal > 0 ? invNet / invTotal : 0m;
 
-                decimal rawRefund = 0m;
-                foreach (var g in GroupRequestItems(request.Items))
-                {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    rawRefund += originalItem.ItemPrice * g.Quantity * netRatio;
-                }
+                var allocations = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items));
+                decimal rawRefund = allocations.Sum(a => a.ItemPrice * a.Quantity) * netRatio;
                 // تقريب واحد نهائي — لا تقارب متسلسل يتراكم خطؤه
                 decimal total = Math.Round(rawRefund, 2, MidpointRounding.AwayFromZero);
 
@@ -112,8 +123,7 @@ namespace Sayl.Core.Services
                 // الخصم المسترد = نصيب البنود من الخصم (نسبة الخصم × القيمة الخام)
                 // الضريبة المستردة = نسبة الضريبة × (الخام المسترد − الخصم المسترد)
                 // (نفس ترتيب بناء الفاتورة الأصلية بالضبط — معادلة لا اجتهاد)
-                decimal returnedGross = GroupRequestItems(request.Items)
-                    .Sum(g => originalInvoice.InvoiceItems.First(ii => ii.ProductId == g.ProductId).ItemPrice * g.Quantity);
+                decimal returnedGross = allocations.Sum(a => a.ItemPrice * a.Quantity);
                 decimal discountRatio = invTotal > 0
                     ? originalInvoice.DiscountAmount / invTotal
                     : 0m;
@@ -147,23 +157,27 @@ namespace Sayl.Core.Services
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
 
-                // بنود مجمّعة: لا سطران لنفس المنتج في فاتورة المرتجع
                 foreach (var g in GroupRequestItems(request.Items))
                 {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
+                    var productAllocations = allocations
+                        .Where(a => a.ProductId == g.ProductId)
+                        .OrderBy(a => a.LineIndex)
+                        .ToList();
 
                     _dbContext.InvoiceItems.Add(new InvoiceItem
                     {
                         InvoiceId = returnInvoice.InvoiceId,
                         ProductId = g.ProductId,
                         Quantity = g.Quantity,
-                        BatchId = originalItem.BatchId,
-                        ItemPrice = originalItem.ItemPrice,
-                        ItemCost = originalItem.ItemCost
+                        BatchId = productAllocations.Count > 0 ? productAllocations[0].BatchId : null,
+                        ItemPrice = productAllocations.Sum(a => a.ItemPrice * a.Quantity) / g.Quantity,
+                        ItemCost = productAllocations.Sum(a => (a.ItemCost ?? 0m) * a.Quantity) / g.Quantity
                     });
 
-                    await RestockProductAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
+                    foreach (var a in productAllocations)
+                    {
+                        await RestockProductAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
+                    }
                 }
 
                 await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
@@ -198,6 +212,7 @@ namespace Sayl.Core.Services
 
             var originalInvoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
+                    .ThenInclude(ii => ii.Batch)
                 .FirstOrDefaultAsync(i => i.InvoiceId == request.OriginalInvoiceId
                                        && i.Type == enInvoicesType.purchase
                                        && i.Status == enInvoicesStatus.completed);
@@ -210,15 +225,14 @@ namespace Sayl.Core.Services
             // VULN-01: حارس الازدواج داخل الطلب — التجميع قبل الفحص (نفس مرتجع العميل)
             foreach (var g in GroupRequestItems(request.Items))
             {
-                var originalItem = originalInvoice.InvoiceItems
-                    .FirstOrDefault(ii => ii.ProductId == g.ProductId);
-
-                if (originalItem == null)
+                var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
+                if (originalItems.Count == 0)
                     return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
-                if (returnedSoFar + g.Quantity > originalItem.Quantity)
-                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                long sold = originalItems.Sum(ii => (long)ii.Quantity);
+                long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                if (g.Quantity > sold - returnedSoFar)
+                    return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
             }
 
             // Serializable يمنع إرجاعين متوازيين لنفس الفاتورة من تجاوز الكمية المسموحة
@@ -229,12 +243,11 @@ namespace Sayl.Core.Services
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
                 foreach (var g in GroupRequestItems(request.Items))
                 {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    int returnedSoFar = alreadyReturned.TryGetValue(g.ProductId, out int qty) ? qty : 0;
-                    if (returnedSoFar + g.Quantity > originalItem.Quantity)
-                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {originalItem.ProductId} (المتبقي: {originalItem.Quantity - returnedSoFar}).");
+                    var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
+                    long sold = originalItems.Sum(ii => (long)ii.Quantity);
+                    long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                    if (g.Quantity > sold - returnedSoFar)
+                        throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
                 }
 
                 // ══ VULN-03 (الحل ب): الاسترداد النسبي الدقيق — مرتجع المورد ══
@@ -248,19 +261,12 @@ namespace Sayl.Core.Services
                 decimal invNetSup = originalInvoice.NetAmount;
                 decimal netRatioSup = invTotalSup > 0 ? invNetSup / invTotalSup : 0m;
 
-                decimal rawRefundSup = 0m;
-                foreach (var g in GroupRequestItems(request.Items))
-                {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
-
-                    rawRefundSup += originalItem.ItemPrice * g.Quantity * netRatioSup;
-                }
+                var allocationsSup = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items));
+                decimal rawRefundSup = allocationsSup.Sum(a => a.ItemPrice * a.Quantity) * netRatioSup;
                 decimal total = Math.Round(rawRefundSup, 2, MidpointRounding.AwayFromZero);
 
                 // التفصيل التدقيقي: نصيب البنود من الخصم والضريبة الأصلية
-                decimal returnedGrossSup = GroupRequestItems(request.Items)
-                    .Sum(g => originalInvoice.InvoiceItems.First(ii => ii.ProductId == g.ProductId).ItemPrice * g.Quantity);
+                decimal returnedGrossSup = allocationsSup.Sum(a => a.ItemPrice * a.Quantity);
                 decimal discountRatioSup = invTotalSup > 0
                     ? originalInvoice.DiscountAmount / invTotalSup
                     : 0m;
@@ -293,23 +299,27 @@ namespace Sayl.Core.Services
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
 
-                // بنود مجمّعة — لا سطران لنفس المنتج
                 foreach (var g in GroupRequestItems(request.Items))
                 {
-                    var originalItem = originalInvoice.InvoiceItems
-                        .First(ii => ii.ProductId == g.ProductId);
+                    var productAllocations = allocationsSup
+                        .Where(a => a.ProductId == g.ProductId)
+                        .OrderBy(a => a.LineIndex)
+                        .ToList();
 
                     _dbContext.InvoiceItems.Add(new InvoiceItem
                     {
                         InvoiceId = returnInvoice.InvoiceId,
                         ProductId = g.ProductId,
                         Quantity = g.Quantity,
-                        BatchId = originalItem.BatchId,
-                        ItemPrice = originalItem.ItemPrice,
-                        ItemCost = originalItem.ItemCost
+                        BatchId = productAllocations.Count > 0 ? productAllocations[0].BatchId : null,
+                        ItemPrice = productAllocations.Sum(a => a.ItemPrice * a.Quantity) / g.Quantity,
+                        ItemCost = productAllocations.Sum(a => (a.ItemCost ?? 0m) * a.Quantity) / g.Quantity
                     });
 
-                    await DeductProductStockAsync(g.ProductId, g.Quantity, originalItem.BatchId, returnInvoice);
+                    foreach (var a in productAllocations)
+                    {
+                        await DeductProductStockAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
+                    }
                 }
 
                 await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
@@ -339,6 +349,39 @@ namespace Sayl.Core.Services
             items
                 .GroupBy(i => i.ProductId)
                 .Select(g => (g.Key, g.Sum(i => i.Quantity)));
+
+        private static List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)> AllocateAcrossOriginalLines(
+            IEnumerable<InvoiceItem> originalItems,
+            IEnumerable<(int ProductId, int Quantity)> groupedRequest)
+        {
+            var ordered = originalItems
+                .Select((ii, index) => (Item: ii, Index: index))
+                .OrderBy(x => x.Item.Batch == null
+                    ? 0
+                    : x.Item.Batch.ExpiryDate.HasValue ? x.Item.Batch.ExpiryDate.Value.DayNumber : int.MaxValue)
+                .ThenBy(x => x.Item.Batch == null ? DateTime.MinValue : (x.Item.Batch.CreatedAt ?? DateTime.MinValue))
+                .ThenBy(x => x.Item.ItemPrice)
+                .ThenBy(x => x.Index)
+                .ToList();
+
+            var request = groupedRequest.ToDictionary(g => g.ProductId, g => g.Quantity);
+            var result = new List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)>();
+
+            foreach (var x in ordered)
+            {
+                if (!request.TryGetValue(x.Item.ProductId, out int remaining) || remaining <= 0)
+                    continue;
+
+                int take = Math.Min(remaining, x.Item.Quantity);
+                if (take <= 0)
+                    continue;
+
+                result.Add((x.Index, x.Item.ProductId, take, x.Item.ItemPrice, x.Item.ItemCost, x.Item.BatchId));
+                request[x.Item.ProductId] = remaining - take;
+            }
+
+            return result;
+        }
 
         private async Task<Dictionary<int, int>> GetReturnedQuantitiesAsync(int originalInvoiceId, enInvoicesType returnType)
         {
@@ -437,23 +480,11 @@ namespace Sayl.Core.Services
         // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —
         // تقرير Z لليوم يرى المرتجع الذي دُفع اليوم، لا يُحمَّل على جلسة مجمدة.
         //
-        // 📖 لماذا نقد = min(الاسترداد، المدفوع) هو الترتيب الصحيح؟ (إثبات موثق)
-        //   فاتورة صافي 100: دفع العميل 40 نقدًا + 60 دينًا، ثم رجّع نصف البضاعة.
-        //   الاسترداد 50 → نقد 40 (كل ما دخل الدرج مقابل هذه البضاعة فعلًا)
-        //   + 10 تخفض الدين. النتيجة: العميل استعاد نقده كاملًا،
-        //   ودينه 50 = قيمة البضاعة التي أبقاها بالضبط.
-        //   المساران البديلان كلاهما يكسر التوازن: ردّ 50 نقدًا يخرج من
-        //   الدرج 10 لم تدخله، وخفض الدين كامل الـ50 يتركه مدينًا 10 على
-        //   بضاعة ردّها. (تحقق صريح بعد شكّ ظاهري: المعادلة سليمة دائمًا.)
         private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
-            decimal paidSoFar = await _dbContext.Payments
-                .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+            var refundPlan = await BuildRefundPlanAsync(originalInvoice, refundTotal);
 
-            decimal cashRefund = Math.Min(refundTotal, paidSoFar);
-
-            if (cashRefund > 0)
+            foreach (var refund in refundPlan.Payments)
             {
                 _dbContext.Payments.Add(new Payment
                 {
@@ -462,15 +493,15 @@ namespace Sayl.Core.Services
                     PartyType = 'C',
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
-                    Amount = cashRefund,
+                    Amount = refund.Amount,
                     PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
-                    PaymentMethod = "cash",
-                    Notes = $"استرداد نقدي عن الفاتورة {originalInvoice.InvoiceId}",
+                    PaymentMethod = refund.Method,
+                    Notes = $"قيد استرداد عن الفاتورة {originalInvoice.InvoiceId}",
                     CreatedAt = DateTime.UtcNow
                 });
             }
 
-            decimal balanceRefund = refundTotal - cashRefund;
+            decimal balanceRefund = refundPlan.BalanceRefund;
             if (balanceRefund > 0 && originalInvoice.PartyId.HasValue)
             {
                 var customer = await _dbContext.Customers.FindAsync(originalInvoice.PartyId.Value);
@@ -485,13 +516,9 @@ namespace Sayl.Core.Services
         // VULN-05: نفس توجيه مرتجع العميل — نقد الاسترداد يعود لدرج جلسة الفعل.
         private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
-            decimal paidSoFar = await _dbContext.Payments
-                .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+            var refundPlan = await BuildRefundPlanAsync(originalInvoice, refundTotal);
 
-            decimal cashRefund = Math.Min(refundTotal, paidSoFar);
-
-            if (cashRefund > 0)
+            foreach (var refund in refundPlan.Payments)
             {
                 _dbContext.Payments.Add(new Payment
                 {
@@ -500,15 +527,15 @@ namespace Sayl.Core.Services
                     PartyType = 'S',
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
-                    Amount = cashRefund,
+                    Amount = refund.Amount,
                     PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
-                    PaymentMethod = "cash",
-                    Notes = $"استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
+                    PaymentMethod = refund.Method,
+                    Notes = $"قيد استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
                     CreatedAt = DateTime.UtcNow
                 });
             }
 
-            decimal balanceRefund = refundTotal - cashRefund;
+            decimal balanceRefund = refundPlan.BalanceRefund;
             if (balanceRefund > 0 && originalInvoice.PartyId.HasValue)
             {
                 var supplier = await _dbContext.Suppliers.FindAsync(originalInvoice.PartyId.Value);
@@ -518,6 +545,54 @@ namespace Sayl.Core.Services
                     if (supplier.Balance < 0) supplier.Balance = 0;
                 }
             }
+        }
+
+        private async Task<DtoRefundPlan> BuildRefundPlanAsync(
+            Invoice originalInvoice, decimal refundTotal)
+        {
+            var originalPayments = await _dbContext.Payments
+                .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
+                .Select(p => new { p.PaymentMethod, p.Amount })
+                .ToListAsync();
+
+            var originalByMethod = originalPayments
+                .GroupBy(p => p.PaymentMethod)
+                .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+            enInvoicesType returnType = originalInvoice.Type == enInvoicesType.purchase
+                ? enInvoicesType.supplier_return
+                : enInvoicesType.customer_return;
+
+            var priorRefunds = await _dbContext.Payments
+                .Where(p => p.InvoiceId != null
+                         && p.Invoice!.OriginalInvoiceId == originalInvoice.InvoiceId
+                         && p.Invoice.Type == returnType
+                         && p.Invoice.Status == enInvoicesStatus.completed)
+                .Select(p => new { p.PaymentMethod, p.Amount })
+                .ToListAsync();
+
+            var priorByMethod = priorRefunds
+                .GroupBy(p => p.PaymentMethod)
+                .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+            var plan = new DtoRefundPlan();
+            decimal remaining = refundTotal;
+
+            foreach (var method in originalByMethod.Keys.OrderBy(m => m == "cash" ? 0 : 1))
+            {
+                decimal paid = originalByMethod[method];
+                decimal refunded = priorByMethod.TryGetValue(method, out decimal pr) ? pr : 0m;
+                decimal remainingPaid = Math.Max(0m, paid - refunded);
+                if (remainingPaid <= 0 || remaining <= 0m)
+                    continue;
+
+                decimal amount = Math.Min(remaining, remainingPaid);
+                plan.Payments.Add(new DtoRefundPayment(method, Math.Round(amount, 2, MidpointRounding.AwayFromZero)));
+                remaining -= amount;
+            }
+
+            plan.BalanceRefund = Math.Round(remaining, 2, MidpointRounding.AwayFromZero);
+            return plan;
         }
     }
 }

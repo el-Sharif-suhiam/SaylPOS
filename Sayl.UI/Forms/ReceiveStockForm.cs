@@ -220,7 +220,14 @@ namespace Sayl.UI.Forms
                     : null
             };
 
-            Result result = await UiHelpers.UseServiceAsync(s => s.ReceiveStockAsync(request));
+            int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+            if (actorUserId <= 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.NoUser"));
+                return;
+            }
+
+            Result result = await UiHelpers.UseServiceAsync(s => s.ReceiveStockAsync(request, actorUserId: actorUserId));
             UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", qty, product.Name));
 
             if (result.IsSuccess)

@@ -252,6 +252,8 @@ namespace Sayl.Core.Services
 
                     for (int i = keepLast; i < files.Count; i++)
                     {
+                        if (files[i].Name.Contains("_pre_restore_", StringComparison.OrdinalIgnoreCase))
+                            continue; // نسخة ما قبل الاستعادة محمية دائمًا (VULN-23)
                         try { files[i].Delete(); } catch { /* ملف مقفول — نتجاهل */ }
                     }
                 }

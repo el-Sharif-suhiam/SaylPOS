@@ -37,12 +37,15 @@ namespace consol_app
             using (var ws = Scope())
             {
                 var stock = Svc<clsStockService>(ws);
+                var db = Svc<Sayl.Core.Data.SaylDbContext>(ws);
+                var admin = await db.Users
+                    .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
                 await stock.ReceiveStockAsync(new DtoStockReceiveRequest
                 {
                     ProductId = 1,
                     BatchNumber = "HARNESS-" + DateTime.Now.Ticks,
                     Quantity = 500
-                });
+                }, admin?.UserId ?? 0);
             }
 
             await AuthCycle();
@@ -153,7 +156,7 @@ namespace consol_app
             // close any leftover open session from previous runs
             var existing = await sessions.GetOpenSessionByUserAsync(cashier.UserId);
             if (existing.IsSuccess && existing.Data != null)
-                await sessions.CloseSessionAsync(existing.Data.SessionId, 0);
+                await sessions.CloseSessionAsync(existing.Data.SessionId, 0, cashier.UserId);
 
             var open = await sessions.OpenSessionAsync(cashier.UserId, 100m);
             Check("open session (opening=100)", open.IsSuccess && open.Data > 0);
@@ -432,14 +435,14 @@ namespace consol_app
                 Console.WriteLine($"   summary: opening={summary.Data.OpeningAmount} sales={summary.Data.CashSales} " +
                     $"ret={summary.Data.CashReturns} in={summary.Data.CashIn} out={summary.Data.CashOut} expected={summary.Data.ExpectedCash}");
 
-                var closed = await sessions.CloseSessionAsync(sessionId, summary.Data.ExpectedCash);
+                var closed = await sessions.CloseSessionAsync(sessionId, summary.Data.ExpectedCash, cashier.UserId);
                 Check("close session Z", closed.IsSuccess, closed.Message);
 
                 var stored = await db.PosSessions.AsNoTracking().FirstAsync(p => p.SessionId == sessionId);
                 Check("stored ExpectedAmount matches drawer math", stored.ExpectedAmount == summary.Data.ExpectedCash,
                     $"db={stored.ExpectedAmount} calc={summary.Data.ExpectedCash}");
 
-                var reclose = await sessions.CloseSessionAsync(sessionId, 0);
+                var reclose = await sessions.CloseSessionAsync(sessionId, 0, cashier.UserId);
                 Check("double-close rejected", !reclose.IsSuccess);
             }
         }
@@ -453,9 +456,24 @@ namespace consol_app
             var checkout = Svc<clsCheckoutService>(s);
             var returns = Svc<clsReturnService>(s);
             var purchase = Svc<clsPurchaseService>(s);
+            var sessions = Svc<clsPosSessionService>(s);
             var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
             var admin = await db.Users.FirstAsync(u => u.Username == "admin");
             var cashier = await db.Users.FirstAsync(u => u.Username == "cashier1");
+
+            // B3: الاختبارات المالية تعتمد درجًا مفتوحًا حقيقيًا — جلسة الكاشير القديمة
+            // أُغلقت في CashDeskCycle، فنعيد فتح درج للمدير ونعيد توجيه sessionId إليه.
+            var acting = await sessions.GetOpenSessionByUserAsync(admin.UserId);
+            if (acting.IsSuccess && acting.Data != null)
+            {
+                sessionId = acting.Data.SessionId;
+            }
+            else
+            {
+                var newActing = await sessions.OpenSessionAsync(admin.UserId, 0m);
+                if (newActing.IsSuccess && newActing.Data > 0)
+                    sessionId = newActing.Data;
+            }
 
             // VULN-02: خصم مبلغ يتجاوز الإجمالي → صافٍ سالب «مدفوع من العدم»
             var overDiscount = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
@@ -732,6 +750,10 @@ namespace consol_app
                 Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 5m, Quantity = 1, BatchNumber = "ATK-ROLE-" + DateTime.Now.Ticks % 100000 } }
             });
             Check("ATTACK cashier purchase rejected", !cashierPurchase.IsSuccess, $"'{cashierPurchase.Message}'");
+
+            // B3: إغلاق درج الاختبار المفتوح لهذه الدورة ليبقى الهارنس قابلًا للتكرار
+            if (sessionId > 0)
+                await sessions.CloseSessionAsync(sessionId, 0m, admin.UserId);
         }
 
         // ───────────────── 6. Credit rules ─────────────────
@@ -1032,7 +1054,7 @@ namespace consol_app
                 Barcode = "TEST" + DateTime.Now.Ticks % 1000000000,
                 BasePrice = 10m, CostPrice = 5m, Type = "stock", ReorderLevel = 5,
                 Unit = "قطعة", IsActive = true
-            });
+            }, admin.UserId);
             Check("product create", created.IsSuccess && created.Data > 0, created.Message);
 
             if (!created.IsSuccess || created.Data <= 0) return;
@@ -1041,7 +1063,7 @@ namespace consol_app
             {
                 ProductId = created.Data, Name = "محدَّث اختبار", BasePrice = 12m,
                 CostPrice = 6m, Type = "stock", ReorderLevel = 3, Unit = "قطعة"
-            });
+            }, admin.UserId);
             Check("product update", upd.IsSuccess, upd.Message);
 
             var deact = await products.DeactivateProductAsync(created.Data, admin.UserId);

@@ -20,17 +20,23 @@ namespace Sayl.Core.Services
         private async Task<int> GetUserRoleValueAsync(int userId)
         {
             if (userId <= 0)
-                return 0;
-            var user = await _dbContext.Users.Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.UserId == userId);
-            return user?.Role.RoleValue ?? 0;
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
         }
 
         // ─────────────────────────────────────────────────
         // استلام مخزون: إنشاء/زيادة دفعة وتحديث المخزون
         // ─────────────────────────────────────────────────
-        public async Task<Result> ReceiveStockAsync(DtoStockReceiveRequest request)
+        public async Task<Result> ReceiveStockAsync(DtoStockReceiveRequest request, int actorUserId = 0)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
+                return Result.Fail("استلام المخزون يتطلب صلاحية شاشة المخزون.");
+
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
 

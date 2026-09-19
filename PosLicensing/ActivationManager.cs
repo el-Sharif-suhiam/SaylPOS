@@ -10,7 +10,7 @@ namespace PosLicensing
         private const string RegistryPath = @"SOFTWARE\Sayl\License";
         private const string ValueName = "Data";
 
-        internal static string PublicKeyXml = "<RSAKeyValue><Modulus>r0vh7zVhN/sQoh2yQ6J1XyRKRb7RCAQ3Ev/JTwd/ChECvZwyAArIsW8LHAztpqfw2EhTcO6nut0R3slG5TrqOiJRY7ZLUQLEl8u1ZX61GpLfSsXKR74iOuE7/wHoVLQHJsULYnVqvMVOAP7sdOJfUgbCbEEC4CezAWCQh64fd6k8I8Q7U+r++q2I4Xl96DQasJYsbNHZYWF48rdQwrwdv3LX48O/Yj8T4FkK1DLs7LJOUEyFqD2RKr3oQa9w6FdA0V2fYY1LIOkrkJ6idhsgOHieu+CFlJAmb9S56Y/b6+ejAi5oboXccUFeQkdvJemLFyuaDyxUbknMRfzKu14xDQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+        internal static string PublicKeyXml = "<RSAKeyValue><Modulus>oRTF2J1LgULwWHnd3LctxJVPPs5cHPpdCYcJDusopCj6X+GFS3iAPpBOPoIYLzvF7JXiILoABoJSp+yY7f8kMLXmKe4gx2UDl2XbWNVypXFUMoXSQGsrpReQU20/y/+OdOyV4Xs3n8HX8Zy5kn8+HJZNvIq7HxHuUcYNbZ3IzAmk9KzJ5V2UhP2YkZ0IUhxb8UrN8DVLNf9MNrJTLRxYnMgjSEEUIRJrLshz9OhMfI1aqEIyM6a3vjqSm0H48YQA51gjmTun81xiY2KFow2pnrTSydH9kUOe6tYIsn6XVWUJPSWkzpDy2/P66LcV0Wptvlbzzhj55JW0t3QcFNKbPQ==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
         public static string GetDeviceCode()
         {
@@ -44,9 +44,8 @@ namespace PosLicensing
                 string raw = key.GetValue(LastSeenValueName) as string;
                 if (!long.TryParse(raw, out long lastSeenTicks))
                 {
-                    // أول فحص — نسجل ونكمل
-                    key.SetValue(LastSeenValueName, DateTime.UtcNow.Ticks.ToString());
-                    return false;
+                    // تثبيت مفعَّل بلا مرساة = عبث (حذف القيمة لإحياء رخصة) — رفض
+                    return true;
                 }
 
                 var lastSeen = new DateTime(lastSeenTicks, DateTimeKind.Utc);
@@ -91,6 +90,12 @@ namespace PosLicensing
             }
 
             SaveStoredLicense(licenseText.Trim());
+            try
+            {
+                using RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath);
+                key.SetValue(LastSeenValueName, DateTime.UtcNow.Ticks.ToString());
+            }
+            catch { }
             return true;
         }
 

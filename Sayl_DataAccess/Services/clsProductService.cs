@@ -16,6 +16,17 @@ namespace Sayl.Core.Services
             _dbContext = dbContext;
         }
 
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
+        }
+
         private static readonly string[] ValidTypes = { "stock", "service", "manufactured" };
 
         public async Task<List<DtoProduct>> GetProductsListAsync(string search = "", string? type = null, bool includeInactive = false, int take = 0)
@@ -183,8 +194,12 @@ namespace Sayl.Core.Services
                 .ToListAsync();
         }
 
-        public async Task<Result<int>> AddNewProductAsync(DtoProduct dtoProduct)
+        public async Task<Result<int>> AddNewProductAsync(DtoProduct dtoProduct, int actorUserId = 0)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+                return Result<int>.Fail("إضافة المنتجات تتطلب صلاحية شاشة المنتجات.");
+
             if (string.IsNullOrWhiteSpace(dtoProduct.Name))
                 return Result<int>.Fail("اسم المنتج مطلوب.");
 
@@ -245,8 +260,12 @@ namespace Sayl.Core.Services
             }
         }
 
-        public async Task<Result> UpdateProductAsync(DtoProduct dtoProduct)
+        public async Task<Result> UpdateProductAsync(DtoProduct dtoProduct, int actorUserId = 0)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+                return Result.Fail("تعديل المنتجات يتطلب صلاحية شاشة المنتجات.");
+
             if (dtoProduct.ProductId <= 0)
                 return Result.Fail("معرف المنتج غير صالح.");
 

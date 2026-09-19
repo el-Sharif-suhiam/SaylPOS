@@ -1,3 +1,4 @@
+using System.Text;
 using Common.DTOs;
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,10 +20,86 @@ namespace Sayl.UI.Forms
         private TextBox _txtCostPrice = null!;
         private TextBox _txtReorder = null!;
 
+        // ═══════════════════════════════════════════════════════════════
+        // 📖 التقاط المسح — بسيط بلا تعقيد:
+        //  1) القارئ "لوحة مفاتيح" — كل حرف يصل يُحفظ فورًا في _scanBuf
+        //     ولا يصل لأي حقل (لا تسريب أصلًا).
+        //  2) عند مرور 500ms دون حرف جديد = القارئ انتهى من إرسال الكود.
+        //  3) عندها فقط يُملأ حقل الباركود بالقيمة كاملة — بلا Enter.
+        //     الكتابة اليدوية البطيئة تُعرض في حقلها كالمعتاد.
+        // ═══════════════════════════════════════════════════════════════
+        private const int ManualConfirmMs = 80;  // مهلة التفريق: حرف واحد بطيء = كتابة يدوية
+        private const int ReaderDoneMs = 500;    // فجوة تأكيد انتهاء القارئ
+
+        private readonly StringBuilder _scanBuf = new();
+        private Control? _heldControl;
+        private readonly System.Windows.Forms.Timer _burstTimer = new() { Interval = ManualConfirmMs };
+        private readonly System.Windows.Forms.Timer _doneTimer = new() { Interval = ReaderDoneMs };
+
         public ProductEditForm(DtoProduct? existing)
         {
             _existing = existing;
             BuildUi();
+            KeyPreview = true;
+            _burstTimer.Tick += (_, _) => ReplayManual();
+            _doneTimer.Tick += (_, _) => CommitScan();
+        }
+
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            base.OnKeyPress(e);
+            if (char.IsControl(e.KeyChar)) return;
+
+            _scanBuf.Append(e.KeyChar);          // يُخزَّن كاملًا قبل أي شيء
+            e.Handled = true;                    // لا يصل لأي حقل — لا تسريب
+            if (_scanBuf.Length == 1)
+            {
+                _heldControl = ActiveControl;
+                _burstTimer.Stop();
+                _burstTimer.Start();
+            }
+            else
+            {
+                _burstTimer.Stop();              // نبضة قارئ مؤكدة — تابع الجمع
+                _doneTimer.Stop();
+                _doneTimer.Start();
+            }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            // Enter الماسح الإضافي لا يضغط «حفظ» أثناء تجميع الكود
+            if (keyData == Keys.Enter && _scanBuf.Length > 0)
+                return true;
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void ReplayManual()
+        {
+            _burstTimer.Stop();
+            if (_scanBuf.Length >= 2) return;    // نبضة قارئ — يديرها CommitScan
+
+            if (_heldControl is TextBox tb)
+            {
+                string s = _scanBuf.ToString();
+                int pos = tb.SelectionStart;
+                tb.Text = tb.Text.Insert(pos, s);
+                tb.SelectionStart = pos + s.Length;
+            }
+            _scanBuf.Clear();
+            _heldControl = null;
+        }
+
+        private void CommitScan()
+        {
+            _doneTimer.Stop();
+            if (_scanBuf.Length >= 2)            // اكتمل الكود: القارئ انتهى
+            {
+                _txtBarcode.Text = _scanBuf.ToString();
+                _txtBarcode.Focus();
+            }
+            _scanBuf.Clear();
+            _heldControl = null;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -58,6 +135,7 @@ namespace Sayl.UI.Forms
             // * = إلزامي (الاسم وسعر البيع يتحقق منهما SaveAsync).
             _txtName = MakeField(AppLang.T("Products.Edit.Name"), x, 58, w, _existing?.Name ?? "");
             _txtBarcode = MakeField(AppLang.T("Products.Edit.Barcode"), x, 116, w, _existing?.Barcode ?? "");
+            _txtBarcode.MaxLength = 50;
             // ── صف مزدوج: الوحدة (يمين 30..220) والنوع قائمة (يسار 240..430) ──
             _txtUnit = MakeField(AppLang.T("Products.Edit.Unit"), x, 174, 190, _existing?.Unit ?? "");
 
@@ -141,18 +219,25 @@ namespace Sayl.UI.Forms
                 IsActive = _existing?.IsActive ?? true
             };
 
+            int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+            if (actorUserId <= 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.NoUser"));
+                return;
+            }
+
             Result result;
             using (var scope = Program.Services.CreateScope())
             {
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
                 if (_existing == null)
                 {
-                    var added = await productService.AddNewProductAsync(dto);
+                    var added = await productService.AddNewProductAsync(dto, actorUserId: actorUserId);
                     result = added.IsSuccess ? Result.Ok(AppLang.T("Products.Msg.Saved")) : Result.Fail(added.Message);
                 }
                 else
                 {
-                    result = await productService.UpdateProductAsync(dto);
+                    result = await productService.UpdateProductAsync(dto, actorUserId: actorUserId);
                 }
             }
 

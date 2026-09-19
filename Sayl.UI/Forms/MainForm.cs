@@ -80,6 +80,10 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+                string lastBackup = await settings.GetAsync(clsSettingsService.KeyLastBackupDate);
+                if (lastBackup == AppClock.NowLocal.Date.ToString("yyyy-MM-dd"))
+                    return; // نسخة اليوم قائمة — لا نحجب الإغلاق بنسخة مكررة
+
                 string folder = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
                     clsBackupService.DefaultBackupFolder);
 

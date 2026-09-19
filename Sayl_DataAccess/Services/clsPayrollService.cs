@@ -1,6 +1,7 @@
 using Common.DTOs;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -32,6 +33,17 @@ namespace Sayl.Core.Services
         {
             _dbContext = dbContext;
             _fiscalYear = fiscalYear;
+        }
+
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
         }
 
         public const string SalaryExpenseCategory = "رواتب";
@@ -84,6 +96,10 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result<int>> GeneratePayrollsAsync(DateOnly periodFrom, DateOnly periodTo, int actorUserId)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+                return Result<int>.Fail("توليد الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+
             if (periodTo < periodFrom)
                 return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
 
@@ -196,6 +212,10 @@ namespace Sayl.Core.Services
         public async Task<Result> UpdatePayrollAsync(int payrollId, decimal workedUnits, decimal holidayUnits,
             decimal deductions, decimal additions, string? notes, int actorUserId)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+                return Result.Fail("تعديل الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+
             if (workedUnits < 0 || holidayUnits < 0 || deductions < 0 || additions < 0)
                 return Result.Fail("القيم يجب أن تكون صفراً أو أكثر.");
 
@@ -259,6 +279,10 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result> PayPayrollAsync(int payrollId, int actorUserId)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+                return Result.Fail("صرف الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+
             var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
             if (record == null)
                 return Result.Fail("الكشف غير موجود.");
@@ -268,6 +292,9 @@ namespace Sayl.Core.Services
 
             if (record.Net <= 0)
                 return Result.Fail("الصافي يجب أن يكون أكبر من صفر قبل الصرف (قيد المصروفات يرفض صفراً).");
+
+            if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(record.PeriodTo))
+                return Result.Fail("كشف من سنة مالية مغلقة — لا يمكن صرفه (مؤرشف).");
 
             var employee = await _dbContext.Employees.FindAsync(record.EmployeeId);
             if (employee == null)
@@ -329,6 +356,10 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result> UnpayPayrollAsync(int payrollId, int actorUserId)
         {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+                return Result.Fail("عكس صرف الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+
             var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
             if (record == null)
                 return Result.Fail("الكشف غير موجود.");

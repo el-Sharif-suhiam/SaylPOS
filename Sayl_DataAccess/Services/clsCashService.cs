@@ -1,5 +1,6 @@
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -16,8 +17,24 @@ namespace Sayl.Core.Services
             _dbContext = dbContext;
         }
 
-        public async Task<Result> AddMovementAsync(int sessionId, char movementType, decimal amount, string reason, int userId)
+        private async Task<int> GetUserRoleValueAsync(int userId)
         {
+            if (userId <= 0)
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
+        }
+
+        public async Task<Result> AddMovementAsync(int sessionId, char movementType, decimal amount, string reason, int userId, int? actorUserId = null)
+        {
+            int effectiveActorUserId = actorUserId ?? userId;
+            int actorRole = await GetUserRoleValueAsync(effectiveActorUserId);
+            if (actorRole < 0)
+                return Result.Fail("لا يمكن تسجيل حركة نقد: مستخدم غير صالح.");
+
             if (movementType != 'I' && movementType != 'O')
                 return Result.Fail("نوع الحركة غير صالح.");
 
@@ -31,9 +48,13 @@ namespace Sayl.Core.Services
             try
             {
                 // فحص الجلسة داخل المعاملة: يمنع قيد حركة على جلسة تُغلق بالتوازي الآن
-                var session = await _dbContext.PosSessions.FindAsync(sessionId);
+                var session = await _dbContext.PosSessions.AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.SessionId == sessionId);
                 if (session == null || session.Status != enPosSessionStatusType.open)
                     return Result.Fail("الجلسة غير موجودة أو مغلقة.");
+
+                if (session.UserId != effectiveActorUserId)
+                    return Result.Fail("لا يمكنك تسجيل حركة نقد في جلسة مستخدم آخر.");
 
                 _dbContext.CashMovements.Add(new CashMovement
                 {
@@ -41,13 +62,13 @@ namespace Sayl.Core.Services
                     MovementType = movementType,
                     Amount = amount,
                     Reason = reason.Trim(),
-                    UserId = userId,
+                    UserId = effectiveActorUserId,
                     CreatedAt = DateTime.UtcNow
                 });
 
                 _dbContext.SystemLogs.Add(new SystemLog
                 {
-                    UserId = userId,
+                    UserId = effectiveActorUserId,
                     Action = movementType == 'I' ? "CashIn" : "CashOut",
                     Details = $"مبلغ: {amount:N2} — السبب: {reason.Trim()} — جلسة #{sessionId}",
                     CreatedAt = DateTime.UtcNow

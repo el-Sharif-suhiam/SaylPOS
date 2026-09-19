@@ -139,11 +139,18 @@ namespace Sayl.UI.Forms
             if (!confirmed)
                 return;
 
+            int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+            if (actorUserId <= 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.NoUser"));
+                return;
+            }
+
             Result result;
             using (var scope = Program.Services.CreateScope())
             {
                 var posService = scope.ServiceProvider.GetRequiredService<clsPosSessionService>();
-                result = await posService.CloseSessionAsync(_sessionId, counted);
+                result = await posService.CloseSessionAsync(_sessionId, counted, actorUserId: actorUserId);
             }
 
             UiHelpers.ShowResult(this, result, AppLang.T("CloseSession.Msg.Closed"));

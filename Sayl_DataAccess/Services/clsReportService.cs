@@ -20,7 +20,7 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         public async Task<Result<DailySalesVM>> GetDailySalesAsync(DateOnly date)
         {
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);
+            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue).AddHours(-3);
             DateTime dayEnd = dayStart.AddDays(1);
 
             var invoicesQuery = _dbContext.Invoices
@@ -104,8 +104,8 @@ namespace Sayl.Core.Services
             if (fromDate > toDate)
                 return Result<ProfitSummaryVM>.Fail("تاريخ البداية يجب أن يكون قبل تاريخ النهاية.");
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue);
+            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
             decimal salesRevenue = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
@@ -131,11 +131,19 @@ namespace Sayl.Core.Services
                 .Where(ii => saleInvoiceIds.Contains(ii.InvoiceId))
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
 
+            decimal returnsCogs = await _dbContext.InvoiceItems
+                .Where(ii => (ii.Invoice.Type == enInvoicesType.customer_return || ii.Invoice.Type == enInvoicesType.supplier_return)
+                         && ii.Invoice.Status == enInvoicesStatus.completed
+                         && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
+
+            decimal cogsNet = cogs - returnsCogs;
+
             decimal expenses = await _dbContext.Expenses
                 .Where(e => e.ExpenseDate >= fromDate && e.ExpenseDate <= toDate)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
-            decimal grossProfit = netRevenue - cogs;
+            decimal grossProfit = netRevenue - cogsNet;
             decimal netProfit = grossProfit - expenses;
 
             var vm = new ProfitSummaryVM
@@ -145,7 +153,7 @@ namespace Sayl.Core.Services
                 SalesRevenue = salesRevenue,
                 ReturnsAmount = returnsAmount,
                 NetRevenue = netRevenue,
-                COGS = cogs,
+                COGS = cogsNet,
                 GrossProfit = grossProfit,
                 Expenses = expenses,
                 NetProfit = netProfit
@@ -168,11 +176,11 @@ namespace Sayl.Core.Services
 
             var periodStarts = BuildPeriodStarts(fromDate, toDate, reportType);
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue);
+            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
             // ── لفّ واحد على الفواتير المكتملة (بيع + مرتجع بيع) في النطاق ──
-            var invoices = await _dbContext.Invoices
+            var invoices = (await _dbContext.Invoices
                 .Where(i => i.CreatedAt >= start && i.CreatedAt <= end
                          && i.Status == enInvoicesStatus.completed
                          && (i.Type == enInvoicesType.sale || i.Type == enInvoicesType.customer_return))
@@ -181,7 +189,7 @@ namespace Sayl.Core.Services
                     i.InvoiceId,
                     i.Type,
                     i.NetAmount,
-                    Day = i.CreatedAt!.Value.Date,
+                    i.CreatedAt,
                     i.PartyId,
                     i.PartyType,
                     i.TotalAmount,
@@ -190,7 +198,22 @@ namespace Sayl.Core.Services
                     UserName = i.User.Username,
                     PartyName = i.Party != null ? i.Party.Name : null
                 })
-                .ToListAsync();
+                .ToListAsync())
+                .Select(x => new
+                {
+                    x.InvoiceId,
+                    x.Type,
+                    x.NetAmount,
+                    Day = ProgramDay(x.CreatedAt!.Value),
+                    x.PartyId,
+                    x.PartyType,
+                    x.TotalAmount,
+                    x.DiscountAmount,
+                    x.TaxAmount,
+                    x.UserName,
+                    x.PartyName
+                })
+                .ToList();
 
             var invoiceIds = invoices.Select(i => i.InvoiceId).ToList();
 
@@ -245,10 +268,7 @@ namespace Sayl.Core.Services
                     ? periodStarts[idx + 1].AddDays(-1)
                     : toDate;
 
-                DateTime pStartD = pFrom.ToDateTime(TimeOnly.MinValue);
-                DateTime pEndD = pTo.ToDateTime(TimeOnly.MaxValue);
-
-                var periodInvoices = invoices.Where(i => i.Day >= pStartD && i.Day <= pEndD).ToList();
+                var periodInvoices = invoices.Where(i => i.Day >= pFrom && i.Day <= pTo).ToList();
 
                 decimal salesRev = periodInvoices.Where(i => i.Type == enInvoicesType.sale).Sum(i => i.NetAmount);
                 decimal returnsRev = periodInvoices.Where(i => i.Type == enInvoicesType.customer_return).Sum(i => i.NetAmount);
@@ -311,7 +331,7 @@ namespace Sayl.Core.Services
                             DiscountAmount = inv.DiscountAmount,
                             TaxAmount = inv.TaxAmount,
                             NetAmount = inv.NetAmount,
-                            CreatedAt = inv.Day
+                            CreatedAt = inv.Day.ToDateTime(TimeOnly.MinValue)
                         };
                         invoiceDetails.Add(detail);
                     }
@@ -320,7 +340,7 @@ namespace Sayl.Core.Services
 
             // ── تجميع الإيرادات اليومية (بدل سرد كل فاتورة على حدة) ──
             var dailyLines = invoices
-                .GroupBy(i => DateOnly.FromDateTime(i.Day))
+                .GroupBy(i => i.Day)
                 .Select(g => new PeriodDailyLineVM
                 {
                     Date = g.Key,
@@ -366,12 +386,12 @@ namespace Sayl.Core.Services
             // دفعات الجلسات (نقدي income/outcome) دفعة واحدة
             var sessionPayments = await _dbContext.Payments
                 .Where(p => p.InvoiceId != null && sessionInvoiceIds.Contains(p.InvoiceId.Value))
-                .Select(p => new { p.InvoiceId, p.PaymentMethod, p.Type, p.Amount })
+                .Select(p => new { p.InvoiceId, p.SessionId, p.PaymentMethod, p.Type, p.Amount })
                 .ToListAsync();
 
             var payBySession = sessionPayments
-                .Where(p => p.InvoiceId!.HasValue && invoiceSessionMap.ContainsKey(p.InvoiceId!.Value))
-                .GroupBy(p => invoiceSessionMap[p.InvoiceId!.Value])
+                .Where(p => p.InvoiceId.HasValue)
+                .GroupBy(p => p.SessionId ?? invoiceSessionMap[p.InvoiceId!.Value])
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             // حركات النقد (قبض/صرف) لكل الجلسات دفعة واحدة
@@ -464,6 +484,9 @@ namespace Sayl.Core.Services
             return Result<PeriodicReportVM>.Ok(report);
         }
 
+        private static DateOnly ProgramDay(DateTime startUtc)
+            => DateOnly.FromDateTime(startUtc.AddHours(3));
+
         /// <summary>يقسّم النطاق الزمني إلى بدايات فترات متساوية حسب النوع (شهر / ربع / نصف / سنة).</summary>
         private static List<DateOnly> BuildPeriodStarts(DateOnly fromDate, DateOnly toDate, enPeriodReportType reportType)
         {
@@ -494,8 +517,8 @@ namespace Sayl.Core.Services
             if (limit <= 0)
                 limit = 10;
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue);
+            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
             var saleInvoiceIds = _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
@@ -525,11 +548,11 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         public async Task<Result<DashboardSummaryVM>> GetDashboardSummaryAsync(DateOnly date)
         {
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue);
+            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue).AddHours(-3);
             DateTime dayEnd = dayStart.AddDays(1);
 
             DateOnly monthStartDate = new DateOnly(date.Year, date.Month, 1);
-            DateTime mtdStart = monthStartDate.ToDateTime(TimeOnly.MinValue);
+            DateTime mtdStart = monthStartDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
 
             // ── اليوم ──
             var todaySales = await _dbContext.Invoices
@@ -580,11 +603,19 @@ namespace Sayl.Core.Services
                 .Where(ii => mtdSaleInvoiceIds.Contains(ii.InvoiceId))
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
 
+            decimal returnsCogs = await _dbContext.InvoiceItems
+                .Where(ii => (ii.Invoice.Type == enInvoicesType.customer_return || ii.Invoice.Type == enInvoicesType.supplier_return)
+                         && ii.Invoice.Status == enInvoicesStatus.completed
+                         && ii.Invoice.CreatedAt >= mtdStart && ii.Invoice.CreatedAt < dayEnd)
+                .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
+
+            decimal cogsNet = cogs - returnsCogs;
+
             decimal monthExpenses = await _dbContext.Expenses
                 .Where(e => e.ExpenseDate >= monthStartDate && e.ExpenseDate <= date)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
-            decimal monthGrossProfit = monthNetSales - cogs;
+            decimal monthGrossProfit = monthNetSales - cogsNet;
             decimal monthNetProfit = monthGrossProfit - monthExpenses;
 
             // ── المخزون والمنتجات ──
@@ -738,7 +769,7 @@ namespace Sayl.Core.Services
             if (withinDays <= 0)
                 withinDays = 90;
 
-            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            DateOnly today = ProgramDay(DateTime.UtcNow);
             DateOnly until = today.AddDays(withinDays);
 
             var result = await _dbContext.Batches
@@ -935,6 +966,16 @@ namespace Sayl.Core.Services
                 .Select(g => new { InvoiceId = g.Key, Paid = g.Sum(p => p.Amount) })
                 .ToDictionaryAsync(x => x.InvoiceId, x => x.Paid);
 
+            var openInvoiceIds = openInvoices.Select(i => i.InvoiceId).ToList();
+            var returnNetByInvoice = await _dbContext.Invoices
+                .Where(i => i.Status == enInvoicesStatus.completed
+                         && (i.Type == enInvoicesType.customer_return || i.Type == enInvoicesType.supplier_return)
+                         && i.OriginalInvoiceId != null
+                         && openInvoiceIds.Contains(i.OriginalInvoiceId.Value))
+                .GroupBy(i => i.OriginalInvoiceId!.Value)
+                .Select(g => new { InvoiceId = g.Key, Net = g.Sum(x => x.NetAmount) })
+                .ToDictionaryAsync(x => x.InvoiceId, x => x.Net);
+
             // أسماء العملاء
             var customerNames = await _dbContext.Parties
                 .Where(p => p.PartyType == 'C')
@@ -951,7 +992,8 @@ namespace Sayl.Core.Services
             foreach (var inv in openInvoices)
             {
                 decimal paid = paidByInvoice.TryGetValue(inv.InvoiceId, out var p) ? p : 0;
-                decimal remaining = inv.NetAmount - paid;
+                decimal returned = returnNetByInvoice.TryGetValue(inv.InvoiceId, out var rn) ? rn : 0m;
+                decimal remaining = inv.NetAmount - paid + returned;
                 if (remaining <= 0) continue;
 
                 int ageDays = asOf.DayNumber - DateOnly.FromDateTime(inv.CreatedAt!.Value).DayNumber;
@@ -1012,12 +1054,14 @@ namespace Sayl.Core.Services
 
             var cashSales = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income && p.PaymentMethod == "cash"
-                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
+                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate
+                          && (p.InvoiceId == null || p.Invoice!.Type != enInvoicesType.supplier_return))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             var cashReturns = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.outcome && p.PaymentMethod == "cash"
-                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
+                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate
+                          && p.InvoiceId != null && p.Invoice!.Type == enInvoicesType.customer_return)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             var customerPayments = await _dbContext.Payments

@@ -1416,6 +1416,7 @@ namespace Sayl.UI.Forms
                 {
                     // أُلغي الدفع — شاشة الزبون تعود للعرض العادي
                     NotifyCustomerDisplay(checkoutRequested: false);
+                    _txtSearch.Focus();
                     return;
                 }
                 payments = payForm.PaymentsList;
@@ -1466,6 +1467,7 @@ namespace Sayl.UI.Forms
                 UiHelpers.ShowInfo(this, AppLang.T("Pos.Msg.Suspended", result.Data));
                 ClearCart();
                 await RefreshStockAsync();
+                _txtSearch.Focus(); // جلسة الماسح جاهزة مباشرة بعد التعليق
                 return;
             }
 

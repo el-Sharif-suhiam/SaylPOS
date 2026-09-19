@@ -238,52 +238,83 @@ namespace Sayl.Core.Services
             if (policyError != null)
                 return Result<UserVM>.Fail(policyError);
 
-            if (await _dbContext.Users.AnyAsync(u => u.Username == username))
-                return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
-
-            var adminRole = await _dbContext.Roles
-                .FirstOrDefaultAsync(r => r.RoleValue == AppPermissions.AdminRoleValue && r.IsActive);
-            if (adminRole == null)
-                return Result<UserVM>.Fail("دور المدير غير متوفر — لا يمكن إنشاء حساب المدير.");
-
-            var owner = new User
-            {
-                Username = username,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-                RoleId = adminRole.RoleId,
-                EmployeeId = null
-            };
-
-            _dbContext.Users.Add(owner);
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                await _dbContext.Database.ExecuteSqlRawAsync(
+                    "SELECT TOP (1) SettingKey FROM Settings WITH (UPDLOCK, HOLDLOCK, TABLOCKX)");
+
+                bool anyActive = await _dbContext.Users.AnyAsync(u => u.IsActive);
+                if (anyActive)
+                    return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
+
+                bool exists = await _dbContext.Users.AnyAsync(u => u.Username == username);
+                if (exists)
+                    return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
+
+                var adminRole = await _dbContext.Roles
+                    .FirstOrDefaultAsync(r => r.RoleValue == AppPermissions.AdminRoleValue && r.IsActive);
+                if (adminRole == null)
+                    return Result<UserVM>.Fail("دور المدير غير متوفر — لا يمكن إنشاء حساب المدير.");
+
+                var owner = new User
+                {
+                    Username = username,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+                    RoleId = adminRole.RoleId,
+                    EmployeeId = null
+                };
+
+                _dbContext.Users.Add(owner);
                 await _dbContext.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                clsAudit.Log(_dbContext, owner.UserId, "OwnerSetup",
+                    $"إنشاء حساب المدير الأول '{owner.Username}'");
+                try
+                {
+                    await _dbContext.SaveChangesAsync();
+                }
+                catch
+                {
+                    // فشل سجل التدقيق لا يمنع إنشاء المالك
+                }
+
+                return Result<UserVM>.Ok(new UserVM
+                {
+                    UserId = owner.UserId,
+                    UserName = owner.Username,
+                    RoleId = adminRole.RoleId,
+                    RoleName = adminRole.Name,
+                    RoleValue = adminRole.RoleValue,
+                    IsActive = true
+                });
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Users_Username"))
             {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
                 return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
             }
-
-            clsAudit.Log(_dbContext, owner.UserId, "OwnerSetup",
-                $"إنشاء حساب المدير الأول '{owner.Username}'");
-            try
+            catch (DbUpdateException ex)
             {
-                await _dbContext.SaveChangesAsync();
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                return Result<UserVM>.Fail($"فشل إنشاء حساب المدير: {ex.Message}");
             }
-            catch
-            {
-                // فشل سجل التدقيق لا يمنع إنشاء المالك
-            }
+        }
 
-            return Result<UserVM>.Ok(new UserVM
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)
+        {
+            for (Exception? e = ex; e != null; e = e.InnerException)
             {
-                UserId = owner.UserId,
-                UserName = owner.Username,
-                RoleId = adminRole.RoleId,
-                RoleName = adminRole.Name,
-                RoleValue = adminRole.RoleValue,
-                IsActive = true
-            });
+                if (e is Microsoft.Data.SqlClient.SqlException sql
+                    && (sql.Number == 2601 || sql.Number == 2627
+                        || sql.Message.Contains(constraintName, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+            return false;
         }
 
         // VULN-43: كان بلا سياسة كلمة مرور إطلاقًا (يقبل "a") — كود ميت لكنه
@@ -442,9 +473,10 @@ namespace Sayl.Core.Services
                 return Result<UserVM>.Fail("اسم المستخدم وكلمة المرور مطلوبان.");
 
             // قفل الحساب بعد المحاولات الفاشلة المتكررة
+            string lockoutKey = NormalizeLockoutKey(username);
             lock (_failedLogins)
             {
-                if (_failedLogins.TryGetValue(username, out var state) && state.LockUntil > DateTime.UtcNow)
+                if (_failedLogins.TryGetValue(lockoutKey, out var state) && state.LockUntil > DateTime.UtcNow)
                 {
                     int remaining = (int)Math.Ceiling((state.LockUntil - DateTime.UtcNow).TotalMinutes);
                     return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {remaining} دقيقة.");
@@ -487,7 +519,7 @@ namespace Sayl.Core.Services
 
             lock (_failedLogins)
             {
-                _failedLogins.Remove(username);
+                _failedLogins.Remove(lockoutKey);
             }
 
             // VULN-29: سجل الدخول best-effort — كان فشل كتابة السجل يرفض
@@ -523,14 +555,18 @@ namespace Sayl.Core.Services
 
         private static void RegisterFailedLogin(string username)
         {
+            string key = NormalizeLockoutKey(username);
             lock (_failedLogins)
             {
-                var (count, _) = _failedLogins.TryGetValue(username, out var s) ? s : (0, DateTime.MinValue);
+                var (count, _) = _failedLogins.TryGetValue(key, out var s) ? s : (0, DateTime.MinValue);
                 count++;
                 var lockUntil = count >= MaxLoginAttempts ? DateTime.UtcNow.AddMinutes(LockMinutes) : DateTime.MinValue;
-                _failedLogins[username] = (count >= MaxLoginAttempts ? 0 : count, lockUntil);
+                _failedLogins[key] = (count >= MaxLoginAttempts ? 0 : count, lockUntil);
             }
         }
+
+        private static string NormalizeLockoutKey(string username)
+            => username?.ToUpperInvariant() ?? string.Empty;
 
 
         public async Task<Result> LogoutAsync(int userId)
