@@ -598,7 +598,8 @@ CREATE INDEX IX_Batches_BatchNumber ON Batches(BatchNumber);
 CREATE INDEX IX_Inventory_QuantityAvailable ON Inventory(QuantityAvailable);
 
 -- Invoices 
-CREATE INDEX IX_Invoices_Type_Status ON Invoices(Type, Status);
+-- C5: مؤشر مُغطي — كان (Type, Status) بلا CreatedAt وشاشة الفواتير تصفّح بالتاريخ دائمًا
+CREATE INDEX IX_Invoices_Type_Status_CreatedAt ON Invoices(Type, Status, CreatedAt);
 CREATE INDEX IX_Invoices_PartyType_PartyId ON Invoices(PartyType, PartyId);
 CREATE INDEX IX_Invoices_UserId ON Invoices(UserId);
 CREATE INDEX IX_Invoices_SessionId ON Invoices(SessionId);

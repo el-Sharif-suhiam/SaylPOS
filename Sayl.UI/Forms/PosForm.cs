@@ -1186,16 +1186,36 @@ namespace Sayl.UI.Forms
 // الفتح وبعد كل بيع/مرتجع/استلام، وهي مصدر «سقف الكمية» لأزرار +/−
 // وللكمية المكتوبة في السطر. (مسار الإضافة نفسه يعيد قراءة القاعدة
 // لحظيًا في AddToCartAsync — اللقطة هنا للشاشة والأزرار فقط.)
-        private async Task RefreshStockAsync()
+        // کارد: RefreshStockAsync: لقطة أرصدة المخزون للذاكرة (_stockByProduct:
+// معرف → «متاح صافٍ» = QuantityAvailable − QuantityReserved — محجوز
+// المعلّقات يخصم من السقف حتى لا نبيع ما هو محجوز أصلًا). تُقرأ عند
+// الفتح وبعد كل بيع/مرتجع/استلام، وهي مصدر «سقف الكمية» لأزرار +/−
+// وللكمية المكتوبة في السطر. (مسار الإضافة نفسه يعيد قراءة القاعدة
+// لحظيًا في AddToCartAsync — اللقطة هنا للشاشة والأزرار فقط.)
+// C1: بعد بيع/تعليق تُمرَّر أصناف السلة الملموسة فقط (productIds) —
+// استعلام IN محدود بدل نقل الكتالوج كاملًا مع كل صفقة.
+        private async Task RefreshStockAsync(params int[] productIds)
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var reports = scope.ServiceProvider.GetRequiredService<clsReportService>();
-                var result = await reports.GetInventoryStatusAsync();
+                var result = await reports.GetInventoryStatusAsync(productIds: productIds.Length > 0 ? productIds : null);
                 if (result.IsSuccess && result.Data != null)
-                    _stockByProduct = result.Data.ToDictionary(x => x.ProductId,
-                        x => Math.Max(0, x.QuantityAvailable - x.QuantityReserved));
+                {
+                    if (productIds.Length == 0)
+                    {
+                        // فتح كامل للشاشة — لقطة جديدة كاملة
+                        _stockByProduct = result.Data.ToDictionary(x => x.ProductId,
+                            x => Math.Max(0, x.QuantityAvailable - x.QuantityReserved));
+                    }
+                    else
+                    {
+                        // C1: بعد بيع/تعليق — تحديث أصناف السلة الملموسة فقط
+                        foreach (var x in result.Data)
+                            _stockByProduct[x.ProductId] = Math.Max(0, x.QuantityAvailable - x.QuantityReserved);
+                    }
+                }
             }
             catch
             {
@@ -1465,8 +1485,10 @@ namespace Sayl.UI.Forms
             if (suspend)
             {
                 UiHelpers.ShowInfo(this, AppLang.T("Pos.Msg.Suspended", result.Data));
+                // C1: أزلنسل أصناف السلة قبل المسح — نُحدّثها وحدها لا الكتالوج كاملًا
+                int[] soldIds = _cart.Select(i => i.ProductId).Distinct().ToArray();
                 ClearCart();
-                await RefreshStockAsync();
+                await RefreshStockAsync(soldIds);
                 _txtSearch.Focus(); // جلسة الماسح جاهزة مباشرة بعد التعليق
                 return;
             }
@@ -1486,8 +1508,10 @@ namespace Sayl.UI.Forms
             }
             _autoPrintedThisSale = false; // تصفير للفاتورة القادمة
 
+            // C1: أزلنسل أصناف السلة قبل المسح — نُحدّثها وحدها لا الكتالوج كاملًا
+            int[] soldIdsForSale = _cart.Select(i => i.ProductId).Distinct().ToArray();
             ClearCart();
-            await RefreshStockAsync();
+            await RefreshStockAsync(soldIdsForSale);
             _txtSearch.Focus(); // الجلسة التالية: الماسح جاهز فورًا
         }
 

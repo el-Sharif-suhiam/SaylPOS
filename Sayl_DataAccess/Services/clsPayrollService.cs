@@ -115,8 +115,17 @@ namespace Sayl.Core.Services
             if (employees.Count == 0)
                 return Result<int>.Fail("لا يوجد موظفون لتوليد كشوف.");
 
+            // C3: موجودات الفترة والعطل الرسمية تُسحب مرة واحدة لا لكل موظف —
+            // وكانت CountHolidaysInRangeAsync تقرأ كل العطل من القاعدة لكل موظف يومي.
+            var existingForPeriod = (await _dbContext.PayrollRecords
+                .Where(r => r.PeriodFrom == periodFrom && r.PeriodTo == periodTo)
+                .Select(r => r.EmployeeId)
+                .ToListAsync()).ToHashSet();
+
+            var holidays = await _dbContext.OfficialHolidays.ToListAsync();
+
             // الفهرس الفريد UQ_PayrollRecords_Employee_Period يمنع التكرار حتى مع طلبين متوازيين؛
-            // نلتقطه ونتجاوز الموظف بدل فشل العملية كاملة
+            // نفحص الموجود مسبقًا (idempotent) ونحفظ مرة واحدة بعد الحلقة (لا معاملة لكل موظف)
             int created = 0;
             foreach (var emp in employees)
             {
@@ -129,6 +138,9 @@ namespace Sayl.Core.Services
                     to = emp.ResignDate.Value;
                 if (to < from)
                     continue; // لم يُعيَّن بعد أو استقال قبل الفترة
+
+                if (existingForPeriod.Contains(emp.EmployeeId))
+                    continue; // كشف لهذه الفترة موجود (idempotent)
 
                 decimal rate = emp.Salary ?? 0;
                 decimal workedUnits = 0, holidayUnits = 0, gross = 0;
@@ -147,7 +159,7 @@ namespace Sayl.Core.Services
                     case enSalaryType.daily:
                     {
                         // الإجازات الرسمية داخل نطاق عمله تُحسب أيامًا مدفوعة
-                        holidayUnits = await CountHolidaysInRangeAsync(from, to);
+                        holidayUnits = CountHolidaysInRange(holidays, from, to);
 
                         // اقتراح أيام العمل: كل أيام النطاق عدا الجمعة والسبت (عطلة أسبوعية افتراضية)
                         // — المحاسب يرى قيمة منطقية يعدّلها (غياب/استئذان) بدل البدء من صفر
@@ -183,19 +195,7 @@ namespace Sayl.Core.Services
                 };
 
                 _dbContext.PayrollRecords.Add(record);
-                try
-                {
-                    await _dbContext.SaveChangesAsync();
-                    created++;
-                }
-                catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_PayrollRecords_Employee_Period"))
-                {
-                    // كشف موجود لهذه الفترة (تزامن أو إعادة توليد) — نتجاوز.
-                    // VULN-11: كان catch بلا فلتر يبتلع كل أخطاء القاعدة
-                    // (CHECK/FK/مهلة) كـ«موجود مسبقًا» — كشوف تختفي بصمت
-                    // مع رسالة نجاح للبقية. الآن: نتجاوز التكرار الحقيقي فقط.
-                    _dbContext.ChangeTracker.Clear();
-                }
+                created++;
             }
 
             if (created == 0)
@@ -203,7 +203,18 @@ namespace Sayl.Core.Services
 
             clsAudit.Log(_dbContext, actorUserId, "GeneratePayrolls",
                 $"توليد {created} كشف رواتب للفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd}");
-            await _dbContext.SaveChangesAsync();
+            try
+            {
+                // C3: حفظ واحد بعد الحلقة — كانت معاملة لكل موظف
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_PayrollRecords_Employee_Period"))
+            {
+                // تزامن متوازٍ نادر: منشئان في اللحظة نفسها لنفس الفترة —
+                // الفهرس الفريد يرفض؛ نعاملها كأن الكل موجود (idempotent)
+                _dbContext.ChangeTracker.Clear();
+                return Result<int>.Fail("كل الموظفين لديهم كشوف لهذه الفترة بالفعل.");
+            }
 
             return Result<int>.Ok(created, $"تم توليد {created} كشف رواتب.");
         }
@@ -434,10 +445,10 @@ namespace Sayl.Core.Services
             return count;
         }
 
-        /// <summary>عدد أيام الإجازات الرسمية المدفوعة داخل نطاق (نسخة داخلية بدون استدعاء خدمة أخرى).</summary>
-        private async Task<decimal> CountHolidaysInRangeAsync(DateOnly from, DateOnly to)
+        /// <summary>عدد أيام الإجازات الرسمية المدفوعة داخل نطاق — نسخة داخلية
+        /// بذاكرة لا بقراءة قاعدة (تستلم قائمة العطل المسحوبة مرة واحدة — C3).</summary>
+        private static decimal CountHolidaysInRange(List<OfficialHoliday> holidays, DateOnly from, DateOnly to)
         {
-            var holidays = await _dbContext.OfficialHolidays.ToListAsync();
             decimal total = 0;
             foreach (var h in holidays)
             {

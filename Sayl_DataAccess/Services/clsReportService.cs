@@ -1,3 +1,4 @@
+using Common.DTOs;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
@@ -72,7 +73,7 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         // تقرير حالة المخزون
         // ─────────────────────────────────────────────────
-        public async Task<Result<List<InventoryStatusVM>>> GetInventoryStatusAsync(bool lowStockOnly = false)
+        public async Task<Result<List<InventoryStatusVM>>> GetInventoryStatusAsync(bool lowStockOnly = false, int[]? productIds = null)
         {
             var query = from p in _dbContext.Products
                         join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
@@ -92,8 +93,54 @@ namespace Sayl.Core.Services
             if (lowStockOnly)
                 query = query.Where(x => x.IsLowStock);
 
+            // C1: تقرير جزئي لأصناف بعينها (IN(...)) — نافذة POS بعد البيع
+            // تُحدث أصناف السلة الملموسة فقط بدل نقل الكتالوج كاملًا.
+            if (productIds is { Length: > 0 })
+                query = query.Where(x => productIds.Contains(x.ProductId));
+
             var result = await query.OrderBy(x => x.ProductName).ToListAsync();
             return Result<List<InventoryStatusVM>>.Ok(result);
+        }
+
+        // C4: نسخة مرقّمة من حالة المخزون — التصفح على مستوى SQL (Count/Skip/Take)
+        // بدل نقل الكتالوج كاملًا ثم تقطيع جانب العميل في شاشة المخزون.
+        public async Task<Result<PagedResult<InventoryStatusVM>>> GetInventoryStatusPagedAsync(bool lowStockOnly = false, int page = 1, int pageSize = 20)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Max(1, pageSize);
+
+            var query = from p in _dbContext.Products
+                        join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
+                        where p.Type == "stock" && p.IsActive
+                        select new InventoryStatusVM
+                        {
+                            ProductId = p.ProductId,
+                            ProductName = p.Name,
+                            Unit = p.Unit,
+                            QuantityAvailable = inv.QuantityAvailable ?? 0,
+                            QuantityReserved = inv.QuantityReserved ?? 0,
+                            ReorderLevel = p.ReorderLevel ?? 0,
+                            IsLowStock = (inv.QuantityAvailable ?? 0) <= (p.ReorderLevel ?? 0),
+                            LastCountedAt = inv.LastCountedAt
+                        };
+
+            if (lowStockOnly)
+                query = query.Where(x => x.IsLowStock);
+
+            int total = await query.CountAsync();
+            var items = await query
+                .OrderBy(x => x.ProductName)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return Result<PagedResult<InventoryStatusVM>>.Ok(new PagedResult<InventoryStatusVM>
+            {
+                Items = items,
+                TotalCount = total,
+                Page = page,
+                PageSize = pageSize
+            });
         }
 
         // ─────────────────────────────────────────────────

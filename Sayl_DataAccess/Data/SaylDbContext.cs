@@ -306,7 +306,11 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.SessionId, "IX_Invoices_SessionId");
 
-            entity.HasIndex(e => new { e.Type, e.Status }, "IX_Invoices_Type_Status");
+            // C5: مؤشر مُغطي — كان (Type, Status) بلا CreatedAt، وشاشة الفواتير
+            // تصفّح بالتاريخ دائمًا فكانت تقرأ الصفوف ثم تفرزها/ترشّحها عمليًا.
+            // بضم CreatedAt يُنفَّذ الفرز والتصفّح (ORDER BY/CreatedAt + BETWEEN)
+            // من المؤشر دون رجوع للجدول.
+            entity.HasIndex(e => new { e.Type, e.Status, e.CreatedAt }, "IX_Invoices_Type_Status_CreatedAt");
 
             entity.HasIndex(e => e.UserId, "IX_Invoices_UserId");
 

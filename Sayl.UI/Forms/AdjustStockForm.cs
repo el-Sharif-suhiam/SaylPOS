@@ -95,10 +95,30 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-                _products = await productService.GetProductsListAsync("", type: "stock");
+                // C2: سقف 200 — الكتالوج الضخم لا يُنقل كاملًا لصندوق التسوية.
+                // إن أُضيء المنتج مسبقًا (من شاشة المخزون) وكان خارج أول 200،
+                // نسحب كاملًا هذه المرة فقط لضمان وجوده في القائمة.
+                bool needFullForPreselect = _preselectedProductId.HasValue;
+                _products = await productService.GetProductsListAsync("", type: "stock",
+                    take: needFullForPreselect ? 0 : 200);
 
-                foreach (var p in _products)
-                    _cmbProduct.Items.Add(p.Name);
+                if (needFullForPreselect && _preselectedProductId.HasValue
+                    && _products.All(p => p.ProductId != _preselectedProductId.Value))
+                {
+                    _products = await productService.GetProductsListAsync("", type: "stock");
+                }
+
+                _cmbProduct.BeginUpdate();
+                try
+                {
+                    _cmbProduct.Items.Clear();
+                    foreach (var p in _products)
+                        _cmbProduct.Items.Add(p.Name);
+                }
+                finally
+                {
+                    _cmbProduct.EndUpdate();
+                }
 
                 if (_products.Count == 0)
                 {

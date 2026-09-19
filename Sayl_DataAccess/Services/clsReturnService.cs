@@ -413,17 +413,39 @@ namespace Sayl.Core.Services
                 _dbContext.Inventories.Add(inventory);
             }
 
+            // B5: لا نُرجع مرتجع البيع إلى دفعة انتهت صلاحيتها أصلاً —
+            // البيع يستبعد `ExpiryDate < اليوم`، فكان المخزون «متاحًا» لا يُباع
+            // أبدًا. عند انتهاء دفعة المصدر نُنشئ دفعة جديدة غير منتهية.
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+
             if (batchId.HasValue)
             {
                 var batch = await _dbContext.Batches.FindAsync(batchId.Value);
                 if (batch != null && batch.ProductId == productId)
                 {
-                    batch.BatchQuantity += quantity;
+                    if (batch.ExpiryDate.HasValue && batch.ExpiryDate.Value < today)
+                    {
+                        // B5: دفعة المصدر منتهية الصلاحية — دفعة جديدة بلا صلاحية
+                        // تحمل كمية المرتجع ليباع المخزون فعليًا.
+                        batch = new Batch
+                        {
+                            ProductId = productId,
+                            BatchNumber = $"RET-{returnInvoice.InvoiceId}-{productId}-{DateTime.UtcNow.Ticks}",
+                            ExpiryDate = null,
+                            BatchQuantity = quantity,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _dbContext.Batches.Add(batch);
+                    }
+                    else
+                    {
+                        batch.BatchQuantity += quantity;
+                    }
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
                         ProductId = productId,
-                        BatchId = batch.BatchId,
+                        Batch = batch,
                         MovementType = enStockMovementType.customer_return,
                         Quantity = quantity,
                         SourceType = "Invoice",

@@ -8,9 +8,8 @@ using Sayl.UI.Infrastructure;
 namespace Sayl.UI.UserControls
 {
     /// <summary>قسم المخزون: حالة الأصناف + تسوية يدوية.</summary>
-    internal class InventoryControl : SectionListControl
+internal class InventoryControl : SectionListControl
     {
-        private List<InventoryStatusVM> _items = new();
         private List<InventoryStatusVM> _shown = new();
         private CheckBox _chkLowOnly = null!;
 
@@ -21,36 +20,22 @@ namespace Sayl.UI.UserControls
         {
             try
             {
+                EnsureColumns(); // C4: الأعمدة تُعرَّف مرة واحدة (لا تُعاد من الصفر كل صفحة)
+
                 using var scope = Program.Services.CreateScope();
                 var reportService = scope.ServiceProvider.GetRequiredService<clsReportService>();
-                var result = await reportService.GetInventoryStatusAsync(lowStockOnly: _chkLowOnly.Checked);
+                var result = await reportService.GetInventoryStatusPagedAsync(
+                    lowStockOnly: _chkLowOnly.Checked, page: _currentPage, pageSize: _pageSize);
                 if (!result.IsSuccess || result.Data == null)
                 {
                     UiHelpers.ShowError(this, result.Message);
                     return;
                 }
 
-                _items = result.Data;
-                var paged = SliceCurrentPage(_items);
-                ApplyPaged(paged);
-                _shown = paged.Items;
+                if (!ApplyPaged(result.Data))
+                    return;
 
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colName", AppLang.T("Common.Label.Product"));
-                Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
-                Grid.Columns.Add("colAvailable", AppLang.T("Inventory.Label.Available"));
-                Grid.Columns.Add("colReserved", AppLang.T("Inventory.Label.Reserved"));
-                Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
-                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns.Add("colCounted", AppLang.T("Inventory.Label.LastCount"));
-                Grid.Columns["colName"].FillWeight = 34;
-                Grid.Columns["colUnit"].FillWeight = 10;
-                Grid.Columns["colAvailable"].FillWeight = 12;
-                Grid.Columns["colReserved"].FillWeight = 12;
-                Grid.Columns["colReorder"].FillWeight = 12;
-                Grid.Columns["colStatus"].FillWeight = 10;
-                Grid.Columns["colCounted"].FillWeight = 10;
-
+                _shown = result.Data.Items;
                 Grid.Rows.Clear();
                 foreach (var i in _shown)
                     Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.QuantityReserved,
@@ -63,18 +48,26 @@ namespace Sayl.UI.UserControls
             }
         }
 
-        /// <summary>شريحة الصفحة الحالية من قائمة مادّة كاملة (ترقيم على الذاكرة).</summary>
-        private PagedResult<InventoryStatusVM> SliceCurrentPage(List<InventoryStatusVM> all)
+        /// <summary>C4: تعريف أعمدة الشبكة يُبنى مرة واحدة فقط — إعادة البناء مع
+        /// كل تحميل كانت تهدر تحجيم/أسلوب كل صفحة في شاشة المخزون.</summary>
+        private void EnsureColumns()
         {
-            int totalPages = Math.Max(1, (int)Math.Ceiling(all.Count / (double)Math.Max(1, _pageSize)));
-            int page = Math.Clamp(_currentPage, 1, totalPages);
-            return new PagedResult<InventoryStatusVM>
-            {
-                TotalCount = all.Count,
-                Page = page,
-                PageSize = _pageSize,
-                Items = all.Skip((page - 1) * _pageSize).Take(_pageSize).ToList()
-            };
+            if (Grid.Columns.Count > 0) return;
+
+            Grid.Columns.Add("colName", AppLang.T("Common.Label.Product"));
+            Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
+            Grid.Columns.Add("colAvailable", AppLang.T("Inventory.Label.Available"));
+            Grid.Columns.Add("colReserved", AppLang.T("Inventory.Label.Reserved"));
+            Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
+            Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+            Grid.Columns.Add("colCounted", AppLang.T("Inventory.Label.LastCount"));
+            Grid.Columns["colName"].FillWeight = 34;
+            Grid.Columns["colUnit"].FillWeight = 10;
+            Grid.Columns["colAvailable"].FillWeight = 12;
+            Grid.Columns["colReserved"].FillWeight = 12;
+            Grid.Columns["colReorder"].FillWeight = 12;
+            Grid.Columns["colStatus"].FillWeight = 10;
+            Grid.Columns["colCounted"].FillWeight = 10;
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.

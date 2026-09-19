@@ -127,13 +127,15 @@ namespace Sayl.Core.Services
 
             if (fromDate.HasValue)
             {
-                DateTime start = fromDate.Value.ToDateTime(TimeOnly.MinValue);
+                // التاريخ يوصل «ببرنامج اليوم» (UTC+3) — نزّله إلى حدود UTC المخزنة
+                // (نفس إزاحة التقارير): بداية المحل للتاريخ المحدد = الثالثة فجرًا قبله.
+                DateTime start = fromDate.Value.ToDateTime(TimeOnly.MinValue).AddHours(-3);
                 query = query.Where(i => i.CreatedAt >= start);
             }
 
             if (toDate.HasValue)
             {
-                DateTime end = toDate.Value.ToDateTime(TimeOnly.MaxValue);
+                DateTime end = toDate.Value.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
                 query = query.Where(i => i.CreatedAt <= end);
             }
 

@@ -170,12 +170,21 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
-                var products = await productService.GetProductsListAsync(search, type: "stock");
+                // C2: سقف 200 — الكتالوج الضخم لا يُنقل كاملًا مع كل بحث/فتح
+                var products = await productService.GetProductsListAsync(search, type: "stock", take: 200);
 
                 _products = products;
-                _lstProducts.Items.Clear();
-                foreach (var p in products)
-                    _lstProducts.Items.Add($"{p.Name}  [{p.Barcode ?? AppLang.T("ReceiveStock.NoBarcode")}]");
+                _lstProducts.BeginUpdate();
+                try
+                {
+                    _lstProducts.Items.Clear();
+                    foreach (var p in products)
+                        _lstProducts.Items.Add($"{p.Name}  [{p.Barcode ?? AppLang.T("ReceiveStock.NoBarcode")}]");
+                }
+                finally
+                {
+                    _lstProducts.EndUpdate();
+                }
 
                 if (_products.Count == 0)
                     UiHelpers.ShowInfo(this, AppLang.T("ReceiveStock.Msg.NoMatches"));

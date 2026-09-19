@@ -22,14 +22,39 @@ namespace Sayl.UI.UserControls
             ? AppLang.T("Invoices.Section.Sales")
             : AppLang.T("Invoices.Section.Purchases");
 
+        // C5: نطاق التاريخ الافتراضي لقائمة الفواتير — الشهر الحالي (توقيت البرنامج
+        // UTC+3). القائمة تعرض أحدث شهر تلو الآخر ولا تعدّ كامل التاريخ مع كل فتح.
+        private DateOnly DefaultRangeFrom
+        {
+            get
+            {
+                var local = AppClock.NowLocal;
+                return new DateOnly(local.Year, local.Month, 1);
+            }
+        }
+
+        private DateOnly DefaultRangeTo
+        {
+            get
+            {
+                var local = AppClock.NowLocal;
+                var first = new DateOnly(local.Year, local.Month, 1);
+                return first.AddMonths(1).AddDays(-1);
+            }
+        }
+
         protected override async Task LoadDataAsync()
         {
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                // C5: نطاق افتراضي = الشهر الحالي (يوم البرنامج UTC+3) — القائمة
+                // لا تعدّ وتقفّز كامل التاريخ مع كل فتح. التصفّح/البحث يعمل داخل
+                // النطاق المرئي، والمؤشر المُغطي (Type, Status, CreatedAt) يخدم المسار.
                 var result = await invoiceService.GetInvoicesPagedAsync(
-                    type: _type, page: _currentPage, pageSize: _pageSize);
+                    type: _type, page: _currentPage, pageSize: _pageSize,
+                    fromDate: DefaultRangeFrom, toDate: DefaultRangeTo);
                 if (!result.IsSuccess || result.Data == null)
                 {
                     UiHelpers.ShowError(this, result.Message);
