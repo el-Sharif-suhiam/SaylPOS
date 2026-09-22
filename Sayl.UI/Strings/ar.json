@@ -83,6 +83,10 @@
   "Login.ChangePwd.Button": "تغيير",
   "Login.ChangePwd.Msg.AllFieldsRequired": "جميع الحقول مطلوبة.",
   "Login.ChangePwd.Msg.Success": "تم تغيير كلمة المرور بنجاح.",
+  "Login.ForcedChange.Title": "تغيير كلمة المرور مطلوب",
+  "Login.ForcedChange.Info": "لأسباب أمنية يجب تغيير كلمة المرور الافتراضية قبل الدخول.",
+  "Login.ForcedChange.Success": "تم تغيير كلمة المرور — جارٍ الدخول...",
+  "Login.ForcedChange.Required": "يجب تغيير كلمة المرور قبل الدخول.",
   "Login.Footer": "© سيل 2026 — جميع الحقوق محفوظة",
 
   "Owner.Title": "إنشاء حساب المدير",

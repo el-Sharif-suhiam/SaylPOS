@@ -170,6 +170,7 @@ CREATE TABLE Users
     EmployeeId INT NULL,
     RoleId TINYINT NOT NULL,
     IsActive bit NOT NULL DEFAULT 1,
+    MustChangePassword bit NOT NULL DEFAULT 0,
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
     CONSTRAINT UQ_Users_Username UNIQUE (Username),
@@ -671,9 +672,9 @@ ALTER TABLE Customers
 GO
 -----------------------------------------------------------
 -- 25) Seed data (minimum for a fresh install to boot)
---     Roles + starter accounts + one demo stock product
---     (login: admin / cashier1 - passwords were set by the
---      owner during installation; change them immediately)
+--     Roles + one demo stock product — NO accounts are seeded (VULN-47):
+--     on first launch with zero active users the app creates the default
+--     admin (admin) and forces a password change at first sign-in.
 -----------------------------------------------------------
 
 -- Roles (bitmask values — see AppPermissions.cs: admin=4095, cashier=0, accountant=508)
@@ -682,11 +683,6 @@ INSERT INTO Roles (Name, RoleValue, IsActive) VALUES
 (N'مدير النظام', 4095, 1),
 (N'كاشير', 0, 1),
 (N'محاسب', 508, 1);
-
--- Starter accounts (BCrypt hashes; reset from inside the app)
-INSERT INTO Users (Username, PasswordHash, RoleId, IsActive, CreatedAt) VALUES
-(N'admin',   N'$2a$11$oCgAsF162xgzRYlaBa7elOoAmjeMBbp9p6B2NukyhmTetpjmvenhq', 1, 1, GETUTCDATE()),
-(N'cashier1',N'$2a$11$WNoLkPsWn5BGq3pwwbZsy.BHCIlgru8PHsj1JNyqopT12/RQI9LIi', 2, 1, GETUTCDATE());
 
 -- Demo stock product (delete after real catalog import)
 INSERT INTO Products (Name, Barcode, Unit, Type, BasePrice, CostPrice, ReorderLevel, IsActive, CreatedAt)

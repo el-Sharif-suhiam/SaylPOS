@@ -20,5 +20,8 @@ namespace Common.DTOs.ViewModel
 
         public bool IsActive { get; set; }
 
+        /// <summary>إجبار تغيير كلمة المرور قبل الدخول — تُملأ من جدول المستخدمين عند تسجيل الدخول فقط.</summary>
+        public bool MustChangePassword { get; set; }
+
     }
 }

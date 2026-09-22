@@ -83,6 +83,10 @@
   "Login.ChangePwd.Button": "Change",
   "Login.ChangePwd.Msg.AllFieldsRequired": "All fields are required.",
   "Login.ChangePwd.Msg.Success": "Password changed successfully.",
+  "Login.ForcedChange.Title": "Password Change Required",
+  "Login.ForcedChange.Info": "For security, the default password must be changed before signing in.",
+  "Login.ForcedChange.Success": "Password changed — signing in...",
+  "Login.ForcedChange.Required": "You must change your password before signing in.",
   "Login.Footer": "© Sayl 2026 — All Rights Reserved",
 
   "Owner.Title": "Create Admin Account",

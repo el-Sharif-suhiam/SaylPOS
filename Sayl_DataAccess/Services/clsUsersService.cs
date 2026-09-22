@@ -218,11 +218,36 @@ namespace Sayl.Core.Services
         public async Task<bool> HasActiveUsersAsync()
             => await _dbContext.Users.AnyAsync(u => u.IsActive);
 
+        /// <summary>الحساب الافتراضي: يُنشأ صامتًا عند صفر مستخدمين نشطين، ويُجبر على
+        /// تغيير كلمة المرور في أول دخول (MustChangePassword=1).</summary>
+        public const string DefaultAdminUsername = "admin";
+        public const string DefaultAdminPassword = "Admin@123";
+
+        /// <summary>ترقية المخطط idempotent قبل أول استعلام مستخدمين: عمود
+        /// MustChangePassword (جديد) وجدول Settings (في القواعد الأقدم الذي أُضيف
+        /// بعدها) — أي غياب يُسقط استعلامات EF بـInvalid object/column name خارج الـ catchات.</summary>
+        public const string EnsureSchemaSql = @"
+IF COL_LENGTH(N'dbo.Users', N'MustChangePassword') IS NULL
+    ALTER TABLE dbo.Users ADD MustChangePassword BIT NOT NULL
+        CONSTRAINT DF_Users_MustChangePassword DEFAULT (0);
+IF OBJECT_ID(N'dbo.Settings', N'U') IS NULL
+    CREATE TABLE dbo.Settings
+    (
+        SettingKey   NVARCHAR(100)  NOT NULL CONSTRAINT PK_Settings PRIMARY KEY,
+        SettingValue NVARCHAR(MAX)  NULL,
+        UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (GETDATE())
+    );";
+
+        /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
+        public async Task EnsureSchemaUpgradesAsync()
+            => await _dbContext.Database.ExecuteSqlRawAsync(EnsureSchemaSql);
+
         /// <summary>VULN-47: إنشاء «حساب المدير» في أول تركيب — الاستبدال الآمن
         /// للحساب الديمو (admin/Admin@123) الذي كان يُزرَع بكلمة مرور معروفة في كل
         /// تثبيت جديد. القاعدة: أول حساب نشط في النظام هو مالكه — ومنذ وجود أي
-        /// مستخدم نشط يُغلق هذا المسار إلى الأبد (لا يعاد تشغيله فوق بيانات حية).</summary>
-        public async Task<Result<UserVM>> CreateOwnerAsync(string username, string password)
+        /// مستخدم نشط يُغلق هذا المسار إلى الأبد (لا يعاد تشغيله فوق بيانات حية).
+        /// requirePasswordChange: يُعلّم الحساب المُنشأ بأنه يجب تغيير كلمته أول دخول.</summary>
+        public async Task<Result<UserVM>> CreateOwnerAsync(string username, string password, bool requirePasswordChange = false)
         {
             if (await HasActiveUsersAsync())
                 return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
@@ -241,8 +266,12 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // A9: قفل جدول Users نفسه (موجود في كل قاعدة) — القفل السابق على
+                // جدول Settings كان يُسقط الإنشاء بـSqlException «Invalid object name»
+                // على القواعد الأقدم التي بُنيت قبل إضافة Settings، والخطأ كان يتسرب
+                // خارج الـ catchات فيؤدي إلى شاشة «لا يوجد مستخدمين».
                 await _dbContext.Database.ExecuteSqlRawAsync(
-                    "SELECT TOP (1) SettingKey FROM Settings WITH (UPDLOCK, HOLDLOCK, TABLOCKX)");
+                    "SELECT COUNT_BIG(*) FROM Users WITH (TABLOCKX, HOLDLOCK)");
 
                 bool anyActive = await _dbContext.Users.AnyAsync(u => u.IsActive);
                 if (anyActive)
@@ -262,7 +291,8 @@ namespace Sayl.Core.Services
                     Username = username,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
                     RoleId = adminRole.RoleId,
-                    EmployeeId = null
+                    EmployeeId = null,
+                    MustChangePassword = requirePasswordChange
                 };
 
                 _dbContext.Users.Add(owner);
@@ -288,7 +318,8 @@ namespace Sayl.Core.Services
                     RoleId = adminRole.RoleId,
                     RoleName = adminRole.Name,
                     RoleValue = adminRole.RoleValue,
-                    IsActive = true
+                    IsActive = true,
+                    MustChangePassword = requirePasswordChange
                 });
             }
             catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Users_Username"))
@@ -303,6 +334,24 @@ namespace Sayl.Core.Services
                 _dbContext.ChangeTracker.Clear();
                 return Result<UserVM>.Fail($"فشل إنشاء حساب المدير: {ex.Message}");
             }
+            catch (Exception ex)
+            {
+                // A9: أي فشل آخر (SqlException من القفل أو أي خطأ غير متوقع) يرجع
+                // نتيجة Fail واضحة بدل تسرّب الاستثناء إلى بوابة الإقلاع.
+                try { await transaction.RollbackAsync(); } catch { /* المعاملة قد تكون منتهية أصلًا */ }
+                _dbContext.ChangeTracker.Clear();
+                return Result<UserVM>.Fail($"فشل إنشاء حساب المدير: {ex.Message}");
+            }
+        }
+
+        /// <summary>الحساب الافتراضي: يُنشأ صامتًا عند صفر مستخدمين نشطين مع إجبار
+        /// تغيير كلمة المرور أول دخول. يفشل برسالة واضحة إن وُجد مستخدم نشط.</summary>
+        public async Task<Result<UserVM>> EnsureDefaultAdminAsync()
+        {
+            if (await HasActiveUsersAsync())
+                return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
+
+            return await CreateOwnerAsync(DefaultAdminUsername, DefaultAdminPassword, requirePasswordChange: true);
         }
 
         private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)
@@ -547,7 +596,8 @@ namespace Sayl.Core.Services
                 RoleName = user.Role.Name,
                 RoleId = user.RoleId,
                 RoleValue = user.Role.RoleValue,
-                Name = user.Employee?.Name ?? "No Employee"
+                Name = user.Employee?.Name ?? "No Employee",
+                MustChangePassword = user.MustChangePassword
             };
 
             return Result<UserVM>.Ok(userVm, "تم تسجيل الدخول بنجاح.");
@@ -616,6 +666,7 @@ namespace Sayl.Core.Services
             }
 
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+            user.MustChangePassword = false;
 
             _dbContext.SystemLogs.Add(new SystemLog
             {

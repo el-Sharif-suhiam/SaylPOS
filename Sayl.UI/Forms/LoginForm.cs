@@ -416,6 +416,20 @@ namespace Sayl.UI.Forms
 
                 if (result.IsSuccess && result.Data != null)
                 {
+                    // أول دخول بحساب «يجب تغيير كلمته» (الافتراضي admin): الدخول لا
+                    // يكتمل قبل تغيير كلمة المرور — نافذة إجبارية قبل LoginSucceeded.
+                    if (result.Data.MustChangePassword)
+                    {
+                        SetBusy(false);
+                        if (!ShowForcedPasswordChange(result.Data.UserName, _txtPassword.Text))
+                        {
+                            ShowError(AppLang.T("Login.ForcedChange.Required"));
+                            _txtPassword.Focus();
+                            return;
+                        }
+                        result.Data.MustChangePassword = false;
+                    }
+
                     SessionState.SetUser(result.Data);
                     SetBusy(false);
                     LoginSucceeded?.Invoke(result.Data);
@@ -507,6 +521,81 @@ namespace Sayl.UI.Forms
 
             if (dlg.ShowDialog(this) == DialogResult.OK)
                 _txtPassword.Text = ""; // يُدخل بالكلمة الجديدة
+        }
+
+        // ─────────────────────────────────────────────────
+        // إجبار تغيير كلمة المرور (أول دخول بحساب الافتراضي admin): نافذة بلا
+        // زر إغلاق — القديمة محفوظة من الجلسة الحالية، وزر واحد «تغيير». لا يُطلق
+        // LoginSucceeded إلا بعد نجاح التغيير (الخدمة تمسح MustChangePassword).
+        private bool ShowForcedPasswordChange(string username, string currentPassword)
+        {
+            bool changed = false;
+            using var dlg = new Form
+            {
+                Text = AppLang.T("Login.ForcedChange.Title"),
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(420, 240),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ControlBox = false,
+                RightToLeft = RightToLeft.Yes,
+                Font = AppTheme.FontBody,
+                BackColor = AppTheme.CardBg
+            };
+
+            var lblInfo = new Label
+            {
+                Text = AppLang.T("Login.ForcedChange.Info"),
+                Bounds = new Rectangle(30, 20, 360, 36),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = AppTheme.TextMuted
+            };
+
+            var lblNew = new Label { Text = AppLang.T("Login.ChangePwd.New"), Bounds = new Rectangle(30, 64, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var txtNew = new TextBox { Bounds = new Rectangle(30, 88, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
+
+            var lblConfirm = new Label { Text = AppLang.T("Owner.Label.Confirm"), Bounds = new Rectangle(30, 128, 360, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var txtConfirm = new TextBox { Bounds = new Rectangle(30, 152, 360, 36), Font = AppTheme.FontBody, UseSystemPasswordChar = true };
+
+            var btnOk = AppTheme.MakeButton(AppLang.T("Login.ChangePwd.Button"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
+            btnOk.Bounds = new Rectangle(30, 192, 360, 40);
+
+            btnOk.Click += async (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(txtNew.Text))
+                {
+                    UiHelpers.ShowError(dlg, AppLang.T("Login.ChangePwd.Msg.AllFieldsRequired"));
+                    return;
+                }
+
+                if (txtNew.Text != txtConfirm.Text)
+                {
+                    UiHelpers.ShowError(dlg, AppLang.T("Owner.Err.Confirm"));
+                    return;
+                }
+
+                Common.Results.Result result;
+                using (var scope = Program.Services.CreateScope())
+                {
+                    var usersService = scope.ServiceProvider.GetRequiredService<clsUsersService>();
+                    result = await usersService.ChangePasswordAsync(username, currentPassword, txtNew.Text);
+                }
+
+                UiHelpers.ShowResult(dlg, result, AppLang.T("Login.ForcedChange.Success"));
+                if (result.IsSuccess)
+                {
+                    changed = true;
+                    dlg.DialogResult = DialogResult.OK;
+                    dlg.Close();
+                }
+            };
+
+            dlg.Controls.AddRange(new Control[] { lblInfo, lblNew, txtNew, lblConfirm, txtConfirm, btnOk });
+            dlg.AcceptButton = btnOk;
+
+            dlg.ShowDialog(this);
+            return changed;
         }
 
         // ─────────────────────────────────────────────────

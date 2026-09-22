@@ -38,6 +38,9 @@ namespace consol_app
             {
                 var stock = Svc<clsStockService>(ws);
                 var db = Svc<Sayl.Core.Data.SaylDbContext>(ws);
+                // ترقية المخطط idempotent أولًا: أي قاعدة قائمة (كقاعدة التطوير)
+                // تكتسب عمود MustChangePassword تلقائيًا قبل أول استعلام.
+                await Svc<clsUsersService>(ws).EnsureSchemaUpgradesAsync();
                 var admin = await db.Users
                     .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
                 await stock.ReceiveStockAsync(new DtoStockReceiveRequest
@@ -101,14 +104,42 @@ namespace consol_app
             var cashierRole = await db.Roles.FirstAsync(r => r.RoleValue == AppPermissions.CashierRoleValue);
 
             User? adminUser;
-            if (!await db.Users.AnyAsync(u => u.IsActive))
+            var freshCreated = !await db.Users.AnyAsync(u => u.IsActive);
+            if (freshCreated)
             {
-                // أول تشغيل / قاعدة نظيفة: ننشئ المدير ثم الكاشير
-                var ownerResult = await users.CreateOwnerAsync("admin", "Admin@123");
+                // أول تشغيل / قاعدة نظيفة: ننشئ المدير الافتراضي (يفرض تغيير كلمة
+                // المرور) ثم الكاشير. VULN-47: لا أولد أي حسابات معروفة في SQL.
+                var ownerResult = await users.EnsureDefaultAdminAsync();
                 if (!ownerResult.IsSuccess)
-                    throw new Exception("CreateOwner failed: " + ownerResult.Message);
+                    throw new Exception("EnsureDefaultAdmin failed: " + ownerResult.Message);
 
                 adminUser = await db.Users.FirstAsync(u => u.UserId == ownerResult.Data!.UserId);
+
+                // مسار إجبار التغيير كاملًا: العلامة في قاعدة البيانات، وتظهر عند
+                // الدخول، ويقبل التغيير ويمسحها، ثم نعيد كلمة المرور الأصلية
+                // كي تبقى الجولة قابلة للتكرار.
+                var freshFlag = await VerifyAsync(async vdb => await vdb.Users
+                    .Where(u => u.UserId == ownerResult.Data!.UserId)
+                    .Select(u => u.MustChangePassword)
+                    .SingleAsync());
+                Check("default admin forces password change (DB flag)", freshFlag);
+
+                var forcedLogin = await users.LoginAsync("admin", "Admin@123");
+                Check("forced-change login succeeds", forcedLogin.IsSuccess, forcedLogin.Message);
+                Check("forced-change flag surfaced on login", forcedLogin.Data!.MustChangePassword,
+                    forcedLogin.Data.MustChangePassword ? "" : "flag missing on UserVM");
+
+                var pwdChange = await users.ChangePasswordAsync("admin", "Admin@123", "ForcedChange#9");
+                Check("forced password change accepted", pwdChange.IsSuccess, pwdChange.Message);
+
+                var flagAfterChange = await VerifyAsync(async vdb => await vdb.Users
+                    .Where(u => u.UserId == ownerResult.Data!.UserId)
+                    .Select(u => u.MustChangePassword)
+                    .SingleAsync());
+                Check("forced-change flag cleared after change", !flagAfterChange);
+
+                var restored = await users.ResetPasswordAsync(ownerResult.Data.UserId, "Admin@123", ownerResult.Data.UserId);
+                Check("default password restored for reruns", restored.IsSuccess, restored.Message);
 
                 var cashierResult = await users.AddNewUserAsync(
                     new NewUserRequest("cashier1", "Cashier123", cashierRole.RoleId, null),
@@ -121,6 +152,10 @@ namespace consol_app
                 adminUser = await db.Users.FirstAsync(u => u.Username == "admin");
                 var cashierUser = await db.Users.FirstAsync(u => u.Username == "cashier1");
                 await users.ResetPasswordAsync(cashierUser.UserId, "Cashier123", adminUser.UserId);
+
+                // VULN-47: لا إنشاء صامت لمدير افتراضي على نظام له مستخدمون أصلًا
+                var refusedDefault = await users.EnsureDefaultAdminAsync();
+                Check("ensure-default-admin refused when users exist", !refusedDefault.IsSuccess, refusedDefault.Message);
             }
 
             if (adminUser == null)

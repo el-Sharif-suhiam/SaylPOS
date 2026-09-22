@@ -118,14 +118,9 @@ var
   InstanceFound: Boolean;
   DbJustCreated: Boolean;
 
-  { ---- owner page (main role, fresh DB) ---- }
-  OwnerPage: TWizardPage;
-  OwnerUsernameEdit: TEdit;
-  OwnerPasswordEdit: TEdit;
-  OwnerConfirmEdit: TEdit;
-  OwnerDemoCheck: TCheckBox;
-  OwnerUsername: String;
-  OwnerPass: String;
+  { ---- options page (main role): demo data only ---- }
+  OptionsPage: TWizardPage;
+  DemoCheck: TCheckBox;
   LoadDemoData: Boolean;
 
 { ---------- helpers ---------- }
@@ -585,10 +580,9 @@ begin
   CustomLogin := False;
   DbJustCreated := False;
   { VULN-47: defaults for silent/unattended installs — demo data matches previous
-    behavior, and an empty owner selection means the app asks on first launch. }
+    behavior; the default admin account is created by the app on first launch
+    and its password must be changed there (no owner page in the wizard). }
   LoadDemoData := True;
-  OwnerUsername := '';
-  OwnerPass := '';
   Trace('P0: PrepareMainRole start');
 
   { show activity while probing - paint this first so the brief checks
@@ -969,44 +963,23 @@ begin
   SqlPassEdit.Visible := False;
 end;
 
-{ ---- owner page: create the admin account (VULN-47) ---- }
-procedure CreateOwnerPage;
+{ ---- options page: demo data only. The admin account is created by the app on
+ first launch (admin / Admin@123) and its password must be changed there — the
+ wizard no longer asks for any account credentials (VULN-47). ---- }
+procedure CreateOptionsPage;
 begin
-  OwnerPage := CreateCustomPage(DbPage.ID,
-    'Admin Account',
-    'No default passwords - the system owner is created now.' +
-    ' Create the account you will use to manage Sayl.');
+  OptionsPage := CreateCustomPage(DbPage.ID,
+    'Data Options',
+    'The default admin account (admin) is created automatically on first ' +
+    'launch, and the program will ask to change its password immediately.');
 
-  OwnerUsernameEdit := TEdit.Create(OwnerPage);
-  OwnerUsernameEdit.Parent := OwnerPage.Surface;
-  OwnerUsernameEdit.Left := ScaleX(0);
-  OwnerUsernameEdit.Top := ScaleY(16);
-  OwnerUsernameEdit.Width := ScaleX(260);
-  OwnerUsernameEdit.ShowHint := True;
-
-  OwnerPasswordEdit := TEdit.Create(OwnerPage);
-  OwnerPasswordEdit.Parent := OwnerPage.Surface;
-  OwnerPasswordEdit.Left := ScaleX(0);
-  OwnerPasswordEdit.Top := ScaleY(64);
-  OwnerPasswordEdit.Width := ScaleX(260);
-  OwnerPasswordEdit.PasswordChar := '*';
-  OwnerPasswordEdit.ShowHint := True;
-
-  OwnerConfirmEdit := TEdit.Create(OwnerPage);
-  OwnerConfirmEdit.Parent := OwnerPage.Surface;
-  OwnerConfirmEdit.Left := ScaleX(0);
-  OwnerConfirmEdit.Top := ScaleY(112);
-  OwnerConfirmEdit.Width := ScaleX(260);
-  OwnerConfirmEdit.PasswordChar := '*';
-  OwnerConfirmEdit.ShowHint := True;
-
-  OwnerDemoCheck := TCheckBox.Create(OwnerPage);
-  OwnerDemoCheck.Parent := OwnerPage.Surface;
-  OwnerDemoCheck.Left := ScaleX(0);
-  OwnerDemoCheck.Top := ScaleY(168);
-  OwnerDemoCheck.Width := ScaleX(430);
-  OwnerDemoCheck.Checked := True;
-  OwnerDemoCheck.Caption :=
+  DemoCheck := TCheckBox.Create(OptionsPage);
+  DemoCheck.Parent := OptionsPage.Surface;
+  DemoCheck.Left := ScaleX(0);
+  DemoCheck.Top := ScaleY(16);
+  DemoCheck.Width := ScaleX(430);
+  DemoCheck.Checked := True;
+  DemoCheck.Caption :=
     'Load demo data (sample products, customers and invoices)';
 end;
 
@@ -1021,8 +994,8 @@ begin
   Trace('W2: termpage done');
   CreateDbPage;
   Trace('W3: dbpage done');
-  CreateOwnerPage;
-  Trace('W4: ownerpage done');
+  CreateOptionsPage;
+  Trace('W4: optionspage done');
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -1032,7 +1005,7 @@ begin
     Result := IsMainRole;
   if PageID = DbPage.ID then
     Result := not IsMainRole;
-  if PageID = OwnerPage.ID then
+  if PageID = OptionsPage.ID then
     Result := not IsMainRole;
 end;
 
@@ -1132,30 +1105,10 @@ begin
     Exit;
   end;
 
-  { ---- owner account page (main role) ---- }
-  if CurPageID = OwnerPage.ID then
+  { ---- options page (main role): demo-data choice ---- }
+  if CurPageID = OptionsPage.ID then
   begin
-    OwnerUsername := Trim(OwnerUsernameEdit.Text);
-    OwnerPass := OwnerPasswordEdit.Text;
-    if (OwnerUsername = '') or (Length(OwnerUsername) < 3) or (Length(OwnerUsername) > 50) then
-    begin
-      MsgBox('Please enter a username (3-50 characters).', mbCriticalError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    if (Length(OwnerPass) < 8) then
-    begin
-      MsgBox('Password must be at least 8 characters (letters and digits).', mbCriticalError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    if OwnerPass <> OwnerConfirmEdit.Text then
-    begin
-      MsgBox('The two passwords do not match.', mbCriticalError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    LoadDemoData := OwnerDemoCheck.Checked;
+    LoadDemoData := DemoCheck.Checked;
     Exit;
   end;
 end;
@@ -1170,24 +1123,6 @@ begin
     '  }' + NL +
     '}';
   SaveStringToFile(JsonPath, Json, False);
-end;
-
-{ VULN-47: write the owner credentials chosen on the wizard to a JSON file
-  in %LocalAppData% so the app can create the owner with BCrypt on first launch.
-  The app deletes the file after use. Only written for a fresh database with
-  a non-empty wizard selection. }
-procedure WritePendingOwner;
-var
-  Dir, Path, Json: String;
-begin
-  Dir := ExpandConstant('{localappdata}\Sayl_POS');
-  ForceDirectories(Dir);
-  Path := Dir + '\pending-owner.json';
-  Json := '{' + NL +
-    '"Username": "' + JsonEscape(OwnerUsername) + '",' + NL +
-    '"Password": "' + JsonEscape(OwnerPass) + '"' + NL +
-    '}';
-  SaveStringToFile(Path, Json, False);
 end;
 
 procedure DoDatabaseSetup;
@@ -1323,10 +1258,10 @@ begin
           end;
         end;
 
-        { Demo data: loaded ONLY on a brand-new database when the owner asked
+        { Demo data: loaded ONLY on a brand-new database when the user asked
           for it (the wizard checkbox; silent installs keep previous demo behavior).
-          VULN-47: no known demo accounts are seeded anymore — the owner account
-          is collected on the wizard page (or asked on first launch). }
+          VULN-47: no known demo accounts are seeded anymore — the app creates the
+          default admin (admin) on first launch and forces a password change. }
         if IsMainRole and DbJustCreated and Ok then
         begin
           if LoadDemoData then
@@ -1353,11 +1288,6 @@ begin
         else if IsMainRole and not DbJustCreated then
           AppendLog(Log, 'Existing database kept as-is (demo data skipped).');
 
-        { VULN-47: persist the owner account chosen on the wizard page so the app
-          can create it on first launch (BCrypt is computed in the app, not here).
-          Written only for a brand-new database; deleted by the app after use. }
-        if IsMainRole and DbJustCreated and Ok and (Trim(OwnerUsername) <> '') then
-          WritePendingOwner;
       finally
         Conn.Close;
       end;
@@ -1386,18 +1316,14 @@ begin
           'Computer name : ' + GetComputerNameString + NL +
           'Access code   : ' + SqlPass + NL +
           'Write these down - they will be required when installing each extra terminal.';
-      { VULN-47: the owner account is created on first launch — either from the
-        wizard selection (stored as pending) or interactively in the app. }
+      { VULN-47: the default admin account is created by the app on first launch;
+        the program forces its password to be changed at first sign-in. }
       if IsMainRole and DbJustCreated and Ok then
-      begin
-        if Trim(OwnerUsername) <> '' then
-          SeedMsg := NL + '--- Your admin account ---' + NL +
-            'User : ' + OwnerUsername + NL +
-            'It will be created automatically on first launch - just sign in.'
-        else
-          SeedMsg := NL + '--- Your admin account ---' + NL +
-            'The program will ask you to create the admin account on first launch.';
-      end
+        SeedMsg := NL + '--- Default admin account ---' + NL +
+          'User     : ' + 'admin' + NL +
+          'Password : ' + 'Admin@123' + NL +
+          'It is created automatically on first launch, and the program will ' +
+          'make you change this password the first time you sign in.'
       else
         SeedMsg := '';
       MsgBox('Setup finished successfully.' + NL + NL +

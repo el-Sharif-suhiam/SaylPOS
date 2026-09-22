@@ -573,6 +573,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.PasswordHash).HasMaxLength(255);
             entity.Property(e => e.Username).HasMaxLength(50);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.MustChangePassword).HasDefaultValue(false);
 
         });
 

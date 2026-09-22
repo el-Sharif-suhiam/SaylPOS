@@ -16,6 +16,10 @@ public partial class User
     public byte RoleId { get; set; }
 
     public bool IsActive { get; set; }
+
+    /// <summary>إجبار تغيير كلمة المرور في أول دخول (الحساب الافتراضي عند التركيب).</summary>
+    public bool MustChangePassword { get; set; }
+
     public DateTime? CreatedAt { get; set; }
 
     public virtual Employee? Employee { get; set; }
