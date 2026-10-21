@@ -41,13 +41,11 @@ namespace Sayl.UI.UserControls
                 Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
                 Grid.Columns.Add("colName", AppLang.T("Roles.Label.RoleName"));
                 Grid.Columns.Add("colDesc", AppLang.T("Roles.Label.Perms"));
-                Grid.Columns.Add("colValue", AppLang.T("Roles.Label.Value"));
                 Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns["colId"].FillWeight = 8;
-                Grid.Columns["colName"].FillWeight = 24;
-                Grid.Columns["colDesc"].FillWeight = 42;
-                Grid.Columns["colValue"].FillWeight = 12;
-                Grid.Columns["colStatus"].FillWeight = 14;
+                Grid.Columns["colId"].FillWeight = 10;
+                Grid.Columns["colName"].FillWeight = 28;
+                Grid.Columns["colDesc"].FillWeight = 46;
+                Grid.Columns["colStatus"].FillWeight = 16;
 
                 Grid.Rows.Clear();
                 foreach (var r in _roles)
@@ -64,7 +62,7 @@ namespace Sayl.UI.UserControls
                         ? AppLang.T("Roles.Fixed")
                         : r.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive");
 
-                    Grid.Rows.Add(r.RoleId, r.Name, desc, r.RoleValue, status);
+                    Grid.Rows.Add(r.RoleId, r.Name, desc, status);
                 }
             }
             catch

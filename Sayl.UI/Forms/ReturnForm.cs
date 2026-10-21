@@ -19,6 +19,9 @@ namespace Sayl.UI.Forms
 
         private int _originalInvoiceId;
         private List<Common.DTOs.ViewModel.InvoiceItemVM> _items = new();
+        private decimal _invoiceTotal;
+        private decimal _invoiceNet;
+        private decimal _netRatio;
 
         /// <summary>VULN-05: جلسة الدرج النشطة — نقد الاسترداد يُنسب لها في تقرير Z
         /// (لا لجلسة الفاتورة الأصلية المتجمدة). يمرَّر من PosForm عند الفتح.</summary>
@@ -267,12 +270,17 @@ namespace Sayl.UI.Forms
 
                 _originalInvoiceId = invoiceId;
                 _items = result.Data.Items;
+                _invoiceTotal = result.Data.TotalAmount;
+                _invoiceNet = result.Data.NetAmount;
+                _netRatio = _invoiceTotal > 0 ? _invoiceNet / _invoiceTotal : 0m;
 
                 _grid.Rows.Clear();
                 foreach (var item in _items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity, UiHelpers.Money(item.ItemPrice), 0);
+                    _grid.Rows.Add(item.ProductName, item.Quantity,
+                        UiHelpers.Money(item.ItemPrice * _netRatio), 0);
 
-                _lblInfo.Text = AppLang.T("Return.Info.Loaded", invoiceId, result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
+                _lblInfo.Text = AppLang.T("Return.Info.Loaded", invoiceId,
+                    result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
             }
             catch
             {
@@ -289,7 +297,7 @@ namespace Sayl.UI.Forms
             }
 
             var returnItems = new List<DtoReturnItem>();
-            decimal returnTotal = 0;
+            decimal grossTotal = 0;
 
             for (int i = 0; i < _grid.Rows.Count && i < _items.Count; i++)
             {
@@ -304,8 +312,10 @@ namespace Sayl.UI.Forms
                 }
 
                 returnItems.Add(new DtoReturnItem { ProductId = item.ProductId, Quantity = qty });
-                returnTotal += item.ItemPrice * qty;
+                grossTotal += item.ItemPrice * qty;
             }
+
+            decimal returnTotal = Math.Round(grossTotal * _netRatio, 2, MidpointRounding.AwayFromZero);
 
             if (returnItems.Count == 0)
             {

@@ -1,3 +1,4 @@
+using System.Text;
 using Common.DTOs;
 using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
@@ -53,6 +54,16 @@ namespace Sayl.UI.Forms
         private System.Windows.Forms.Timer _searchTimer = null!;
         private int _searchSeq;
 
+        // ══ نظام Buffer للمسح الضوئي: يلتقط الباركود من أي حقل ══
+        // يمنع الباركود من الوصول لحقل غير _txtSearch —
+        // الكاشير قد يقف على حقل الخصم/الضريبة ومسح الباركود يذهب للحقل الخاطئ.
+        private const int ScannerManualMs = 80;
+        private const int ScannerDoneMs = 500;
+        private readonly StringBuilder _scanBuf = new();
+        private Control? _heldControl;
+        private readonly System.Windows.Forms.Timer _burstTimer = new() { Interval = ScannerManualMs };
+        private readonly System.Windows.Forms.Timer _doneTimer = new() { Interval = ScannerDoneMs };
+
         // منطقة السلة
         private Label _lblItemsBadge = null!;
         private Label _lblStockWarn = null!;
@@ -74,6 +85,9 @@ namespace Sayl.UI.Forms
         public PosForm()
         {
             BuildUi();
+            KeyPreview = true;
+            _burstTimer.Tick += (_, _) => ReplayManual();
+            _doneTimer.Tick += (_, _) => CommitScan();
             Load += async (_, _) =>
             {
                 await OpenSessionAsync();
@@ -145,6 +159,69 @@ namespace Sayl.UI.Forms
             }
             catch { /* هدوء */ }
             _customerDisplay = null;
+        }
+
+        // ══ التقاط الباركود من أي حقل ══
+        // يمنع الباركود من الوصول لحقل غير _txtSearch —
+        // الكاشير قد يقف على حقل الخصم/الضريبة ومسح الباركود يذهب للحقل الخاطئ.
+        // الآلية: كل حرف يُخزّن في buffer ويُمنع من الوصول للحقل،
+        // وعند Enter أو انتهاء القارئ (500ms) يُنسخ للحقل الصحيح.
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            base.OnKeyPress(e);
+            if (char.IsControl(e.KeyChar)) return;
+
+            _scanBuf.Append(e.KeyChar);
+            e.Handled = true;
+            if (_scanBuf.Length == 1)
+            {
+                _heldControl = ActiveControl;
+                _burstTimer.Stop();
+                _burstTimer.Start();
+            }
+            else
+            {
+                _burstTimer.Stop();
+                _doneTimer.Stop();
+                _doneTimer.Start();
+            }
+        }
+
+        private void ReplayManual()
+        {
+            _burstTimer.Stop();
+            if (_scanBuf.Length >= 2) return;
+
+            if (_heldControl is TextBox tb)
+            {
+                string s = _scanBuf.ToString();
+                int pos = tb.SelectionStart;
+                tb.Text = tb.Text.Insert(pos, s);
+                tb.SelectionStart = pos + s.Length;
+            }
+            _scanBuf.Clear();
+            _heldControl = null;
+        }
+
+        private void CommitScan()
+        {
+            _doneTimer.Stop();
+            if (_scanBuf.Length >= 2)
+            {
+                string term = _scanBuf.ToString();
+                _scanBuf.Clear();
+                _heldControl = null;
+
+                _txtSearch.Text = term;
+                _txtSearch.Focus();
+                _searchTimer.Stop();
+                _ = SearchCommitAsync();
+            }
+            else
+            {
+                _scanBuf.Clear();
+                _heldControl = null;
+            }
         }
 
         // ═══════════════════════════════════════════════
@@ -1066,6 +1143,18 @@ namespace Sayl.UI.Forms
             opsGrid.Controls.Add(btnCloseSession, 1, 1);
             AddRow(layout, opsGrid, 112);
 
+            // 7ب) فواتير اليوم: كل فواتير هذا الكاشير لهذا اليوم + بحث بالوقت
+            var btnTodayInvoices = AppTheme.MakeButton(AppLang.T("Pos.TodayInvoices.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 52);
+            btnTodayInvoices.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnTodayInvoices.Click += (_, _) => ShowTodayInvoices();
+            AddRow(layout, btnTodayInvoices, 54);
+
+            // 7ج) ملصقات باركود: طباعة ملصق الباركود + رقمه لمنتجات الرفوف
+            var btnLabels = AppTheme.MakeButton(AppLang.T("Pos.LabelPrint.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 52);
+            btnLabels.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            btnLabels.Click += (_, _) => ShowLabelPrint();
+            AddRow(layout, btnLabels, 54);
+
             // 8) استلام المخزون (حسب الصلاحية)
             var btnReceive = AppTheme.MakeButton(AppLang.T("Pos.ReceiveStock.Button"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 50);
             btnReceive.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
@@ -1493,20 +1582,11 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            // VULN-35: الطباعة الحرارية التلقائية — كان إعداد «طباعة تلقائية بعد
-            // كل بيع» محفوظًا ولا يُقرأ (طابعة كاملة من الكود الميت). الآن:
-            // إن فعّلها المدير وضبط طابعة → ESC/POS مباشرة بعد كل بيع
-            // (بلا نافذة PDF) — الإيصال يخرج لحظة اكتمال الفاتورة.
-            await TryAutoThermalPrintAsync(result.Data);
-
-            // اكتملت الفاتورة (دفع كامل أو دَين) — سؤال واحد بسيط: هل يريد الكاشير طباعتها؟
-            // (يُسأل فقط لو لم تخرج حراريًا تلقائيًا — لا نكرر الطباعة مرتين)
-            if (!_autoPrintedThisSale && ConfirmationDialog.Show(this, AppLang.T("Pos.Print.Title"),
-                    AppLang.T("Pos.Print.Ask"), dangerStyle: false))
-            {
-                await InvoicePrintHelper.PrintAsync(result.Data, this);
-            }
-            _autoPrintedThisSale = false; // تصفير للفاتورة القادمة
+            // قرار المالك: بلا طباعة تلقائية إطلاقًا — بعد كل بيع نافذة واحدة
+            // دائمًا: حرارية 80mm / A4 رسمية / بدون طباعة (Enter = حرارية).
+            var printFormat = InvoiceFormatPicker.Show(this, allowSkip: true);
+            if (printFormat.HasValue)
+                await InvoicePrintHelper.PrintAsync(result.Data, this, printFormat.Value);
 
             // C1: أزلنسل أصناف السلة قبل المسح — نُحدّثها وحدها لا الكتالوج كاملًا
             int[] soldIdsForSale = _cart.Select(i => i.ProductId).Distinct().ToArray();
@@ -1515,50 +1595,25 @@ namespace Sayl.UI.Forms
             _txtSearch.Focus(); // الجلسة التالية: الماسح جاهز فورًا
         }
 
-        // ───────────────── طباعة الفاتورة بعد إتمامها ─────────────────
-        // (PDF في Documents\Sayl_POS\Invoices ثم فتح نافذة الطباعة بالنسخة الجاهزة)
-
-        /// <summary>VULN-35: الطباعة الحرارية التلقائية بعد البيع —
-        /// يقرأ إعدادَي AutoPrintReceipt وReceiptPrinter (كانا يُحفظان ولا يُقرآن)
-        /// ويطلق ReceiptPrinter.PrintInvoiceAsync (كان كودًا ميتًا) على Task.Run —
-        /// الإرسال الخام winspool حظر فلا يلامس مؤشر الواجهة. أي فشل صامت:
-        /// الإيصال تحسين، لا يوقف البيع، والسؤال اليدوي يبقى للأحوال.</summary>
-        private bool _autoPrintedThisSale;
-        private async Task TryAutoThermalPrintAsync(int invoiceId)
+        // ───────────────── فواتير اليوم ─────────────────
+        // قائمة فواتير هذا الكاشير لليوم فقط مع بحث بالوقت (ساعة / ساعة:دقيقة)
+        // واختيار الصيغة عند إعادة طباعة نسخة إضافية — نافذة TodayInvoicesForm.
+        private void ShowTodayInvoices()
         {
-            try
-            {
-                bool autoPrint;
-                string printerName;
-                InvoicePrintVM? invoice = null;
-                using (var scope = Program.Services.CreateScope())
-                {
-                    var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
-                    autoPrint = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
-                    if (!autoPrint) return;
-                    printerName = await settings.GetAsync(clsSettingsService.KeyReceiptPrinter, "");
-                    if (string.IsNullOrWhiteSpace(printerName)) return;
+            using var form = new TodayInvoicesForm(SessionState.CurrentUser?.UserId ?? 0);
+            form.ShowDialog(this);
+            _txtSearch.Focus(); // الماسح أول ما ينتظر بعد أي نافذة
+        }
 
-                    var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                    var res = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
-                    if (res.IsSuccess) invoice = res.Data;
-                }
-
-                if (invoice == null) return;
-
-                var inv = invoice;
-                var printer = printerName;
-                await Task.Run(async () =>
-                {
-                    var (ok, _) = await ReceiptPrinter.PrintInvoiceAsync(inv, printer);
-                });
-
-                _autoPrintedThisSale = true; // خرجت حراريًا — لا نكرر بالسؤال
-            }
-            catch
-            {
-                // صمت مقصود: فشل الإيصال لا يعطل البيع — السؤال اليدوي يبقى بديلًا
-            }
+        // ───────────────── ملصقات باركود ─────────────────
+        // طباعة ملصق (باركود المنتج + رقمه) على طابعة الملصقات — ZPL أو ESC/POS
+        // — لتعليق الرفوف. لا تعمل حجز ولا مسح قاعدي: منتج بلا باركود يعود
+        // برسالة صريحة تثبيت الملاحة لشاشة المنتجات.
+        private void ShowLabelPrint()
+        {
+            using var form = new LabelPrintForm();
+            form.ShowDialog(this);
+            _txtSearch.Focus();
         }
 
         // ───────────────── المرتجع / النقد / إغلاق الجلسة ─────────────────

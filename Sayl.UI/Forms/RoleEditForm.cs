@@ -20,7 +20,6 @@ namespace Sayl.UI.Forms
 
         private TextBox _txtName = null!;
         private CheckBox[] _screenChecks = null!;
-        private Label _lblSummary = null!;
 
         public RoleEditForm(DtoRole? existing)
         {
@@ -31,13 +30,13 @@ namespace Sayl.UI.Forms
         // 📖 شبكة checkboxes: صف لكل شاشة (بت واحد = خانة اختيار).
         // عند التعديل: كل خانة تُعلَّم إذا Has(existing.RoleValue, bit).
         // عند الحفظ: OR تراكمي يبني القناع (النقر المزدوج آمن بالبناء).
-        // الملخص الحي أسفل الشبكة يقرأ بصريًا ما يختاره المدير.
         private void BuildUi()
         {
             Text = _existing == null ? AppLang.T("RoleEdit.AddTitle") : AppLang.T("RoleEdit.EditTitle");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(460, 560);
+            // الطول يُحسب لاحقًا من عدد الشاشات (داخل الإقلاع أدناه) —
+            // طول ثابت (560 سابقًا) كان يقص زرّي الحفظ/الإلغاء تحت الحافة
             MaximizeBox = false;
             MinimizeBox = false;
             RightToLeft = RightToLeft.Yes;
@@ -68,22 +67,14 @@ namespace Sayl.UI.Forms
                     ForeColor = AppTheme.TextPrimary,
                     Font = new Font("Segoe UI", 10F)
                 };
-                _screenChecks[i].CheckedChanged += (_, _) => UpdateSummary();
                 Controls.Add(_screenChecks[i]);
             }
 
-            // الملخص الحي: يعرض عدد الشاشات المختارة + قيمة القناع الرقمية
-            _lblSummary = new Label
-            {
-                Text = "",
-                Bounds = new Rectangle(30, 156 + screens.Length * 34 + 6, 400, 24),
-                TextAlign = ContentAlignment.MiddleRight,
-                ForeColor = AppTheme.PrimaryDark,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
-            };
-
             var btnOk = AppTheme.MakeButton(AppLang.T("Common.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            int btnY = 156 + screens.Length * 34 + 40;
+            int btnY = 156 + screens.Length * 34 + 10;
+            // ارتفاع ديناميكي: آخر خانة + ال10px فاصل + زر 50 + هامش 18 —
+            // الأزرار ظاهرة كاملة مهما تغير عدد الشاشات في الكتالوج
+            ClientSize = new Size(460, btnY + 50 + 18);
             btnOk.Bounds = new Rectangle(30, btnY, 260, 50);
             btnOk.Click += async (_, _) => await SaveAsync();
 
@@ -91,15 +82,12 @@ namespace Sayl.UI.Forms
             btnCancel.Bounds = new Rectangle(310, btnY, 120, 50);
             btnCancel.DialogResult = DialogResult.Cancel;
 
-            Controls.AddRange(new Control[] { lblTitle, lblName, _txtName, lblScreens, _lblSummary, btnOk, btnCancel });
+            Controls.AddRange(new Control[] { lblTitle, lblName, _txtName, lblScreens, btnOk, btnCancel });
             AcceptButton = btnOk;
             CancelButton = btnCancel;
-
-            // ملخص أولي
-            UpdateSummary();
         }
 
-        /// <summary>قيمة القناع الحالية من الخانات (OR تراكمي).</summary>
+        /// <summary>قيمة القناع الحالية من الخانات (OR تراكمي) — تستخدم عند الحفظ فقط.</summary>
         private int CurrentMask()
         {
             int mask = 0;
@@ -107,15 +95,6 @@ namespace Sayl.UI.Forms
                 if (chk.Checked && chk.Tag is int bit)
                     mask |= bit;
             return mask;
-        }
-
-        private void UpdateSummary()
-        {
-            int mask = CurrentMask();
-            int count = _screenChecks.Count(c => c.Checked);
-            _lblSummary.Text = count == 0
-                ? AppLang.T("RoleEdit.Summary.Empty")
-                : AppLang.T("RoleEdit.Summary.Selected", count, _screenChecks.Length, mask);
         }
 
         private async Task SaveAsync()

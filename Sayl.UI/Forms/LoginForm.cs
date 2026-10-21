@@ -123,11 +123,11 @@ namespace Sayl.UI.Forms
             lblTagline.MouseDown += StartDrag;
 
             // ── البطاقة البيضاء: حاوية الحقول ──
-            // Bounds(40, 198, 480, 388): ارتفاع أكبر من السابق (342) —
-            // استوعبنا رابط «تغيير كلمة المرور» أسفل زر الدخول.
+            // Bounds(40, 198, 480, 342): تنتهي فوق الساعة (560) — أي رسالة خطأ
+            // تُعرض في أسفل البطاقة تبقى ظاهرة كاملة ولا تختفي خلف نص الساعة.
             var card = new Panel
             {
-                Bounds = new Rectangle(40, 198, 480, 388),
+                Bounds = new Rectangle(40, 198, 480, 342),
                 BackColor = AppTheme.CardBg
             };
             AppTheme.ApplyRoundedRegion(card, 18);
@@ -222,7 +222,7 @@ namespace Sayl.UI.Forms
 
             // ── زر الدخول: Height=54 كبير قصدًا (زر أساسي) ──
             _btnLogin = AppTheme.MakeButton(AppLang.T("Login.Button.Login"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            _btnLogin.Bounds = new Rectangle(24, 240, 432, 54);
+            _btnLogin.Bounds = new Rectangle(24, 222, 432, 50);
 
             // ── أسفل البطاقة: رابط تغيير كلمة المرور (الشكل القوي —
             // المستخدم يدير سرّه بنفسه: اسم + القديمة + الجديدة).
@@ -231,7 +231,7 @@ namespace Sayl.UI.Forms
             var lnkChangePassword = new Button
             {
                 Text = AppLang.T("Login.Link.ChangePassword"),
-                Bounds = new Rectangle(24, 300, 432, 34),
+                Bounds = new Rectangle(24, 278, 432, 26),
                 FlatStyle = FlatStyle.Flat,
                 ForeColor = AppTheme.Primary,
                 BackColor = Color.Transparent,
@@ -245,7 +245,7 @@ namespace Sayl.UI.Forms
             _lblError = new Label
             {
                 Text = "",
-                Bounds = new Rectangle(24, 342, 432, 48),
+                Bounds = new Rectangle(24, 306, 432, 34),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = AppTheme.Danger,
                 Visible = false

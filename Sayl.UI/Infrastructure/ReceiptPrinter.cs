@@ -56,15 +56,16 @@ namespace Sayl.UI.Infrastructure
             }
         }
 
-        /// <summary>إرسال بايتات خام إلى طابعة.</summary>
-        private static bool SendBytesToPrinter(string printerName, byte[] bytes)
+        /// <summary>إرسال بايتات خام إلى طابعة — مسار موحّد تتشاركه
+        /// طابعة الإيصال وطابعة الملصقات (LabelPrinter).</summary>
+        public static bool SendBytesToPrinter(string printerName, byte[] bytes, string docName = "Sayl Receipt")
         {
             if (!OpenPrinter(printerName.Normalize(), out IntPtr hPrinter, IntPtr.Zero))
                 return false;
 
             var di = new DOCINFOA
             {
-                pDocName = "Sayl Receipt",
+                pDocName = docName,
                 pOutputFile = null!,
                 pDataType = "RAW"
             };
