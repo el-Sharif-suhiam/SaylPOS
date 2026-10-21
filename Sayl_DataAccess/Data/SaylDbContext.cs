@@ -386,7 +386,10 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.PartyType, "IX_Parties_PartyType");
 
-            entity.HasIndex(e => e.Email, "parties_email_unique").IsUnique();
+            // VULN-26 follow-up: فهرس فريد **مُرشّح** — الفارغ (NULL) كثرة مسموحة
+            // والفهرس الفريد العادي يقبض بعد NULL واحد فيرتد أي إضافة عميل بلا
+            // بريد (منها الإضافة السريعة من الكاشير) بـ2601. See Upgrade_10.
+            entity.HasIndex(e => e.Email, "parties_email_unique").IsUnique().HasFilter("[Email] IS NOT NULL");
 
             entity.Property(e => e.AddressLine1).HasMaxLength(400);
             entity.Property(e => e.AddressLine2).HasMaxLength(400);

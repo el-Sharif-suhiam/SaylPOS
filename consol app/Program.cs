@@ -53,6 +53,7 @@ namespace consol_app
 
             await AuthCycle();
             var (sessionId, cashierId) = await SessionAndSaleCycle();
+            await QuickAddPartyCycle();
             if (sessionId > 0)
             {
                 await SuspendResumeCancelCycle(sessionId, cashierId);
@@ -176,6 +177,75 @@ namespace consol_app
 
         // ───────────────── 2. Session + direct sale ─────────────────
         private static int _saleInvoiceId;
+
+        // ═══════════════════════════════════════════════
+        // QuickAddPartyCycle — مسار «إضافة عميل جديد» من شاشة الكاشير:
+        //  1) إضافتان متتاليتان بلا بريد (منPosQuickAdd=true + كاشير 0 صلاحيات)
+        //     — قبل Upgrade_10 كان الثاني يرتد بـ2601 (فهرس فريد يقبض بعد NULL واحد).
+        //  2) بريد مكرر لموجود فعلًا — يجب أن يفشل برسالة صريحة فيها «مستخدم مسبقًا».
+        //  3) تلطيف النظام: صفوف الاختبار تُعطَّل (حذف ناعم) لا تُمس بيانات حقيقية.
+        // ═══════════════════════════════════════════════
+        private static async Task QuickAddPartyCycle()
+        {
+            Console.WriteLine("--- POS QUICK ADD PARTY ---");
+            using var s = Scope();
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+            var parties = Svc<clsPartyService>(s);
+
+            var cashier = await db.Users.FirstAsync(u => u.Username == "cashier1");
+            string stamp = "QA-" + DateTime.Now.Ticks.ToString()[^8..];
+
+            // 1) إضافتان بلا بريد — كلتاهما يجب أن تنجحا
+            var r1 = await parties.AddNewPartyWithRoleAsync(
+                new DtoParty { PartyType = 'C', Name = "زبون سريع " + stamp + " A", Phone1 = "079000001" },
+                actorUserId: cashier.UserId, fromPosQuickAdd: true);
+            Check("quick-add #1 without email succeeds", r1.IsSuccess, r1.Message);
+
+            var r2 = await parties.AddNewPartyWithRoleAsync(
+                new DtoParty { PartyType = 'C', Name = "زبون سريع " + stamp + " B", Phone1 = "079000002" },
+                actorUserId: cashier.UserId, fromPosQuickAdd: true);
+            Check("quick-add #2 without email succeeds (filtered unique index)", r2.IsSuccess, r2.Message);
+
+            // نقطتان محجوزتان لخطوة 2 قيد الاختبار
+            List<int> created = new();
+            if (r1.IsSuccess) created.Add(r1.Data);
+            if (r2.IsSuccess) created.Add(r2.Data);
+
+            // 2) بريد مكرر: نستعير بريد طرف قائم وولها للزبون الجديد
+            var withEmail = await db.Parties
+                .Where(p => p.Email != null)
+                .Select(p => new { p.PartyId, p.Email })
+                .FirstOrDefaultAsync();
+            if (withEmail != null && r2.IsSuccess)
+            {
+                var dup = await parties.AddNewPartyWithRoleAsync(
+                    new DtoParty { PartyType = 'C', Name = "زبون بريد مكرر " + stamp, Email = withEmail.Email },
+                    actorUserId: cashier.UserId, fromPosQuickAdd: true);
+                Check("duplicate email rejected with clear message",
+                    !dup.IsSuccess && (dup.Message?.Contains("مستخدم مسبقًا") ?? false),
+                    dup.Message ?? "");
+            }
+            else
+                Check("duplicate email test skipped (no seeded email or quick-add#2 failed)", false, withEmail?.Email ?? "");
+
+            // 3) تحقق مستقل: بانين أفادان بلا بريد يُقبّل كلاهما في القاعدة (NULL كثرة مسموحة)
+            int nullEmailCount = await VerifyAsync(async vdb => await vdb.Parties
+                .Where(p => p.PartyType == 'C')
+                .CountAsync(p => p.Email == null));
+            Check("database now holds multiple NULL-email parties", nullEmailCount >= 2, $"NULL count={nullEmailCount}");
+
+            // 4) تهذيف: تعطيل صفوف الاختبار فقط (حذف ناعم — بلا استيفاء بيانات حقيقية)
+            await VerifyAsync(async vdb =>
+            {
+                foreach (var id in created)
+                {
+                    var p = await vdb.Parties.FindAsync(id);
+                    if (p != null) vdb.Entry(p).Property(x => x.IsActive).CurrentValue = false;
+                }
+                await vdb.SaveChangesAsync();
+                return true;
+            });
+        }
 
         private static async Task<(int sessionId, int cashierId)> SessionAndSaleCycle()
         {

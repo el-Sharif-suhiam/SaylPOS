@@ -236,7 +236,30 @@ IF OBJECT_ID(N'dbo.Settings', N'U') IS NULL
         SettingKey   NVARCHAR(100)  NOT NULL CONSTRAINT PK_Settings PRIMARY KEY,
         SettingValue NVARCHAR(MAX)  NULL,
         UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (GETDATE())
-    );";
+    );
+/* Upgrade_10: parties_email_unique -> فهرس فريد مُرشّح. الفهرس الفريد
+   العادي يقبض بعد NULL واحد فقط فيرتد أي عميل ثانٍ بلا بريد (منها
+   الإضافة السريعة من POS) بـ2601 على القواعد القديمة. لا بيانات تُمس:
+   البريدات الفعلية المكررة تحجب الاستبدال حتي يُنظفها المالك يدويًا.
+   (Microsoft.Data.SqlClient يقف QUOTED_IDENTIFIER ON — شرط الفوهرس المرشح.) */
+IF OBJECT_ID(N'dbo.Parties', N'U') IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.Parties')
+          AND name = N'parties_email_unique'
+          AND is_unique = 1 AND has_filter = 1
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM dbo.Parties WHERE Email IS NOT NULL
+        GROUP BY Email HAVING COUNT(*) > 1
+    )
+BEGIN
+    IF EXISTS (SELECT 1 FROM sys.indexes
+               WHERE object_id = OBJECT_ID(N'dbo.Parties')
+                 AND name = N'parties_email_unique')
+        DROP INDEX parties_email_unique ON dbo.Parties;
+    EXEC(N'CREATE UNIQUE INDEX parties_email_unique ON dbo.Parties(Email) WHERE Email IS NOT NULL');
+END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
         public async Task EnsureSchemaUpgradesAsync()

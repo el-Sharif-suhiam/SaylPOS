@@ -230,7 +230,8 @@ namespace Sayl.UI.Forms
             {
                 PartyType = 'C',
                 Name = input.ResultValue.Value.name,
-                Phone1 = string.IsNullOrWhiteSpace(input.ResultValue.Value.phone) ? null : input.ResultValue.Value.phone,
+                Phone1 = string.IsNullOrWhiteSpace(input.ResultValue.Value.phone1) ? null : input.ResultValue.Value.phone1,
+                Phone2 = string.IsNullOrWhiteSpace(input.ResultValue.Value.phone2) ? null : input.ResultValue.Value.phone2,
                 IsActive = true
             };
 
@@ -258,16 +259,16 @@ namespace Sayl.UI.Forms
             Close();
         }
 
-        /// <summary>نافذة إدخال سريعة: اسم + جوال.</summary>
+        /// <summary>نافذة إدخال سريعة: اسم + جوال + جوال ثاني.</summary>
         private class QuickNameForm : Form
         {
-            public (string name, string phone)? ResultValue { get; private set; }
+            public (string name, string phone1, string phone2)? ResultValue { get; private set; }
 
             public QuickNameForm()
             {
                 FormBorderStyle = FormBorderStyle.FixedDialog;
                 StartPosition = FormStartPosition.CenterParent;
-                ClientSize = new Size(380, 220);
+                ClientSize = new Size(380, 310);
                 MaximizeBox = false;
                 MinimizeBox = false;
                 RightToLeft = RightToLeft.Yes;
@@ -275,14 +276,20 @@ namespace Sayl.UI.Forms
                 Text = AppLang.T("CustomerPicker.QuickAdd.Title");
 
                 var lblName = new Label { Text = AppLang.T("CustomerPicker.QuickAdd.Name"), Bounds = new Rectangle(24, 16, 332, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-                var txtName = new TextBox { Bounds = new Rectangle(24, 40, 332, 36), Font = AppTheme.FontBody };
-                var lblPhone = new Label { Text = AppLang.T("CustomerPicker.Label.Phone"), Bounds = new Rectangle(24, 86, 332, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-                var txtPhone = new TextBox { Bounds = new Rectangle(24, 110, 332, 36), Font = AppTheme.FontBody };
+                // حرس إدخال: حدود مخطط DB (الاسم 150، الجوالان 20) — يمنع فشل
+                // «تجاوز طول البيانات» من الوصول للقاعدة أصلًا (Upgrade_10 جار)
+                var txtName = new TextBox { Bounds = new Rectangle(24, 40, 332, 36), Font = AppTheme.FontBody, MaxLength = 150 };
+
+                var lblPhone1 = new Label { Text = AppLang.T("CustomerPicker.Label.Phone"), Bounds = new Rectangle(24, 86, 332, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+                var txtPhone1 = new TextBox { Bounds = new Rectangle(24, 110, 332, 36), Font = AppTheme.FontBody, MaxLength = 20 };
+
+                var lblPhone2 = new Label { Text = AppLang.T("CustomerPicker.Label.Phone2"), Bounds = new Rectangle(24, 156, 332, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+                var txtPhone2 = new TextBox { Bounds = new Rectangle(24, 180, 332, 36), Font = AppTheme.FontBody, MaxLength = 20 };
 
                 var btnOk = AppTheme.MakeButton(AppLang.T("CustomerPicker.QuickAdd.Button.Add"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-                btnOk.Bounds = new Rectangle(24, 158, 180, 46);
+                btnOk.Bounds = new Rectangle(24, 236, 180, 46);
                 var btnCancel = AppTheme.MakeButton(AppLang.T("Common.Button.Cancel"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-                btnCancel.Bounds = new Rectangle(216, 158, 140, 46);
+                btnCancel.Bounds = new Rectangle(216, 236, 140, 46);
                 btnCancel.DialogResult = DialogResult.Cancel;
 
                 btnOk.Click += (_, _) =>
@@ -292,11 +299,11 @@ namespace Sayl.UI.Forms
                         UiHelpers.ShowError(this, AppLang.T("CustomerPicker.QuickAdd.Msg.NameRequired"));
                         return;
                     }
-                    ResultValue = (txtName.Text.Trim(), txtPhone.Text?.Trim() ?? "");
+                    ResultValue = (txtName.Text.Trim(), txtPhone1.Text?.Trim() ?? "", txtPhone2.Text?.Trim() ?? "");
                     DialogResult = DialogResult.OK;
                 };
 
-                Controls.AddRange(new Control[] { lblName, txtName, lblPhone, txtPhone, btnOk, btnCancel });
+                Controls.AddRange(new Control[] { lblName, txtName, lblPhone1, txtPhone1, lblPhone2, txtPhone2, btnOk, btnCancel });
                 AcceptButton = btnOk;
                 CancelButton = btnCancel;
             }

@@ -90,7 +90,7 @@ CREATE TABLE Parties
     CONSTRAINT CK_Parties_PartyType CHECK (PartyType IN ('C','S','B'))
 );
 
-CREATE UNIQUE INDEX parties_email_unique ON Parties(email);
+CREATE UNIQUE INDEX parties_email_unique ON Parties(email) WHERE email IS NOT NULL;
 
 -----------------------------------------------------------
 -- 4) Create Customers

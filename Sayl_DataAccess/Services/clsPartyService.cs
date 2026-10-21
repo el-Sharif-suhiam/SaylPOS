@@ -5,6 +5,7 @@ using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
+using System.ComponentModel.DataAnnotations;
 namespace Sayl.Core.Services
 {
     public class clsPartyService
@@ -41,12 +42,23 @@ namespace Sayl.Core.Services
                   return Result<int>.Fail("إضافة هذا النوع من الأطراف تتطلب صلاحية شاشته المخصصة.");
           }
 
-             using var transaction = await _dbContext.Database.BeginTransactionAsync();
+             // فحص الاسم قبل فتح المعاملة: أخطاء الشكل (فارغ/طول) تعود
+             // برسالتها الحقيقية لا برسالة DB عامة — المصدر: ValidationException
              try
              {
-                 Party newParty = new Party
-                 {
-                     Name = clsValidation.ValidateString(dtoParty.Name, "Name"),
+                 dtoParty.Name = clsValidation.ValidateString(dtoParty.Name, "Name");
+             }
+             catch (ValidationException vex)
+             {
+                 return Result<int>.Fail(vex.Message);
+             }
+
+              using var transaction = await _dbContext.Database.BeginTransactionAsync();
+              try
+             {
+                  Party newParty = new Party
+                  {
+                      Name = dtoParty.Name, // مُتحقق منه قبل فتح المعاملة أعلاه
                      PartyType = dtoParty.PartyType,
                      IsActive = dtoParty.IsActive,
                      Email = string.IsNullOrWhiteSpace(dtoParty.Email) ? null : dtoParty.Email,
@@ -70,10 +82,25 @@ namespace Sayl.Core.Services
                  await transaction.CommitAsync();
                  return Result<int>.Ok(newParty.PartyId, "تمت إضافة الطرف بنجاح.");
              }
-             catch
+             catch (ValidationException vex)
              {
                  await transaction.RollbackAsync();
-                 return Result<int>.Fail("فشلت عملية الإضافة. الرجاء المحاولة مرة أخرى.");
+                 return Result<int>.Fail(vex.Message);
+             }
+             catch (DbUpdateException dbEx) when (dbEx.InnerException is Microsoft.Data.SqlClient.SqlException sql &&
+                                                  sql.Number == 2601 &&
+                                                  sql.Message.Contains("parties_email_unique"))
+             {
+                 // Upgrade_10: البريد الفريد المُرشّح — تعارض بريد فعلي (ليس NULL)
+                 await transaction.RollbackAsync();
+                 return Result<int>.Fail(string.IsNullOrWhiteSpace(dtoParty.Email)
+                     ? "بريد الطرف مطلوب لإكمال الإضافة." 
+                     : $"البريد الإلكتروني «{dtoParty.Email}» مستخدم مسبقًا لطرف آخر.");
+             }
+             catch (Exception ex)
+             {
+                 await transaction.RollbackAsync();
+                 return Result<int>.Fail($"فشلت عملية الإضافة: {ex.Message}");
              }
          }
 
