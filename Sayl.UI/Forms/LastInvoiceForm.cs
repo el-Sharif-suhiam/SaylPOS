@@ -2,6 +2,7 @@ using Common.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
+using Sayl.UI.Controls;
 using Sayl.UI.Infrastructure;
 
 namespace Sayl.UI.Forms
@@ -164,7 +165,10 @@ namespace Sayl.UI.Forms
         private async Task PrintAsync()
         {
             if (_invoiceId == null) return;
-            await InvoicePrintHelper.PrintAsync(_invoiceId.Value, this);
+            // إعادة طباعة نسخة إضافية: اختيار الصيغة (حرارية / A4) ثم المسار الموحّد
+            var fmt = InvoiceFormatPicker.Show(this, allowSkip: false);
+            if (fmt.HasValue)
+                await InvoicePrintHelper.PrintAsync(_invoiceId.Value, this, fmt.Value);
         }
     }
 }

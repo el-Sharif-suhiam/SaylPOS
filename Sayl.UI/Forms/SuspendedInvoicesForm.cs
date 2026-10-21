@@ -275,9 +275,11 @@ namespace Sayl.UI.Forms
 
             Changed = true;
 
-            // اكتملت الفاتورة — سؤال واحد: هل يريد الكاشير طباعتها؟
-            if (ConfirmationDialog.Show(this, AppLang.T("Pos.Print.Title"), AppLang.T("Pos.Print.Ask"), dangerStyle: false))
-                await InvoicePrintHelper.PrintAsync(invoice.InvoiceId, this);
+            // اكتمل استكمال المعلق — النافذة الثلاثية الموحدة: حرارية / A4 / بدون
+            // (نفس سلوك البيع المباشر — Pos.Print.Title/Ask أُزيلت من مفاتيح اللغة)
+            var printFormat = InvoiceFormatPicker.Show(this, allowSkip: true);
+            if (printFormat.HasValue)
+                await InvoicePrintHelper.PrintAsync(invoice.InvoiceId, this, printFormat.Value);
 
             await LoadInvoicesAsync();
         }
