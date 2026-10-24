@@ -151,9 +151,13 @@ namespace Sayl.UI
         // ── VULN-47: بوابة حساب المدير الأول ──────────────────────────
         /// <summary>
         /// تنشئ حساب المدير الافتراضي (admin/Admin@123) صامتًا عند صفر مستخدمين
-        /// نشطين — لا توجد شاشة إنشاء في المثبّت بعد الآن، والحساب يُجبر على
-        /// تغيير كلمة المرور في أول دخول (MustChangePassword=1). تُرجع false فقط
-        /// إذا فشل الإنشاء التلقائي وأُلغى الحاجز التفاعلي الاحتياطي.
+        /// نشطين — لا توجد شاشة إنشاء تفاعلية إطلاقًا، والحساب يُجبر على تغيير
+        /// كلمة المرور في أول دخول (MustChangePassword=1).
+        /// سباق الإقلاع بعد التثبيت: المثبّت ينطلق التطبيق فورًا وقد تكون خدمة
+        /// SQL أو SQL Browser ما زالا يجهزان (TCP 258 مرتين في سجل الأخطاء)،
+        /// لذا يعاد المحاولة حتى 6 مرات قبل الاستسلام.
+        /// عند الفشل النهائي: رسالة واضحة ثم الاستمرار — LoginForm يُظهر خطأ
+        /// الاتصال بوضوح، والإقلاع التالي يعيد محاولة الإنشاء تلقائيًا.
         /// </summary>
         private static bool EnsureOwnerSetup()
         {
@@ -165,25 +169,49 @@ namespace Sayl.UI
                 // ملف pending-owner الوراثي (نسخة مثبّت أقدم) — تنظيف فقط
                 SafeDelete(PendingOwnerFile);
 
-                // ترقية المخطط idempotent قبل أي استعلام مستخدمين (القواعد الأقدم
-                // بلا عمود MustChangePassword أو بلا جدول Settings)
-                usersService.EnsureSchemaUpgradesAsync().GetAwaiter().GetResult();
+                for (int attempt = 1; ; attempt++)
+                {
+                    try
+                    {
+                        // ترقية المخطط idempotent قبل أي استعلام مستخدمين (القواعد الأقدم
+                        // بلا عمود MustChangePassword أو بلا جدول Settings)
+                        usersService.EnsureSchemaUpgradesAsync().GetAwaiter().GetResult();
 
-                // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
-                if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())
-                    return true;
+                        // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
+                        if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())
+                            return true;
 
-                // صفر مستخدمين نشطين: الحساب الافتراضي مع إجبار تغيير أول دخول
-                var result = usersService.EnsureDefaultAdminAsync().GetAwaiter().GetResult();
-                if (result.IsSuccess)
-                    return true;
+                        var result = usersService.EnsureDefaultAdminAsync().GetAwaiter().GetResult();
+                        if (result.IsSuccess)
+                            return true;
 
-                // فشل الإنشاء التلقائي (قاعدة معطّلة إلخ): شاشة تفاعلية خط الدفاع الأخير
-                using var dlg = new OwnerSetupForm(Core.Services.clsUsersService.DefaultAdminUsername);
-                if (dlg.ShowDialog() != DialogResult.OK)
-                    return false;
-
-                return true;
+                        // فشل منطقي (ليس اتصالًا) — لا شاشة إنشاء: رسالة + استمرار،
+                        // والإقلاع القادم يعيد المحاولة تلقائيًا.
+                        LogError("OWNER_SETUP", new Exception(result.Message));
+                        MessageBox.Show(
+                            AppLang.T("Owner.Err.Failed", result.Message ?? "") + "\n" +
+                            AppLang.T("Startup.DbRetryHint"),
+                            AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
+                            MessageBoxDefaultButton.Button1,
+                            MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError("OWNER_SETUP", ex);
+                        if (attempt >= 6)
+                        {
+                            // كل المحاولات فشلت — رسالة اتصال صريحة، بلا أي شاشة إنشاء
+                            MessageBox.Show(
+                                AppLang.T("Startup.DbNotReady"),
+                                AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
+                                MessageBoxDefaultButton.Button1,
+                                MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                            return true;
+                        }
+                        Thread.Sleep(5000); // خدمة SQL/Browser قد يكونان يجهزان بعد التثبيت
+                    }
+                }
             }
             catch (Exception ex)
             {

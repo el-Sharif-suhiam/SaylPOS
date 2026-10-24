@@ -846,7 +846,9 @@ namespace Sayl.UI.Forms
 
             _gridCart.Columns.Clear();
 
-            _gridCart.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            // اسم المنتج للقراءة فقط — الكاشير لا يعدل بيانات الصنف (فشل
+            // طباعة الإيصال/تقارير الربح لو حُرف الاسم من السلة). الكمية وحدها قابلة للتحرير.
+            _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colProduct", HeaderText = AppLang.T("Common.Label.Product"), ReadOnly = true });
 
             var cPrice = new DataGridViewCellStyle { Format = "N2", Alignment = DataGridViewContentAlignment.MiddleCenter };
             _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colPrice", HeaderText = AppLang.T("Common.Label.Price"), DefaultCellStyle = cPrice, ReadOnly = true });

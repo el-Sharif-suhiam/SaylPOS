@@ -213,7 +213,13 @@ begin
     Result := Result + 'User Id=' + SqlLogin + ';Password=' + SqlPass + ';'
   else
     Result := Result + 'Trusted_Connection=True;';
-  Result := Result + 'TrustServerCertificate=True;';
+  { Encrypt=False: with the modern SqlClient default (Encrypt=Mandatory)
+    Shared Memory is unusable and the app depends 100% on TCP+SQL Browser -
+    the fragile path that caused the 'no connection' loop right after
+    install. Encrypt=False lets local connections fall back to Shared
+    Memory (terminals still connect over TCP). Trust stays equivalent:
+    TrustServerCertificate=True already skips certificate validation. }
+  Result := Result + 'Encrypt=False;TrustServerCertificate=True;';
 end;
 
 function BuildOleDbConnString(const InitialCatalog: String): String;
@@ -500,19 +506,28 @@ begin
 
   { الامتياز الأدنى — no sysadmin ever:
     - dbcreator: RESTORE DATABASE + ALTER DATABASE (SINGLE/MULTI_USER) التي يحتاجها التطبيق
-    - db_backupoperator: BACKUP DATABASE
-    - dbo عبر ALTER AUTHORIZATION: كامل CRUD على SaylDB (لا يحتاج تبديل قاعدة — ينفذ من أي سياق)
-    إعادة التثبيت على أجهزة قديمة تسحب sysadmin تلقائيًا (شرط EXISTS قبل DROP). }
+    - dbo عبر ALTER AUTHORIZATION: كامل CRUD + النسخ الاحتياطي على SaylDB (لا يحتاج تبديل قاعدة — ينفذ من أي سياق)
+    FIX: كانت الدفعة تحتوي 'ALTER SERVER ROLE db_backupoperator' — هذا دور
+    قاعدة بيانات لا دور خادم، فكان تنفيذ الدفعة كاملة يفشل عند هذا السطر
+    ويتخطى ALTER AUTHORIZATION (ملكية SaylDB) — فيبقى login 'sayl' بلا أي
+    وصول إلى SaylDB على التثبيت فوق قاعدة موجودة مسبقًا («لا يوجد اتصال»).
+    الآن: db_backupoperator حُذف (dbo يمنحه ضمنيًا)، وكل أمر في استدعاء
+    مستقل حتى لا يُسقط فشلُ أحدها البقية. }
   Conn.Execute(
     'IF EXISTS (SELECT 1 FROM sys.server_role_members m ' +
     'JOIN sys.server_principals r ON m.role_principal_id = r.principal_id ' +
     'JOIN sys.server_principals p ON m.member_principal_id = p.principal_id ' +
     'WHERE r.name = ''sysadmin'' AND p.name = ''' + SaylLoginName + ''') ' +
     'ALTER SERVER ROLE sysadmin DROP MEMBER [' + SaylLoginName + ']; ' +
-    'ALTER SERVER ROLE dbcreator ADD MEMBER [' + SaylLoginName + ']; ' +
-    'ALTER SERVER ROLE db_backupoperator ADD MEMBER [' + SaylLoginName + ']; ' +
-    'IF DB_ID(N''SaylDB'') IS NOT NULL ' +
-    'ALTER AUTHORIZATION ON DATABASE::[SaylDB] TO [' + SaylLoginName + '];');
+    'ALTER SERVER ROLE dbcreator ADD MEMBER [' + SaylLoginName + '];');
+  try
+    { في استدعاء مستقل حتى لا يُسكَت فشله على يد فشل سطر آخر }
+    Conn.Execute(
+      'IF DB_ID(N''SaylDB'') IS NOT NULL ' +
+      'ALTER AUTHORIZATION ON DATABASE::[SaylDB] TO [' + SaylLoginName + '];');
+  except
+    AppendLog(Log, 'NOTE: ALTER AUTHORIZATION on SaylDB failed: ' + GetExceptionMessage);
+  end;
   AppendLog(Log, 'Login ''' + SaylLoginName + ''' ready (least privilege, no sysadmin).');
 end;
 
