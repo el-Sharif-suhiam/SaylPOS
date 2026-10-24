@@ -435,20 +435,9 @@ begin
   end;
 end;
 
-{ Silently install the bundled SQL Server Express.
-  Robust path: unpack the 266 MB bootstrap to a SHORT folder first
-  (deep temp paths break the SQL self-extractor / MSI 260-char limit),
-  then run the extracted setup.exe. Exit codes 0 AND 3010 (success +
-  reboot required) are treated as success - 3010 is NOT a failure. }
-{ Silently install the bundled SQL Server Express.
-  Robust path: copy the 266 MB bootstrap to a SHORT root-level folder
-  first (deep temp paths break the SQL self-extractor / MSI 260-char
-  limit - critical with long or non-ASCII user names), then run it.
-  Exit codes 0 AND 3010 (success + reboot required) are treated as
-  success - 3010 is NOT a failure, but it flags NeedRestart. }
 function InstallSqlExpress(Log: TStringList): Boolean;
 var
-  Src, ShortDir, ShortSrc, Params, SummaryPath: String;
+  Src, ShortDir, Params, SummaryPath: String;
   ResCode: Integer;
 begin
   Result := False;
@@ -515,13 +504,6 @@ begin
     NeedRestart := True;
     AppendLog(Log, 'SQL Express installed OK, but Windows requested a restart (3010) - ' +
       'the engine may stay unreachable until that restart.');
-  end;
-
-  { clean up the relocated bootstrap }
-  try
-    if Pos(ShortDir, Src) = 1 then
-      DelTree(ShortDir, True, True, True);
-  except
   end;
 
   AppendLog(Log, 'SQL Server Express installed OK.');
@@ -1387,9 +1369,16 @@ begin
           'and the program will ask you to change this password immediately at first sign-in.' + NL
       else
         SeedMsg := '';
+
+      { 3010 restart warning: always shown when the flag is set, even if
+        DB setup succeeded (the engine may still need a reboot). Shown FIRST
+        so it cannot be missed. }
       if NeedRestart then
-        SeedMsg := NL + '*** IMPORTANT: Windows requested a restart (database engine was just installed). ' +
-          'If the program cannot connect, restart this PC and everything will work. ***' + NL + NL + SeedMsg;
+        SeedMsg := NL + '============================================' + NL +
+          '*** ACTION REQUIRED: Restart Windows now ***' + NL +
+          'The database engine was just installed and requires a restart to become ' +
+          'fully operational. After restarting, run the program again - everything will work.' + NL +
+          '============================================' + NL + SeedMsg;
       MsgBox('Setup finished successfully.' + NL + NL +
         'Connection : ' + FinalServer + NL +
         'Database   : SaylDB' + NL +
