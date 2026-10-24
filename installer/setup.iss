@@ -67,7 +67,7 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent; Check: LaunchAppAllowed
 
 ; ============================================================================
 
@@ -119,6 +119,12 @@ var
   SqlPass: String;
   InstanceFound: Boolean;
   DbJustCreated: Boolean;
+  { SQL Express exit code 3010 = installed OK but Windows wants a restart;
+    the engine may not accept connections until that restart happens. }
+  NeedRestart: Boolean;
+  { True only when the database setup finished successfully - gates the
+    postinstall app launch so the app never starts against a dead engine. }
+  DbSetupOk: Boolean;
 
   { ---- options page (main role): demo data only ---- }
   OptionsPage: TWizardPage;
@@ -434,9 +440,15 @@ end;
   (deep temp paths break the SQL self-extractor / MSI 260-char limit),
   then run the extracted setup.exe. Exit codes 0 AND 3010 (success +
   reboot required) are treated as success - 3010 is NOT a failure. }
+{ Silently install the bundled SQL Server Express.
+  Robust path: copy the 266 MB bootstrap to a SHORT root-level folder
+  first (deep temp paths break the SQL self-extractor / MSI 260-char
+  limit - critical with long or non-ASCII user names), then run it.
+  Exit codes 0 AND 3010 (success + reboot required) are treated as
+  success - 3010 is NOT a failure, but it flags NeedRestart. }
 function InstallSqlExpress(Log: TStringList): Boolean;
 var
-  Src, Params, SummaryPath: String;
+  Src, ShortDir, ShortSrc, Params, SummaryPath: String;
   ResCode: Integer;
 begin
   Result := False;
@@ -445,6 +457,21 @@ begin
   begin
     AppendLog(Log, 'ERROR: SQLEXPR_x64_ENU.exe was not found inside the installer.');
     Exit;
+  end;
+
+  { Deep %TEMP% paths break the SQL self-extractor (MSI 260-char limit),
+    especially with long/non-ASCII user names. Relocate to a short
+    root-level path; fall back to the original location if the copy fails. }
+  ShortDir := ExpandConstant('{sd}\SaylSQLSetup');
+  try
+    ForceDirectories(ShortDir);
+    if FileCopy(Src, AddBackslash(ShortDir) + 'SQLEXPR_x64_ENU.exe', False) then
+      Src := ShortDir + '\SQLEXPR_x64_ENU.exe'
+    else
+      AppendLog(Log, 'NOTE: could not relocate SQL bootstrap to ' + ShortDir +
+        ' - running from temp (may hit path-length limits).');
+  except
+    AppendLog(Log, 'NOTE: short-path relocation skipped: ' + GetExceptionMessage);
   end;
 
   { SQL Server 2022's SQLEXPR_x64_ENU.exe is a self-contained installer that
@@ -484,7 +511,18 @@ begin
     Exit;
   end;
   if ResCode = 3010 then
-    AppendLog(Log, 'SQL Server Express installed OK, but Windows may request a restart.');
+  begin
+    NeedRestart := True;
+    AppendLog(Log, 'SQL Express installed OK, but Windows requested a restart (3010) - ' +
+      'the engine may stay unreachable until that restart.');
+  end;
+
+  { clean up the relocated bootstrap }
+  try
+    if Pos(ShortDir, Src) = 1 then
+      DelTree(ShortDir, True, True, True);
+  except
+  end;
 
   AppendLog(Log, 'SQL Server Express installed OK.');
   Result := True;
@@ -1204,8 +1242,9 @@ begin
 
       if InstanceFound then
       begin
-        { give the engine up to 3 minutes to accept connections }
-        if not WaitForInstanceReady(FinalServer, 180) then
+        { give the engine up to 5 minutes to accept connections - a freshly
+          installed engine can take 60-120s before it accepts connections }
+        if not WaitForInstanceReady(FinalServer, 300) then
           AppendLog(Log, 'NOTE: engine is not accepting connections yet.');
         { 2b) ensure the 'sayl' login exists - via WINDOWS admin connection }
         if not CustomLogin then
@@ -1311,6 +1350,7 @@ begin
     end;
 
     Log.SaveToFile(LogPath);
+    DbSetupOk := Ok;
 
     { never block unattended installs with script dialogs }
     if WizardSilent() then
@@ -1333,16 +1373,23 @@ begin
           'Computer name : ' + GetComputerNameString + NL +
           'Access code   : ' + SqlPass + NL +
           'Write these down - they will be required when installing each extra terminal.';
-      { VULN-47: the default admin account is created by the app on first launch;
-        the program forces its password to be changed at first sign-in. }
+      { The FIRST sign-in account: created by the app automatically on the first
+        launch (only on a brand-new database), and the program forces its
+        password to be changed at first sign-in. Shown here so the owner has
+        the credentials in hand to open the system the first time (VULN-47). }
       if IsMainRole and DbJustCreated and Ok then
-        SeedMsg := NL + '--- Default admin account ---' + NL +
+        SeedMsg := NL + '==============================' + NL +
+          '--- First sign-in account ---' + NL +
           'User     : ' + 'admin' + NL +
           'Password : ' + 'Admin@123' + NL +
-          'It is created automatically on first launch, and the program will ' +
-          'make you change this password the first time you sign in.'
+          '==============================' + NL +
+          'This account is created automatically the first time the program starts, ' +
+          'and the program will ask you to change this password immediately at first sign-in.' + NL
       else
         SeedMsg := '';
+      if NeedRestart then
+        SeedMsg := NL + '*** IMPORTANT: Windows requested a restart (database engine was just installed). ' +
+          'If the program cannot connect, restart this PC and everything will work. ***' + NL + NL + SeedMsg;
       MsgBox('Setup finished successfully.' + NL + NL +
         'Connection : ' + FinalServer + NL +
         'Database   : SaylDB' + NL +
@@ -1352,6 +1399,14 @@ begin
   finally
     Log.Free;
   end;
+end;
+
+{ Postinstall app launch gate: never start the app against a dead engine
+  (a failed database setup). A 3010 restart flag alone does not block -
+  the engine is often fully reachable before the restart happens. }
+function LaunchAppAllowed(): Boolean;
+begin
+  Result := DbSetupOk;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
