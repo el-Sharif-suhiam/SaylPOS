@@ -302,6 +302,26 @@ namespace Sayl.Core.Services
 
                         batchId = batch.BatchId;
                     }
+                    else
+                    {
+                        // زيادة بلا رقم دفعة — نصنع دفعة تجميعية تلقائيًا:
+                        // الخصم يمر عبر الدفعات حصرًا (FEFO)، ومخزون بلا دفعة
+                        // يظل «غير قابل للبيع» رغم ظهوره في Inventory (خطأ
+                        // خبز البرجر الحي: تسوية +300 بلا دفعة = رفض بيع).
+                        // الدفعة التجميعية بلا انتهاء تُبقي المنتج قابلًا للبيع
+                        // وتحفظ التوازن: مجموع الدفعات = المتاح دائمًا.
+                        var autoBatch = new Batch
+                        {
+                            ProductId = request.ProductId,
+                            BatchNumber = $"ADJ-{DateTime.UtcNow:yyyyMMdd-HHmmss}",
+                            ExpiryDate = request.ExpiryDate,
+                            BatchQuantity = request.Quantity,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _dbContext.Batches.Add(autoBatch);
+                        await _dbContext.SaveChangesAsync(); // توليد BatchId قبل الحركة
+                        batchId = autoBatch.BatchId;
+                    }
 
                     // زيادة ذرية للمخزون
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(

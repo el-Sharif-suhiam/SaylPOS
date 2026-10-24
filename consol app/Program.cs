@@ -67,6 +67,7 @@ namespace consol_app
             await ReportsCycle();
             await SettingsBackupCycle();
             await CrudSmokeCycle();
+            await AdjustBatchConsistencyCycle();
 
             Console.WriteLine();
             Console.WriteLine($"================ RESULT: {_pass} PASSED / {_fail} FAILED ================");
@@ -1176,6 +1177,54 @@ namespace consol_app
 
             var act = await products.ActivateProductAsync(created.Data);
             Check("product reactivate", act.IsSuccess, act.Message);
+        }
+
+        // ───────────────── 11. تعادل الدفعات والمخزون (خطأ خبز البرجر) ─────────────────
+        // التسوية بلا رقم دفعة يجب أن تصنع دفعة تلقائيًا — وإلا يبقى المخزون
+        // «غير قابل للبيع»: FEFO يرفض رغم وجود كمية في Inventory.
+        private static async Task AdjustBatchConsistencyCycle()
+        {
+            Console.WriteLine("--- ADJUST/BATCH CONSISTENCY ---");
+            using var s = Scope();
+            var products = Svc<clsProductService>(s);
+            var stock = Svc<clsStockService>(s);
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+            var admin = await db.Users.FirstAsync(u => u.Username == "admin");
+
+            var created = await products.AddNewProductAsync(new DtoProduct
+            {
+                Name = "اختبار دفعة تلقائية " + DateTime.Now.Ticks % 100000,
+                Barcode = "TESTB" + DateTime.Now.Ticks % 1000000000,
+                BasePrice = 3m, CostPrice = 1m, Type = "stock", Unit = "قطعة", IsActive = true
+            }, admin.UserId);
+            Check("recon product create", created.IsSuccess && created.Data > 0, created.Message);
+            if (!created.IsSuccess || created.Data <= 0) return;
+            int pid = created.Data;
+
+            var adj = await stock.AdjustStockAsync(new DtoStockAdjustmentRequest
+            {
+                ProductId = pid,
+                Quantity = 5,
+                IsIncrease = true,
+                Reason = "هارنس: زيادة بلا رقم دفعة",
+                UserId = admin.UserId
+            });
+            Check("adjust +5 without batch number succeeds", adj.IsSuccess, adj.Message);
+
+            int batchQty = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+            Check("auto batch created with quantity", batchQty == 5, $"batchSum={batchQty}");
+
+            // كان يفشل قبل الإصلاح: الدفعة الوحيدة تجميعية تلقائية.
+            // نطاق منفصل — قارئ خصم البيع الحقيقي لا يحمل كاش الكيانات من التسوية
+            using (var s2 = Scope())
+            {
+                var freshStock = Svc<clsStockService>(s2);
+                var deduct = await freshStock.SellStockAsync(pid, 2);
+                Check("sale-deduct 2 from auto batch succeeds", deduct.IsSuccess, deduct.Message);
+            }
+
+            int after = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+            Check("batches track inventory after deduct", after == 3, $"batchSum={after}");
         }
     }
 }
