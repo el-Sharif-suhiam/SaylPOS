@@ -162,24 +162,26 @@ Online-less licensing: per-device fingerprint (HWID) from CPU/Disk/Board/BIOS; a
 المثبّت `installer\setup.iss` (Inno Setup) يحزّم كل شيء:
 
 - **دور رئيسي (MAIN)**: تثبيت صامت لـ SQL Server 2022 Express (مثبّت محليًا في الحزمة، ~250MB) بإنشاء `SAYL` وTCP 1433، إنشاء تسجيل دخول `sayl` بأدنى امتياز (dbcreator + db_backupoperator + dbo — لا sysadmin أبدًا)، تهيئة القاعدة من سكربتات `SaylDB.sql` + بيانات تجريبية اختيارية، كتابة `appsettings.json`.
-- **دور شاشة (TERMINAL)**: الاتصال بالجهاز الرئيسي عبر الشبكة المحلية باسم الكمبيوتر + رمز وصول مولّد.
-- **بدون كلمات مرور افتراضية**: صفحة «إنشاء حساب المدير» في المعالج تجمع اسم المستخدم وكلمة المرور، ويُنشئ الحساب عند أول تشغيل؛ والتركيب الصامت يعرض الشاشة التفاعلية عند أول إقلاع.
+- **قاعدة قديمة عند إعادة التركيب**: إن وُجدت `SaylDB` يسأل المثبّت: **الاحتفاظ بالبيانات (الافتراضي)** أو **مسحها والبدء نظيفًا**؛ المسح يكتب نسخة احتياطية أولًا ولا يكمل إن فشلت. التركيب الصامت يحتفظ ما لم يُمرَّر `/RESETDB=1`.
+- **دور شاشة (TERMINAL)**: الاتصال بالجهاز الرئيسي عبر الشبكة المحلية باسم الكمبيوتر + رمز وصول مولّد. لا يُسأل عن قاعدة محلية ولا يحذفها.
+- **أول تشغيل**: إن لم يوجد أي مستخدم نشط يُنشئ التطبيق `admin` بكلمة مرور مؤقتة `Admin@123` ويُجبر على تغييرها أول دخول. وإذا كانت القاعدة القديمة تحوي `admin` معطّلًا (بعد فك تثبيت سابق) يُعاد تفعيله وتصفير كلمته بدل الفشل بـ«اسم المستخدم موجود مسبقًا».
+- **فك التثبيت**: على الجهاز الرئيسي فقط، ويسأل عن حذف `SaylDB` مع **الافتراضي «لا»** ونسخة احتياطية إلزامية قبل الحذف؛ التركيب الصامت والطرفيات يحتفظون بالقاعدة.
 - **تحقق آلي**: `installer\build-installer.ps1` ينشر التطبيق، يجهّز سكربتات القاعدة، يوضع الـ redist، ويجمّع بـ ISCC في حزمة واحدة.
 
-The installer (`setup.iss`, Inno Setup) ships as one package: **MAIN role** silently installs SQL Server 2022 Express (bundled offline, ~250 MB) on instance `SAYL` (TCP 1433), creates the least-privilege `sayl` login (dbcreator + db_backupoperator + dbo — never sysadmin), builds the database from `SaylDB.sql` with optional demo data, and writes `appsettings.json`; **TERMINAL role** joins the main PC over LAN with a generated access code; **no default credentials** — the wizard collects the admin account (created on first launch, or interactively for silent installs). `build-installer.ps1` automates publish, staging, and ISCC compilation.
+The installer (`setup.iss`, Inno Setup) ships as one package: **MAIN role** silently installs SQL Server 2022 Express (bundled offline, ~250 MB) on instance `SAYL` (TCP 1433), creates the least-privilege `sayl` login (dbcreator + db_backupoperator + dbo — never sysadmin), builds the database from `SaylDB.sql` with optional demo data, and writes `appsettings.json`; **TERMINAL role** joins the main PC over LAN with a generated access code and never touches a local database. If `SaylDB` already exists, MAIN asks to **keep it (default)** or **erase and start clean**; erasing always writes a backup first and aborts if the backup fails. Silent MAIN installs keep existing data unless `/RESETDB=1` is passed. Uninstall on MAIN asks whether to delete `SaylDB` (**default No**) and backs it up first; silent uninstalls and terminals keep it. On first launch with zero active users, the app creates `admin / Admin@123` and forces a password change; a leftover inactive `admin` row is reactivated instead of failing with “username exists”. `build-installer.ps1` automates publish, staging, and ISCC compilation.
 
 ---
 
 ## الأمان / Security
 
-- **لا كلمات مرور افتراضية**: أُزيلت حسابات `admin/Admin@123` و`cashier1` المزروعة؛ حساب المدير يُنشأ بمعرفة الواضبة فقط.
+- **لا حسابات تجريبية مزروعة**: أُزيلت حسابات `admin` و`cashier1` من بيانات SQL؛ عند انعدام أي مستخدم نشط يُنشئ/يعيد تفعيل التطبيق `admin` بكلمة مرور مؤقتة `Admin@123` ويُجبر تغييرها أول دخول (تعافٍ آمن بعد إعادة التركيب).
 - **أدنى امتياز لقول السايبول**: تسجيل `sayl` لا يملك sysadmin بل الأدوار اللازمة فقط.
 - **كلمات مرور بأسلوب BCrypt** مع حساب مضاد للتوقيت (dummy hash) لغير الموجودين، وإخفاء أخطاء الدخول الموحدة.
 - **سجل تدقيق** (SystemLogs) لعمليات الحساسة (بيع، مرجعات، رواتب، مستخدمون)، best-effort ولا يعطّل العمل عند امتلائه.
 - **حراس مالية في القاعدة والخدمة**: قيود CHECK + تحقق قبل كل معاملة.
 - رحلة تحصين موثقة: تقرير هجوم بمدد 45 مكتشفًا، أُغلق 44/45 مختبرًا حيًا (VULN-22 مؤجل بقرار المالك لتدوير مفتاح الاختبار قبل الإطلاق)، إضافة VULN-46/47 بعد التقرير.
 
-- **No default passwords**: seeded `admin/Admin@123` and `cashier1` removed; the admin account is created by the owner.
+- **No seeded demo accounts**: `admin` and `cashier1` are no longer inserted by SQL; when no active user exists, the app creates/reactivates `admin` with temporary `Admin@123` and forces a password change at first sign-in (safe recovery after reinstall).
 - **Least privilege for SQL**: the `sayl` login is never sysadmin.
 - **BCrypt passwords** with timing-safe dummy hashes and unified error messages.
 - **Audit log** (SystemLogs) for sensitive operations, best-effort (never blocks work).

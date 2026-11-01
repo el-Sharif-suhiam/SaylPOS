@@ -28,7 +28,7 @@ namespace consol_app
             // المثيل المسماة SAYL — المثبت ينشئها (SaylInstance = 'SAYL' في setup.iss)
             // والافتراضي '.' قد لا يحمل SaylDB على جهاز التطوير.
             Services = new ServiceCollection()
-                .AddSaylServices("Server=DESKTOP-DT3B4CG\\SAYL;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
+                .AddSaylServices("Server=.\\SAYL;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
                 .BuildServiceProvider();
 
             // مسبار التزويد: دورات الهارنس تستهلك مخزون المنتج 1 دورة بعد دورة
@@ -68,6 +68,7 @@ namespace consol_app
             await SettingsBackupCycle();
             await CrudSmokeCycle();
             await AdjustBatchConsistencyCycle();
+            await OwnerRecoveryCycle();
 
             Console.WriteLine();
             Console.WriteLine($"================ RESULT: {_pass} PASSED / {_fail} FAILED ================");
@@ -117,6 +118,12 @@ namespace consol_app
 
                 adminUser = await db.Users.FirstAsync(u => u.UserId == ownerResult.Data!.UserId);
 
+                var ownerActive = await VerifyAsync(async vdb => await vdb.Users
+                    .Where(u => u.UserId == ownerResult.Data!.UserId)
+                    .Select(u => u.IsActive)
+                    .SingleAsync());
+                Check("created owner is active in DB", ownerActive);
+
                 // مسار إجبار التغيير كاملًا: العلامة في قاعدة البيانات، وتظهر عند
                 // الدخول، ويقبل التغيير ويمسحها، ثم نعيد كلمة المرور الأصلية
                 // كي تبقى الجولة قابلة للتكرار.
@@ -148,6 +155,12 @@ namespace consol_app
                     actorUserId: adminUser.UserId);
                 if (!cashierResult.IsSuccess)
                     throw new Exception("Add cashier failed: " + cashierResult.Message);
+
+                var cashierActive = await VerifyAsync(async vdb => await vdb.Users
+                    .Where(u => u.Username == "cashier1")
+                    .Select(u => u.IsActive)
+                    .SingleAsync());
+                Check("created cashier is active in DB", cashierActive);
             }
             else
             {
@@ -174,6 +187,79 @@ namespace consol_app
 
             var unknown = await users.LoginAsync("no-such-user", "whatever123");
             Check("unknown user rejected", !unknown.IsSuccess);
+        }
+
+        // ───────────────── 1b. Owner recovery after reinstall ─────────────────
+        // سيناريو إعادة التركيب فوق قاعدة قديمة: كل المستخدمين معطّلون (admin
+        // ضمنهم) بعد فك التثبيت/الترقية. EnsureDefaultAdmin يجب أن يعيد تفعيل
+        // admin بدل الفشل بـ«اسم المستخدم موجود مسبقًا». نأخذ لقطة ونستعيدها
+        // في finally كي تبقى القاعدة صالحة لباقي الجولات وللدخول العادي.
+        private static async Task OwnerRecoveryCycle()
+        {
+            Console.WriteLine("--- OWNER RECOVERY (reinstall over old DB) ---");
+            List<User> snapshot;
+            User? admin;
+            using (var s = Scope())
+            {
+                var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+                snapshot = await db.Users.AsNoTracking().ToListAsync();
+                admin = snapshot.FirstOrDefault(u => u.Username == "admin");
+            }
+
+            if (admin == null)
+            {
+                Check("owner recovery requires an existing admin row", false);
+                return;
+            }
+
+            try
+            {
+                using (var s = Scope())
+                {
+                    var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+                    await db.Users.ExecuteUpdateAsync(u => u.SetProperty(x => x.IsActive, false));
+                }
+
+                using (var s = Scope())
+                {
+                    var users = Svc<clsUsersService>(s);
+
+                    var recovery = await users.EnsureDefaultAdminAsync();
+                    Check("owner recovery reactivates inactive admin", recovery.IsSuccess, recovery.Message);
+                    if (recovery.IsSuccess)
+                    {
+                        Check("owner recovery restores admin role",
+                            recovery.Data!.RoleValue == AppPermissions.AdminRoleValue);
+                        Check("owner recovery forces password change", recovery.Data.MustChangePassword);
+
+                        var login = await users.LoginAsync("admin", "Admin@123");
+                        Check("owner recovery default login works", login.IsSuccess, login.Message);
+                    }
+
+                    var refused = await users.EnsureDefaultAdminAsync();
+                    Check("owner recovery refused once admin is active again", !refused.IsSuccess, refused.Message);
+                }
+
+                using (var s = Scope())
+                {
+                    var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+                    Check("owner recovery audit entry written",
+                        await db.SystemLogs.AnyAsync(l => l.Action == "OwnerRecovered" && l.UserId == admin.UserId));
+                }
+            }
+            finally
+            {
+                using var s = Scope();
+                var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+                foreach (var u in snapshot)
+                {
+                    await db.Users.Where(x => x.UserId == u.UserId).ExecuteUpdateAsync(set => set
+                        .SetProperty(x => x.IsActive, u.IsActive)
+                        .SetProperty(x => x.PasswordHash, u.PasswordHash)
+                        .SetProperty(x => x.MustChangePassword, u.MustChangePassword)
+                        .SetProperty(x => x.RoleId, u.RoleId));
+                }
+            }
         }
 
         // ───────────────── 2. Session + direct sale ─────────────────

@@ -126,6 +126,15 @@ var
     postinstall app launch so the app never starts against a dead engine. }
   DbSetupOk: Boolean;
 
+  { ---- existing-database page (main role) ---- }
+  ExistingDbPage: TWizardPage;
+  ExistingDbInfoLabel: TLabel;
+  KeepDbRadio: TRadioButton;
+  EraseDbRadio: TRadioButton;
+  ExistingDbFound: Boolean;
+  ExistingDbAction: Integer; { 0 = keep, 1 = erase and start clean }
+  ExistingDbActionChosen: Boolean;
+
   { ---- options page (main role): demo data only ---- }
   OptionsPage: TWizardPage;
   DemoCheck: TCheckBox;
@@ -147,6 +156,22 @@ begin
   Result := Trim(S);
   while (Length(Result) > 0) and (Result[Length(Result)] = '\') do
     Delete(Result, Length(Result), 1);
+end;
+
+{ Turns the installer's local server notation ('.', '.\SAYL') into a name a
+  terminal can use over the LAN ('SHOP-PC', 'SHOP-PC\SAYL'). A custom
+  server name is returned unchanged. }
+function BuildTerminalServerName: String;
+var
+  S: String;
+begin
+  S := TrimmedText(FinalServer);
+  if (S = '.') or (S = '(local)') or (CompareText(S, 'localhost') = 0) then
+    Result := GetComputerNameString
+  else if Copy(S, 1, 2) = '.\' then
+    Result := GetComputerNameString + Copy(S, 2, Length(S) - 1)
+  else
+    Result := S;
 end;
 
 { Escapes into pure-ASCII JSON body (\uXXXX for anything non-ASCII),
@@ -266,6 +291,32 @@ begin
   RS.Close;
 end;
 
+{ Opens a temporary Windows-auth connection to master and checks whether the
+  old SaylDB exists. Used by PrepareMainRole so the wizard can offer the
+  Keep/Erase choice before any files are copied. Restores the auth globals. }
+function ProbeDatabaseExists(const Server: String): Boolean;
+var
+  Conn: Variant;
+  Err: String;
+  SaveAuth: Boolean;
+  SaveLogin, SavePwd: String;
+  Ok: Boolean;
+begin
+  Result := False;
+  SaveAuth := UseSqlAuth; SaveLogin := SqlLogin; SavePwd := SqlPass;
+  UseSqlAuth := False;
+  Ok := TryOpenConnection(Conn, 'master', Err);
+  if Ok then
+  begin
+    try
+      Result := DatabaseExists(Conn);
+    finally
+      Conn.Close;
+    end;
+  end;
+  UseSqlAuth := SaveAuth; SqlLogin := SaveLogin; SqlPass := SavePwd;
+end;
+
 { Reads a SQL script from its XML envelope (CDATA) produced by
   build-installer.ps1. MSXML handles the UTF-8 decoding natively - Pascal
   Script has no built-in UTF-8 file reader and no 'raise' statement, so
@@ -348,6 +399,72 @@ end;
 procedure AppendLog(Log: TStringList; const Msg: String);
 begin
   Log.Add('[' + GetDateTimeString('yyyy/mm/dd hh:nn:ss', '-', ':') + '] ' + Msg);
+end;
+
+{ Backs up SaylDB to the instance's default backup folder (so the SQL service
+  account can write it), then drops the database. Returns False and keeps the
+  database if the backup fails - never erase without a valid backup. }
+function BackupAndDropDatabase(Conn: Variant; Log: TStringList): Boolean;
+var
+  RS: Variant;
+  BackupPath, FileName, PropValue: String;
+begin
+  Result := False;
+  BackupPath := '';
+
+  { Prefer the SQL Server default backup path. Fall back to ProgramData only
+    when the property is unavailable. }
+  try
+    RS := Conn.Execute('SELECT ISNULL(CAST(SERVERPROPERTY(''InstanceDefaultBackupPath'') AS nvarchar(4000)), '''')');
+    if not RS.EOF then
+    begin
+      PropValue := RS.Fields.Item(0).Value;
+      if PropValue <> '' then
+        BackupPath := PropValue;
+    end;
+    RS.Close;
+  except
+    BackupPath := '';
+  end;
+
+  if BackupPath = '' then
+    BackupPath := ExpandConstant('{commonappdata}\Sayl\Backups');
+  if (Length(BackupPath) > 0) and (Copy(BackupPath, Length(BackupPath), 1) <> '\') then
+    BackupPath := BackupPath + '\';
+
+  FileName := BackupPath + 'SaylDB_' +
+    GetDateTimeString('yyyymmdd_hhnnss', '-', '-') + '.bak';
+
+  try
+    if not DirExists(BackupPath) then
+      ForceDirectories(BackupPath);
+  except
+    AppendLog(Log, 'NOTE: could not create backup folder ' + BackupPath +
+      ' (' + GetExceptionMessage + '). The SQL service must be able to write there.');
+  end;
+
+  try
+    Conn.Execute('BACKUP DATABASE [SaylDB] TO DISK = N''' + FileName +
+      ''' WITH INIT, COPY_ONLY, STATS = 10');
+    AppendLog(Log, 'Backup written to ' + FileName);
+  except
+    AppendLog(Log, 'ERROR: backup failed - database was NOT erased: ' + GetExceptionMessage);
+    Exit;
+  end;
+
+  try
+    Conn.Execute('ALTER DATABASE [SaylDB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE');
+    Conn.Execute('DROP DATABASE [SaylDB]');
+    AppendLog(Log, 'Dropped database SaylDB after a successful backup.');
+    Result := True;
+  except
+    AppendLog(Log, 'ERROR: drop failed - database was kept: ' + GetExceptionMessage);
+    try
+      Conn.Execute('ALTER DATABASE [SaylDB] SET MULTI_USER');
+    except
+      { ignore - the database may already be gone or unavailable }
+    end;
+  end;
 end;
 
 { Immediate crash-trace helper: appends straight to disk so we always
@@ -616,10 +733,22 @@ begin
   SqlLogin := SaylLoginName;
   CustomLogin := False;
   DbJustCreated := False;
-  { VULN-47: defaults for silent/unattended installs — demo data matches previous
+  ExistingDbFound := False;
+  ExistingDbAction := 0;
+  ExistingDbActionChosen := False;
+  { VULN-47: defaults for silent/unattended installs - demo data matches previous
     behavior; the default admin account is created by the app on first launch
     and its password must be changed there (no owner page in the wizard). }
   LoadDemoData := True;
+
+  { One access code for terminals, whether we install a fresh engine or reuse
+    an existing one. Reuse the saved code when present so terminals keep
+    working after a reinstall. }
+  if LoadSavedPassword(SavedPwd) and (SavedPwd <> '') then
+    SqlPass := SavedPwd
+  else
+    SqlPass := GenerateAccessCode();
+
   Trace('P0: PrepareMainRole start');
 
   { show activity while probing - paint this first so the brief checks
@@ -659,25 +788,26 @@ begin
   if InstanceFound then
   begin
     UseSqlAuth := False;
+    ExistingDbFound := ProbeDatabaseExists(FinalServer);
     DbInfoLabel.Caption :=
       'An existing database engine was found on this PC:' + NL +
       FinalServer + NL +
       'It will be used directly - nothing extra will be installed.';
+    if ExistingDbFound then
+      DbInfoLabel.Caption := DbInfoLabel.Caption + NL +
+        'An existing SaylDB database was found - you will choose whether to keep or erase it.';
   end
   else
   begin
     FinalServer := '.\' + SaylInstance;
     UseSqlAuth := True;
-    if LoadSavedPassword(SavedPwd) and (SavedPwd <> '') then
-      SqlPass := SavedPwd
-    else
-      SqlPass := GenerateAccessCode();
     DbInfoLabel.Caption :=
       'A free database engine (SQL Server Express) will be installed automatically and silently.' + NL +
       'This step runs once only and may take 5-15 minutes. No internet needed.';
   end;
   StateReady := True;
-  Trace('P9: PrepareMainRole done, found=' + IntToStr(Ord(InstanceFound)));
+  Trace('P9: PrepareMainRole done, found=' + IntToStr(Ord(InstanceFound)) +
+    ', existingDb=' + IntToStr(Ord(ExistingDbFound)));
 end;
 
 { Polls the instance until it accepts connections or the timeout passes.
@@ -1000,12 +1130,50 @@ begin
   SqlPassEdit.Visible := False;
 end;
 
+{ ---- existing database page: only shown on a MAIN install when SaylDB is
+ already present. Keeping the database is the safe default; erasing requires
+ an explicit confirmation and always writes a backup first. ---- }
+procedure CreateExistingDbPage;
+begin
+  ExistingDbPage := CreateCustomPage(DbPage.ID,
+    'Existing database found',
+    'A previous Sayl POS database (SaylDB) was found on this PC.');
+
+  ExistingDbInfoLabel := TLabel.Create(ExistingDbPage);
+  ExistingDbInfoLabel.Parent := ExistingDbPage.Surface;
+  ExistingDbInfoLabel.Left := ScaleX(0);
+  ExistingDbInfoLabel.Top := ScaleY(0);
+  ExistingDbInfoLabel.Width := ScaleX(430);
+  ExistingDbInfoLabel.Height := ScaleY(64);
+  ExistingDbInfoLabel.WordWrap := True;
+  ExistingDbInfoLabel.AutoSize := False;
+  ExistingDbInfoLabel.Caption :=
+    'Choose what to do with the existing data. Keeping it preserves all sales, ' +
+    'products, customers and users. Erasing starts clean and creates a backup ' +
+    'of the old database first.';
+
+  KeepDbRadio := TRadioButton.Create(ExistingDbPage);
+  KeepDbRadio.Parent := ExistingDbPage.Surface;
+  KeepDbRadio.Left := ScaleX(8);
+  KeepDbRadio.Top := ScaleY(76);
+  KeepDbRadio.Width := ScaleX(430);
+  KeepDbRadio.Caption := 'Keep existing data (recommended)';
+  KeepDbRadio.Checked := True;
+
+  EraseDbRadio := TRadioButton.Create(ExistingDbPage);
+  EraseDbRadio.Parent := ExistingDbPage.Surface;
+  EraseDbRadio.Left := ScaleX(8);
+  EraseDbRadio.Top := ScaleY(104);
+  EraseDbRadio.Width := ScaleX(430);
+  EraseDbRadio.Caption := 'Erase all data and start clean (a backup is made first)';
+end;
+
 { ---- options page: demo data only. The admin account is created by the app on
- first launch (admin / Admin@123) and its password must be changed there — the
+ first launch (admin / Admin@123) and its password must be changed there - the
  wizard no longer asks for any account credentials (VULN-47). ---- }
 procedure CreateOptionsPage;
 begin
-  OptionsPage := CreateCustomPage(DbPage.ID,
+  OptionsPage := CreateCustomPage(ExistingDbPage.ID,
     'Data Options',
     'The default admin account (admin) is created automatically on first ' +
     'launch, and the program will ask to change its password immediately.');
@@ -1031,8 +1199,10 @@ begin
   Trace('W2: termpage done');
   CreateDbPage;
   Trace('W3: dbpage done');
+  CreateExistingDbPage;
+  Trace('W4: existingdbpage done');
   CreateOptionsPage;
-  Trace('W4: optionspage done');
+  Trace('W5: optionspage done');
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -1042,6 +1212,8 @@ begin
     Result := IsMainRole;
   if PageID = DbPage.ID then
     Result := not IsMainRole;
+  if PageID = ExistingDbPage.ID then
+    Result := (not IsMainRole) or (not ExistingDbFound);
   if PageID = OptionsPage.ID then
     Result := not IsMainRole;
 end;
@@ -1142,6 +1314,27 @@ begin
     Exit;
   end;
 
+  { ---- existing database page (main role): keep or erase ---- }
+  if CurPageID = ExistingDbPage.ID then
+  begin
+    ExistingDbActionChosen := True;
+    if EraseDbRadio.Checked then
+    begin
+      if MsgBox('Erase the existing SaylDB database and start clean?' + NL + NL +
+        'All current sales, products, customers and users will be removed.' + NL +
+        'A backup of the old database is created first.' + NL + NL +
+        'Continue?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
+      begin
+        Result := False;
+        Exit;
+      end;
+      ExistingDbAction := 1;
+    end
+    else
+      ExistingDbAction := 0;
+    Exit;
+  end;
+
   { ---- options page (main role): demo-data choice ---- }
   if CurPageID = OptionsPage.ID then
   begin
@@ -1168,7 +1361,7 @@ var
   ErrMsg: String;
   Log: TStringList;
   LogPath, DbDir, JsonPath: String;
-  Connected, Ok, RunSeed: Boolean;
+  Connected, Ok, RunSeed, LoginReady: Boolean;
   N: Integer;
   SeedMsg, ExtraMsg, RoleMsg: String;
   AppAuthMode: Boolean;
@@ -1192,6 +1385,23 @@ begin
     else
       RoleMsg := 'terminal';
     AppendLog(Log, 'Role: ' + RoleMsg + ', server: ' + FinalServer);
+
+    { Remember what this installation is, so the uninstaller never offers to
+      drop a database from a terminal (which belongs to the main PC). }
+    try
+      RegWriteStringValue(HKLM, 'Software\Sayl', 'Role', RoleMsg);
+      RegWriteStringValue(HKLM, 'Software\Sayl', 'DbServer', FinalServer);
+    except
+      AppendLog(Log, 'NOTE: could not save Role/DbServer to registry: ' + GetExceptionMessage);
+    end;
+
+    { Silent installs have no wizard page. Keep the old DB by default; allow
+      /RESETDB=1 for an explicit clean install. }
+    if Lowercase(ExpandConstant('{param:RESETDB|0}')) = '1' then
+    begin
+      ExistingDbAction := 1;
+      ExistingDbActionChosen := True;
+    end;
 
     { 1) always write the chosen connection string }
     try
@@ -1228,7 +1438,10 @@ begin
           installed engine can take 60-120s before it accepts connections }
         if not WaitForInstanceReady(FinalServer, 300) then
           AppendLog(Log, 'NOTE: engine is not accepting connections yet.');
-        { 2b) ensure the 'sayl' login exists - via WINDOWS admin connection }
+        { 2b) ensure the 'sayl' login exists - via WINDOWS admin connection.
+              This runs for BOTH fresh and existing engines now: terminals need
+              a working, non-empty access code after every reinstall. }
+        LoginReady := False;
         if not CustomLogin then
         begin
           AppAuthMode := UseSqlAuth;
@@ -1238,6 +1451,7 @@ begin
             try
               try
                 EnsureSaylLogin(Log, Conn, SqlPass);
+                LoginReady := True;
               except
                 AppendLog(Log, 'NOTE: could not create/reset ''' + SaylLoginName +
                   ''' login (' + GetExceptionMessage + '). Single-PC use still works.');
@@ -1250,6 +1464,8 @@ begin
             AppendLog(Log, 'NOTE: admin connection failed: ' + ErrMsg);
           Trace('M3: admin login block done');
           UseSqlAuth := AppAuthMode;
+          if LoginReady then
+            SavePassword(SqlPass);
         end;
 
         { 2c) reconnect exactly the way the APP will connect }
@@ -1274,9 +1490,40 @@ begin
       try
         Ok := True;
 
+        { Existing DB: decide keep vs erase. The wizard page normally made the
+          choice; for a silent install or a recovered instance that the page
+          never saw, keep unless /RESETDB=1 was passed. }
         if DatabaseExists(Conn) then
-          AppendLog(Log, 'Database SaylDB already exists - keeping it as-is (fresh-install-only system).')
-        else
+        begin
+          ExistingDbFound := True;
+          if IsMainRole and (not ExistingDbActionChosen) and (not WizardSilent()) then
+          begin
+            if MsgBox('An existing SaylDB database was found on this PC.' + NL + NL +
+              'Erase it and start clean? A backup will be created first.' + NL +
+              'Choose No to keep the existing data.', mbConfirmation,
+              MB_YESNO or MB_DEFBUTTON2) = IDYES then
+              ExistingDbAction := 1
+            else
+              ExistingDbAction := 0;
+            ExistingDbActionChosen := True;
+          end;
+
+          if IsMainRole and (ExistingDbAction = 1) then
+          begin
+            AppendLog(Log, 'Erasing existing SaylDB at user request (backup first)...');
+            if BackupAndDropDatabase(Conn, Log) then
+              AppendLog(Log, 'Existing SaylDB erased; a fresh one will be created.')
+            else
+            begin
+              AppendLog(Log, 'ERROR: erase aborted - existing database was kept.');
+              Ok := False;
+            end;
+          end
+          else
+            AppendLog(Log, 'Database SaylDB already exists - keeping it as-is.');
+        end;
+
+        if Ok and (not DatabaseExists(Conn)) then
         begin
           AppendLog(Log, 'Creating database SaylDB...');
           try
@@ -1298,7 +1545,7 @@ begin
 
         { Demo data: loaded ONLY on a brand-new database when the user asked
           for it (the wizard checkbox; silent installs keep previous demo behavior).
-          VULN-47: no known demo accounts are seeded anymore — the app creates the
+          VULN-47: no known demo accounts are seeded anymore - the app creates the
           default admin (admin) on first launch and forces a password change. }
         if IsMainRole and DbJustCreated and Ok then
         begin
@@ -1350,10 +1597,10 @@ begin
     begin
       { shown on the MAIN PC when terminals will ever connect to it }
       ExtraMsg := '';
-      if IsMainRole and (not CustomLogin) and UseSqlAuth and (SqlPass <> '') then
+      if IsMainRole and (not CustomLogin) and LoginReady and (SqlPass <> '') then
         ExtraMsg := NL + '--- For extra cashier terminals ---' + NL +
-          'Computer name : ' + GetComputerNameString + NL +
-          'Access code   : ' + SqlPass + NL +
+          'Server name  : ' + BuildTerminalServerName + NL +
+          'Access code  : ' + SqlPass + NL +
           'Write these down - they will be required when installing each extra terminal.';
       { The FIRST sign-in account: created by the app automatically on the first
         launch (only on a brand-new database), and the program forces its
@@ -1367,6 +1614,11 @@ begin
           '==============================' + NL +
           'This account is created automatically the first time the program starts, ' +
           'and the program will ask you to change this password immediately at first sign-in.' + NL
+      else if IsMainRole and (not DbJustCreated) and Ok then
+        SeedMsg := NL + '--- Existing data kept ---' + NL +
+          'Sign in with your existing account.' + NL +
+          'If no account is active, the program restores the default admin ' +
+          '(admin / Admin@123) and requires a password change at first sign-in.' + NL
       else
         SeedMsg := '';
 
@@ -1404,6 +1656,103 @@ begin
     Trace('S0: postinstall reached');
     DoDatabaseSetup;
     Trace('S9: DoDatabaseSetup returned');
+  end;
+end;
+
+{ ============================================================================
+  UNINSTALLER: optional database removal.
+  Business data survives an uninstall by default. Only a MAIN installation is
+  offered the choice; a terminal must never drop the main PC's database.
+  A backup is always written before anything is dropped.
+  ============================================================================ }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Role, Server, Pwd, ErrMsg, LogPath: String;
+  Conn: Variant;
+  Log: TStringList;
+  SaveAuth: Boolean;
+  SaveLogin, SavePwd: String;
+  Connected, Dropped: Boolean;
+begin
+  if CurUninstallStep <> usUninstall then
+    Exit;
+
+  { Silent uninstalls keep the database - never destroy data without a human
+    confirming it. }
+  if UninstallSilent() then
+    Exit;
+
+  if not RegQueryStringValue(HKLM, 'Software\Sayl', 'Role', Role) then
+    Exit; { older install: no marker - do not touch the database }
+  if CompareText(Role, 'main') <> 0 then
+    Exit;
+
+  if MsgBox('Delete the Sayl POS database (SaylDB) and all sales data?' + NL + NL +
+    'A backup will be created first.' + NL +
+    'Choose No to keep the data for a future reinstall.', mbConfirmation,
+    MB_YESNO or MB_DEFBUTTON2) <> IDYES then
+  begin
+    Exit;
+  end;
+
+  if not RegQueryStringValue(HKLM, 'Software\Sayl', 'DbServer', Server) then
+    Server := '.\SAYL';
+
+  LogPath := ExpandConstant('{commonappdata}\Sayl\uninstall-database.log');
+  Log := TStringList.Create;
+  try
+    AppendLog(Log, 'Uninstall database removal requested for server ' + Server + '.');
+    try
+      ForceDirectories(ExtractFileDir(LogPath));
+    except
+      { the log is best effort }
+    end;
+
+    FinalServer := Server;
+    SqlLogin := SaylLoginName;
+    SaveAuth := UseSqlAuth; SaveLogin := SqlLogin; SavePwd := SqlPass;
+    UseSqlAuth := False;
+    Connected := TryOpenConnection(Conn, 'master', ErrMsg);
+
+    if not Connected then
+    begin
+      if RegQueryStringValue(HKLM, 'Software\Sayl', 'DbPassword', Pwd) and (Pwd <> '') then
+      begin
+        UseSqlAuth := True;
+        SqlLogin := SaylLoginName;
+        SqlPass := Pwd;
+        Connected := TryOpenConnection(Conn, 'master', ErrMsg);
+      end;
+    end;
+
+    UseSqlAuth := SaveAuth; SqlLogin := SaveLogin; SqlPass := SavePwd;
+
+    if not Connected then
+    begin
+      AppendLog(Log, 'ERROR: cannot connect to ' + Server + ': ' + ErrMsg);
+      try Log.SaveToFile(LogPath); except end;
+      MsgBox('Could not connect to the database, so it was NOT deleted.' + NL + NL +
+        'Details: ' + LogPath, mbError, MB_OK);
+      Exit;
+    end;
+
+    try
+      Dropped := BackupAndDropDatabase(Conn, Log);
+    finally
+      Conn.Close;
+    end;
+
+    if Dropped then
+      MsgBox('The Sayl POS database was backed up and deleted.' + NL + NL +
+        'Backup and log folder:' + NL +
+        ExpandConstant('{commonappdata}\Sayl'), mbInformation, MB_OK)
+    else
+      MsgBox('The database was NOT deleted (backup or drop failed).' + NL + NL +
+        'Details: ' + LogPath, mbError, MB_OK);
+
+    try Log.SaveToFile(LogPath); except end;
+  finally
+    Log.Free;
   end;
 end;
 

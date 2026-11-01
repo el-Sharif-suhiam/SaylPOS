@@ -203,7 +203,8 @@ namespace Sayl.Core.Services
                 Username = req.userName,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.password),
                 RoleId = req.RoleId,
-                EmployeeId = req.EmployeeId ?? null
+                EmployeeId = req.EmployeeId ?? null,
+                IsActive = true
             };
 
             _dbContext.Users.Add(user);
@@ -269,8 +270,13 @@ END;";
         /// للحساب الديمو (admin/Admin@123) الذي كان يُزرَع بكلمة مرور معروفة في كل
         /// تثبيت جديد. القاعدة: أول حساب نشط في النظام هو مالكه — ومنذ وجود أي
         /// مستخدم نشط يُغلق هذا المسار إلى الأبد (لا يعاد تشغيله فوق بيانات حية).
-        /// requirePasswordChange: يُعلّم الحساب المُنشأ بأنه يجب تغيير كلمته أول دخول.</summary>
-        public async Task<Result<UserVM>> CreateOwnerAsync(string username, string password, bool requirePasswordChange = false)
+        /// requirePasswordChange: يُعلّم الحساب المُنشأ بأنه يجب تغيير كلمته أول دخول.
+        /// reactivateExisting: عند إعادة التركيب فوق قاعدة قديمة قد يوجد صف admin
+        /// معطّل (IsActive=0) بلا أي مستخدم نشط. بدل الفشل بـ«اسم المستخدم موجود
+        /// مسبقًا» نعيد تفعيله ونصفّر كلمته — هذا هو مسار التعافي الوحيد المسموح،
+        /// ويبقى محصورًا في حالة انعدام أي مستخدم نشط.</summary>
+        public async Task<Result<UserVM>> CreateOwnerAsync(string username, string password,
+            bool requirePasswordChange = false, bool reactivateExisting = false)
         {
             if (await HasActiveUsersAsync())
                 return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
@@ -300,14 +306,52 @@ END;";
                 if (anyActive)
                     return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
 
-                bool exists = await _dbContext.Users.AnyAsync(u => u.Username == username);
-                if (exists)
-                    return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
-
                 var adminRole = await _dbContext.Roles
                     .FirstOrDefaultAsync(r => r.RoleValue == AppPermissions.AdminRoleValue && r.IsActive);
                 if (adminRole == null)
                     return Result<UserVM>.Fail("دور المدير غير متوفر — لا يمكن إنشاء حساب المدير.");
+
+                if (reactivateExisting)
+                {
+                    var existing = await _dbContext.Users
+                        .FirstOrDefaultAsync(u => u.Username == username);
+                    if (existing != null)
+                    {
+                        existing.IsActive = true;
+                        existing.RoleId = adminRole.RoleId;
+                        existing.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+                        existing.MustChangePassword = requirePasswordChange;
+
+                        await _dbContext.SaveChangesAsync();
+                        await transaction.CommitAsync();
+
+                        clsAudit.Log(_dbContext, existing.UserId, "OwnerRecovered",
+                            $"إعادة تفعيل حساب المدير القديم '{existing.Username}' وتعيين كلمة مرور افتراضية.");
+                        try
+                        {
+                            await _dbContext.SaveChangesAsync();
+                        }
+                        catch
+                        {
+                            // فشل سجل التدقيق لا يمنع استعادة المالك
+                        }
+
+                        return Result<UserVM>.Ok(new UserVM
+                        {
+                            UserId = existing.UserId,
+                            UserName = existing.Username,
+                            RoleId = adminRole.RoleId,
+                            RoleName = adminRole.Name,
+                            RoleValue = adminRole.RoleValue,
+                            IsActive = true,
+                            MustChangePassword = requirePasswordChange
+                        });
+                    }
+                }
+
+                bool exists = await _dbContext.Users.AnyAsync(u => u.Username == username);
+                if (exists)
+                    return Result<UserVM>.Fail("اسم المستخدم موجود مسبقًا.");
 
                 var owner = new User
                 {
@@ -315,6 +359,7 @@ END;";
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
                     RoleId = adminRole.RoleId,
                     EmployeeId = null,
+                    IsActive = true,
                     MustChangePassword = requirePasswordChange
                 };
 
@@ -368,13 +413,16 @@ END;";
         }
 
         /// <summary>الحساب الافتراضي: يُنشأ صامتًا عند صفر مستخدمين نشطين مع إجبار
-        /// تغيير كلمة المرور أول دخول. يفشل برسالة واضحة إن وُجد مستخدم نشط.</summary>
+        /// تغيير كلمة المرور أول دخول. يفشل برسالة واضحة إن وُجد مستخدم نشط.
+        /// على قاعدة قديمة بقي فيها صف admin معطّل من تركيب سابق، يُعاد تفعيله
+        /// بدل الفشل بـ«اسم المستخدم موجود مسبقًا» (تعافٍ آمن بعد إعادة التركيب).</summary>
         public async Task<Result<UserVM>> EnsureDefaultAdminAsync()
         {
             if (await HasActiveUsersAsync())
                 return Result<UserVM>.Fail("إنشاء حساب المدير غير متاح — النظام يحتوي مستخدمين بالفعل.");
 
-            return await CreateOwnerAsync(DefaultAdminUsername, DefaultAdminPassword, requirePasswordChange: true);
+            return await CreateOwnerAsync(DefaultAdminUsername, DefaultAdminPassword,
+                requirePasswordChange: true, reactivateExisting: true);
         }
 
         private static bool IsUniqueConstraintViolation(DbUpdateException ex, string constraintName)

@@ -356,7 +356,10 @@ namespace Sayl.UI.Forms
 
                 if (_cmbUsers.Items.Count == 0)
                 {
-                    SetConnectionStatus(false);
+                    // الاتصال بقاعدة البيانات نجح بالفعل (الاستعلامات عادت)؛
+                    // غياب المستخدمين النشطين ليس فشل اتصال. الخلط بينهما كان
+                    // يعرض «غير متصل بقاعدة البيانات» على قاعدة سليمة.
+                    SetConnectionStatus(true);
                     ShowError(AppLang.T("Login.Msg.NoActiveUsers"));
                 }
                 else

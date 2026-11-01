@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "csharp-concurrency-patterns": {
+      "source": "aaronontheweb/dotnet-skills",
+      "sourceType": "github",
+      "skillPath": "skills/csharp-concurrency-patterns/SKILL.md",
+      "computedHash": "e8c5da1a61b48fb091697ca9ff992de6f7efd2788addf3ddf414ec26d61e4167"
+    },
+    "dotnet-testing-strategy": {
+      "source": "wshaddix/dotnet-skills",
+      "sourceType": "github",
+      "skillPath": "skills/dotnet-testing-strategy/SKILL.md",
+      "computedHash": "84751a4c56ae1f0d2c65bdfa84194729f9926c26d95b5b67dfe6c212aa8ac229"
+    },
+    "efcore-patterns": {
+      "source": "aaronontheweb/dotnet-skills",
+      "sourceType": "github",
+      "skillPath": "skills/efcore-patterns/SKILL.md",
+      "computedHash": "007f3fe823890219dc4e0fdb3a27ec66cc4502067273e39eb94b51a9e6f4a52a"
+    }
+  }
+}
