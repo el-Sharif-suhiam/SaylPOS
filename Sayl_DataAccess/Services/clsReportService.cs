@@ -52,6 +52,21 @@ namespace Sayl.Core.Services
                          && i.CreatedAt >= dayStart && i.CreatedAt < dayEnd)
                 .SumAsync(i => (decimal?)i.NetAmount) ?? 0m;
 
+            // ══ المتبقي بتخصيص الدفعات على الفواتير (لا طرح تحصيل اليوم من مبيعات اليوم) ══
+            // تحصيل اليوم قد يسدد فواتير أيام سابقة (التخصيص الأقدم أولًا)، وفواتير
+            // اليوم قد تكون سُددت من تحصيل قديم أو مرتجعات ضدها تُخفّض دينها.
+            // لكل فاتورة بيع مكتملة اليوم: متبقيها الفعلي = صافيها + مرتجعاتها − دفعاتها
+            // (المرتبطة ونصيب العام المخصص)، ومجموعها هو المتحرك على فواتير اليوم.
+            var todaySaleInvoiceIds = await invoicesQuery
+                .Select(i => i.InvoiceId)
+                .ToListAsync();
+
+            var outstandingByInvoice = await clsPaymentAllocation
+                .GetOutstandingForInvoicesAsync(_dbContext, todaySaleInvoiceIds);
+
+            decimal outstanding = todaySaleInvoiceIds
+                .Sum(id => Math.Max(0m, outstandingByInvoice.GetValueOrDefault(id)));
+
             decimal net = sales?.Net ?? 0m;
             decimal netAfterReturns = net + returnsNet; // المرتجعات قيمتها سالبة
 
@@ -64,7 +79,7 @@ namespace Sayl.Core.Services
                 TotalTax = sales?.Tax ?? 0m,
                 TotalNet = netAfterReturns,
                 TotalCollected = collected,
-                TotalOutstanding = netAfterReturns - collected
+                TotalOutstanding = outstanding
             };
 
             return Result<DailySalesVM>.Ok(vm);
@@ -178,8 +193,13 @@ namespace Sayl.Core.Services
                 .Where(ii => saleInvoiceIds.Contains(ii.InvoiceId))
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
 
+            // مرتجع العميل وحده يقلب تكلفة مبيعات: بند المرتجع يحمل تكلفة البنود
+            // المُباعة الأصلية (ItemCost التاريخية) — راجع docs/COSTING.md.
+            // مرتجع المورد ليس خصمًا من تكلفة مبيعات العملاء: بضاعته لم تدخل
+            // المبيعات أصلًا، وتكلفتها تُرد من المورد (استرداد شراء) وتُخصم من
+            // الدفعة والمخزون — إدخالها هنا كان يضخّم الربح وهميًا.
             decimal returnsCogs = await _dbContext.InvoiceItems
-                .Where(ii => (ii.Invoice.Type == enInvoicesType.customer_return || ii.Invoice.Type == enInvoicesType.supplier_return)
+                .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                          && ii.Invoice.Status == enInvoicesStatus.completed
                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
@@ -301,6 +321,12 @@ namespace Sayl.Core.Services
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
                 .ToDictionaryAsync(x => x.Date, x => x.Total);
 
+            // ── المتبقي لكل فاتورة بيع بتخصيص الدفعات (لا طرح تحصيل الفترة من إيرادها) ──
+            // تحصيل الفترة قد يسدد ديونًا من فترات سابقة، وفواتير الفترة قد تكون
+            // سُددت بتحصيلات لاحقة — المتبقي الصحيح يُحسب على مستوى الفاتورة.
+            var outstandingByInvoice = await clsPaymentAllocation
+                .GetOutstandingForInvoicesAsync(_dbContext, invoiceIds);
+
             // ── تجميع الفترات ──
             var periods = new List<PeriodicPeriodVM>();
             var invoiceDetails = new List<InvoicePrintVM>();
@@ -338,6 +364,12 @@ namespace Sayl.Core.Services
                     .Where(kv => kv.Key >= pFrom && kv.Key <= pTo)
                     .Sum(kv => kv.Value);
 
+                // متبقي فواتير البيع داخل الفترة بتخصيص الدفعات (المرتجعات مخفَّضة
+                // في المتبقي نفسه عبر OriginalInvoiceId — راجع clsPaymentAllocation)
+                decimal periodOutstanding = periodInvoices
+                    .Where(i => i.Type == enInvoicesType.sale)
+                    .Sum(i => Math.Max(0m, outstandingByInvoice.GetValueOrDefault(i.InvoiceId)));
+
                 periods.Add(new PeriodicPeriodVM
                 {
                     PeriodLabel = $"{pFrom:yyyy-MM-dd} ← {pTo:yyyy-MM-dd}",
@@ -354,7 +386,7 @@ namespace Sayl.Core.Services
                     Expenses = exp,
                     NetProfit = gross - exp,
                     Collected = periodCollected,
-                    Outstanding = netRev - periodCollected
+                    Outstanding = periodOutstanding
                 });
 
                 if (fromFilled == null) fromFilled = pFrom;
@@ -501,7 +533,8 @@ namespace Sayl.Core.Services
             decimal totalGross = totalNetRev - totalCogsNet;
             decimal totalExpenses = periods.Sum(p => p.Expenses);
             decimal totalNetProfit = totalGross - totalExpenses;
-            decimal totalOutstanding = totalNetRev - collected;
+            // المتبقي الكلي = مجموع متبقي فواتير البيع بتخصيص الدفعات (فواتير الفترات كلها)
+            decimal totalOutstanding = periods.Sum(p => p.Outstanding);
 
             var report = new PeriodicReportVM
             {
@@ -650,8 +683,10 @@ namespace Sayl.Core.Services
                 .Where(ii => mtdSaleInvoiceIds.Contains(ii.InvoiceId))
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
 
+            // مرتجع العميل فقط يقلب تكلفة المبيعات — مرتجع المورد ليس خصمًا من
+            // تكلفة مبيعات العملاء (تكلفتها تُرد من المورد، راجع GetProfitSummaryAsync)
             decimal returnsCogs = await _dbContext.InvoiceItems
-                .Where(ii => (ii.Invoice.Type == enInvoicesType.customer_return || ii.Invoice.Type == enInvoicesType.supplier_return)
+                .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                          && ii.Invoice.Status == enInvoicesStatus.completed
                          && ii.Invoice.CreatedAt >= mtdStart && ii.Invoice.CreatedAt < dayEnd)
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
@@ -849,64 +884,86 @@ namespace Sayl.Core.Services
         /// <summary>ربحية كل منتج في فترة: كمية/إيراد/تكلفة/ربح/هامش/حصة — مرتبًا بالربح تنازليًا.</summary>
         public async Task<Result<List<ProductProfitVM>>> GetProductProfitReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            var start = fromDate.ToDateTime(TimeOnly.MinValue);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue);
+            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير
+            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
-            var rows = await _dbContext.InvoiceItems
+            // ══ إيراد البند الفعلي يخصم نصيبه من خصم رأس الفاتورة (والضريبة وفق سياسة الصافي) ══
+            // الفاتورة بُنيت: الصافي = الإجمالي − الخصم + الضريبة، والإيراد المعتمد في كل
+            // تقارير الأرباح هو NetAmount (الضريبة جزء منه بلا تصنيف منفرد — سياسة قائمة).
+            // نصيب البند = قيمته الخام × (الصافي/الإجمالي) — مجموع البنود يساوي صافي
+            // الفاتورة بالضبط، فيتطابق مجموع ربحية المنتجات مع إجمالي ربح تقرير الأرباح.
+            var saleRows = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.Type == enInvoicesType.sale
                           && ii.Invoice.Status == enInvoicesStatus.completed
                           && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
-                .GroupBy(ii => new { ii.ProductId, ii.Product.Name })
-                .Select(g => new
+                .Select(ii => new
                 {
-                    g.Key.ProductId,
-                    g.Key.Name,
-                    Quantity = g.Sum(x => x.Quantity),
-                    // المرتجعات تظهر كفواتير نوع customer_return داخل نفس القائمة؟ لا —
-                    // الفلتر نوع sale فقط؛ المرتجع يُطرح باستعلام مرافق أدناه
-                    Revenue = g.Sum(x => x.ItemPrice * x.Quantity),
-                    Cost = g.Sum(x => (x.ItemCost ?? 0m) * x.Quantity)
+                    ii.ProductId,
+                    ProductName = ii.Product.Name,
+                    ii.Quantity,
+                    ii.ItemPrice,
+                    ItemCost = ii.ItemCost ?? 0m,
+                    InvoiceTotal = ii.Invoice.TotalAmount,
+                    InvoiceNet = ii.Invoice.NetAmount
                 })
                 .ToListAsync();
 
-            // خصم المرتجعات (كمية وإيرادًا وتكلفة) من نفس المنتجات
-            var returns = await _dbContext.InvoiceItems
+            // المرتجعات تُطرح كميتًا وإيرادًا وتكلفة — إيراد المرتجع بنسبة صافي فاتورة
+            // المرتجع نفسها (الاسترداد الفعلي بعد خصم الضريبة/الخصم المعكوسين، VULN-03):
+            // فاتورة المرتجع سالبة الرأس (Total/Net) فالنسبة موجبة وتطابق ما رُد للعميل.
+            var returnRows = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                           && ii.Invoice.Status == enInvoicesStatus.completed
                           && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
-                .GroupBy(ii => ii.ProductId)
-                .Select(g => new
+                .Select(ii => new
                 {
-                    ProductId = g.Key,
-                    Quantity = g.Sum(x => x.Quantity),
-                    Revenue = g.Sum(x => x.ItemPrice * x.Quantity),
-                    Cost = g.Sum(x => (x.ItemCost ?? 0m) * x.Quantity)
+                    ii.ProductId,
+                    ii.Quantity,
+                    ii.ItemPrice,
+                    ItemCost = ii.ItemCost ?? 0m,
+                    InvoiceTotal = ii.Invoice.TotalAmount,
+                    InvoiceNet = ii.Invoice.NetAmount
                 })
                 .ToListAsync();
 
-            var returnsByProduct = returns.ToDictionary(r => r.ProductId);
+            // النسبة معرفة على أي رأس غير صفري: فاتورة البيع موجبة الرأس، وفاتورة
+            // المرتجع سالبة الرأس (Net/Total كلاهما سالب → نسبة موجبة تعكس الاسترداد)
+            static decimal NetRatio(decimal total, decimal net)
+                => total != 0 ? net / total : 0m;
+
+            var agg = new Dictionary<int, (string Name, int Qty, decimal Revenue, decimal Cost)>();
+            void Accumulate(int productId, string name, int qty, decimal revenue, decimal cost, int sign)
+            {
+                var cur = agg.TryGetValue(productId, out var v)
+                    ? v
+                    : (Name: name, Qty: 0, Revenue: 0m, Cost: 0m);
+                agg[productId] = (cur.Name, cur.Qty + sign * qty, cur.Revenue + sign * revenue, cur.Cost + sign * cost);
+            }
+
+            foreach (var r in saleRows)
+                Accumulate(r.ProductId, r.ProductName, r.Quantity,
+                    r.ItemPrice * r.Quantity * NetRatio(r.InvoiceTotal, r.InvoiceNet),
+                    r.ItemCost * r.Quantity, sign: +1);
+
+            foreach (var r in returnRows)
+                Accumulate(r.ProductId, "", r.Quantity,
+                    r.ItemPrice * r.Quantity * NetRatio(r.InvoiceTotal, r.InvoiceNet),
+                    r.ItemCost * r.Quantity, sign: -1);
 
             var list = new List<ProductProfitVM>();
-            foreach (var r in rows)
+            foreach (var (productId, row) in agg)
             {
-                int qty = r.Quantity;
-                decimal revenue = r.Revenue;
-                decimal cost = r.Cost;
+                if (row.Qty <= 0) continue; // صافي الصفر لا يفيد التحليل
 
-                if (returnsByProduct.TryGetValue(r.ProductId, out var ret))
-                {
-                    qty -= ret.Quantity;
-                    revenue -= ret.Revenue;
-                    cost -= ret.Cost;
-                }
-                if (qty <= 0) continue; // صافي الصفر لا يفيد التحليل
-
+                decimal revenue = row.Revenue;
+                decimal cost = row.Cost;
                 decimal profit = revenue - cost;
                 list.Add(new ProductProfitVM
                 {
-                    ProductId = r.ProductId,
-                    ProductName = r.Name,
-                    Quantity = qty,
+                    ProductId = productId,
+                    ProductName = row.Name,
+                    Quantity = row.Qty,
                     Revenue = Math.Round(revenue, 2),
                     Cost = Math.Round(cost, 2),
                     Profit = Math.Round(profit, 2),
@@ -924,8 +981,9 @@ namespace Sayl.Core.Services
         /// <summary>أفضل العملاء في فترة: عدد فواتيرهم وإيرادهم وربحهم وصافي ما تحصّل منهم.</summary>
         public async Task<Result<List<CustomerProfitVM>>> GetTopCustomersReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            var start = fromDate.ToDateTime(TimeOnly.MinValue);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue);
+            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير
+            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
             var sales = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
@@ -964,13 +1022,27 @@ namespace Sayl.Core.Services
                 .Select(g => new { PartyId = g.Key, Returns = g.Sum(x => x.NetAmount) })
                 .ToDictionaryAsync(x => x.PartyId, x => x.Returns);
 
+            // ══ المرتجع يقلب تكلفته أيضًا: بند المرتجع يحمل تكلفة البنود المُباعة الأصلية ══
+            // إيراد العميل ينخفض بقيمة المرتجع — بلا قلب التكلفة يظهر ربح العميل أقل
+            // من حقيقته بمقدار تكلفة البضاعة المرتجعة.
+            var returnsCogsByParty = await _dbContext.InvoiceItems
+                .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
+                          && ii.Invoice.Status == enInvoicesStatus.completed
+                          && ii.Invoice.PartyId != null
+                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                .GroupBy(ii => ii.Invoice.PartyId!.Value)
+                .Select(g => new { PartyId = g.Key, Cost = g.Sum(x => (x.ItemCost ?? 0m) * x.Quantity) })
+                .ToDictionaryAsync(x => x.PartyId, x => x.Cost);
+
             var result = new List<CustomerProfitVM>();
             foreach (var s in sales)
             {
                 decimal cost = cogsByParty.TryGetValue(s.PartyId!.Value, out var c) ? c : 0m;
                 decimal returns = returnsByParty.TryGetValue(s.PartyId.Value, out var r) ? Math.Abs(r) : 0m;
+                decimal returnsCost = returnsCogsByParty.TryGetValue(s.PartyId.Value, out var rc) ? rc : 0m;
                 decimal netRevenue = s.Revenue - returns;
-                decimal profit = netRevenue - cost;
+                decimal netCost = cost - returnsCost;
+                decimal profit = netRevenue - netCost;
 
                 result.Add(new CustomerProfitVM
                 {

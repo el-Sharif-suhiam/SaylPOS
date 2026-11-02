@@ -111,6 +111,73 @@ namespace Sayl.Core.Services
         }
 
         /// <summary>
+        /// المتبقي لكل فاتورة من فواتير محددة — بتخصيص حتمي مطابق لـ GetPartyOutstandingAsync.
+        ///
+        /// الدفعات العامة (بلا فاتورة) تُخصَّص على فواتير الطرف **كلها** الأقدم أولًا،
+        /// لذا يُحسب المتبقي على كامل مجموعة فواتير كل طرف مالك (لا الفواتير المطلوبة
+        /// وحدها) ثم يُرشَّح الناتج للمفاتيح المطلوبة — وإلا ظن تقرير أن دفعة اليوم
+        /// سددت فاتورة اليوم بينما هي سددت دَينًا أقدم بالتخصيص الزمني.
+        ///
+        /// فواتير الزوار (PartyId = null) بلا دفعات عامة: المتبقي = الصافي + مرتجعاتها − دفعاتها المرتبطة.
+        /// </summary>
+        public static async Task<Dictionary<int, decimal>> GetOutstandingForInvoicesAsync(
+            SaylDbContext dbContext, IEnumerable<int> invoiceIds)
+        {
+            var requested = invoiceIds.Distinct().ToList();
+            var map = new Dictionary<int, decimal>();
+            if (requested.Count == 0)
+                return map;
+
+            var seeds = await dbContext.Invoices
+                .Where(i => requested.Contains(i.InvoiceId))
+                .Select(i => new { i.InvoiceId, i.PartyType, i.PartyId })
+                .ToListAsync();
+
+            // أصحاب الأطراف: حساب المتبقي على كامل فواتير الطرف (التخصيص الزمني يحتاجها كلها)
+            var partyKeys = seeds
+                .Where(i => i.PartyId != null)
+                .Select(i => (PartyType: i.PartyType ?? 'C', PartyId: i.PartyId!.Value))
+                .Distinct()
+                .ToList();
+
+            foreach (var (partyType, partyId) in partyKeys)
+            {
+                var rows = await GetPartyOutstandingAsync(dbContext, partyType, partyId);
+                foreach (var r in rows)
+                    map[r.InvoiceId] = r.Outstanding;
+            }
+
+            // فواتير الزوار بلا طرف — لا دفعات عامة تُخصَّص لها
+            var walkInIds = seeds.Where(i => i.PartyId == null).Select(i => i.InvoiceId).ToList();
+            if (walkInIds.Count > 0)
+            {
+                var walkInRows = await dbContext.Invoices
+                    .Where(i => walkInIds.Contains(i.InvoiceId))
+                    .Select(i => new
+                    {
+                        i.InvoiceId,
+                        i.NetAmount,
+                        Returns = dbContext.Invoices
+                            .Where(r => r.OriginalInvoiceId == i.InvoiceId
+                                     && r.Status == enInvoicesStatus.completed
+                                     && (r.Type == enInvoicesType.customer_return
+                                      || r.Type == enInvoicesType.supplier_return))
+                            .Sum(r => (decimal?)r.NetAmount) ?? 0m,
+                        LinkedPaid = dbContext.Payments
+                            .Where(p => p.InvoiceId == i.InvoiceId)
+                            .Sum(p => (decimal?)p.Amount) ?? 0m
+                    })
+                    .ToListAsync();
+
+                foreach (var r in walkInRows)
+                    map[r.InvoiceId] = r.NetAmount + r.Returns - r.LinkedPaid;
+            }
+
+            return map.Where(kv => requested.Contains(kv.Key))
+                      .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
+        /// <summary>
         /// أثر دفعة عامة جديدة (بعد إضافتها للسياق أو قبلها — تُخصَّص القيمة الممرَّرة فقط)
         /// على حالات سداد الفواتير: تخصيص الأقدم أولًا ثم تحديث PaymentStatus لكل فاتورة
         /// تغيّرت حالتها. يعيد الفائض غير المخصَّص (credit بلا فواتير مستحقة).
