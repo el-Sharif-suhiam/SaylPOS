@@ -43,6 +43,8 @@ namespace consol_app
                 await Svc<clsUsersService>(ws).EnsureSchemaUpgradesAsync();
                 // جدول حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
                 await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
+                // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
+                await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
                 var admin = await db.Users
                     .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
                 await stock.ReceiveStockAsync(new DtoStockReceiveRequest
@@ -72,6 +74,7 @@ namespace consol_app
             await CrudSmokeCycle();
             await AdjustBatchConsistencyCycle();
             await InventoryBatchConsistencyCycle();
+            await StockCountCycle();
             await OwnerRecoveryCycle();
             await PaymentAllocationCycle();
             await RefundPlanCycle();
@@ -1782,6 +1785,208 @@ namespace consol_app
 
             int after = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
             Check("batches track inventory after deduct", after == 3, $"batchSum={after}");
+        }
+
+        // ───────────────── 19. Stock count: stale snapshot + concurrency ─────────────────
+        private static async Task StockCountCycle()
+        {
+            Console.WriteLine("--- STOCK COUNT (reconciliation + concurrency) ---");
+            string tag = "SCC" + DateTime.Now.Ticks % 100000000;
+            var adminId = await VerifyAsync(async db =>
+                await db.Users.Where(u => u.Username == "admin").Select(u => u.UserId).FirstAsync());
+
+            // 3 منتجات معزولة: A وB وC بمخزون 10 لكل منها (استلام بدفعة حقيقية)
+            int pidA = 0, pidB = 0, pidC = 0;
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                var stock = Svc<clsStockService>(ps);
+                foreach (var suffix in new[] { "A", "B", "C" })
+                {
+                    var prod = new Product { Name = tag + suffix, Barcode = tag + suffix, Type = "stock", BasePrice = 10m, CostPrice = 2m, IsActive = true };
+                    pdb.Products.Add(prod);
+                    await pdb.SaveChangesAsync();
+                    if (suffix == "A") pidA = prod.ProductId;
+                    else if (suffix == "B") pidB = prod.ProductId;
+                    else pidC = prod.ProductId;
+                    var rec = await stock.ReceiveStockAsync(new DtoStockReceiveRequest
+                    {
+                        ProductId = prod.ProductId, BatchNumber = tag + suffix, Quantity = 10
+                    }, adminId);
+                    Check($"seed {suffix} received 10", rec.IsSuccess, rec.Message);
+                }
+            }
+
+            int invOf(int pid) => VerifyAsync(async db =>
+                await db.Inventories.AsNoTracking().Where(i => i.ProductId == pid)
+                    .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync()).GetAwaiter().GetResult();
+
+            // ══ 1) فتح جلسة — اللقطة = 10 ══
+            int sessionId;
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var started = await cnt.StartSessionAsync(adminId);
+                Check("session started", started.IsSuccess, started.Message);
+                sessionId = started.Data;
+
+                var lines = await cnt.GetOpenSessionAsync();
+                var la = lines.First(l => l.ProductId == pidA);
+                Check("snapshot book = 10", la.BookQuantity == 10, $"book={la.BookQuantity}");
+            }
+
+            // ══ 2) حركات أثناء العد: بيع 2 من A ثم شراء 3 إلى A (الفعلي 11)، بيع 4 من B (الفعلي 6) ══
+            using (var s = Scope())
+            {
+                var stock = Svc<clsStockService>(s);
+                var sell1 = await stock.SellStockAsync(pidA, 2);
+                Check("sell 2 of A during count", sell1.IsSuccess, sell1.Message);
+                var buy = await stock.ReceiveStockAsync(new DtoStockReceiveRequest
+                { ProductId = pidA, BatchNumber = tag + "A", Quantity = 3 }, adminId);
+                Check("receive 3 of A during count", buy.IsSuccess, buy.Message);
+                var sell2 = await stock.SellStockAsync(pidB, 4);
+                Check("sell 4 of B during count", sell2.IsSuccess, sell2.Message);
+            }
+            Check("A actual = 11", invOf(pidA) == 11, $"inv={invOf(pidA)}");
+            Check("B actual = 6", invOf(pidB) == 6, $"inv={invOf(pidB)}");
+
+            // ══ 3) العد الفعلي: A=11 وB=6 وC=12 (فائض حقيقي +2) — وعدّ بقية المنتجات بالفعلي ══
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var lines = await cnt.GetOpenSessionAsync();
+                foreach (var l in lines)
+                {
+                    int counted = l.ProductId == pidA ? 11 : l.ProductId == pidB ? 6 : l.ProductId == pidC ? 12
+                        : await VerifyAsync(async db =>
+                            await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
+                                .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
+                    var r = await cnt.SetCountedAsync(l.CountId, counted);
+                    if (!r.IsSuccess) Check($"count {l.ProductName}", false, r.Message);
+                }
+            }
+
+            // ══ 4) الترحيل: المصالحة ضد الدفتري الفعّال — لا فرق لقطة قديمة ══
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var post = await cnt.PostSessionAsync(adminId);
+                Check("session posted", post.IsSuccess, post.Message);
+            }
+            Check("A final = 11 (movements reconciled)", invOf(pidA) == 11, $"inv={invOf(pidA)}");
+            Check("B final = 6 (movements reconciled)", invOf(pidB) == 6, $"inv={invOf(pidB)}");
+            Check("C final = 12 (real surplus +2 applied)", invOf(pidC) == 12, $"inv={invOf(pidC)}");
+
+            // ══ 5) الترحيل المزدوج مرفوض والرصيد لا يتغير ══
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var again = await cnt.PostSessionAsync(adminId);
+                Check("re-post rejected", !again.IsSuccess, again.Message);
+            }
+            Check("C stock unchanged after re-post", invOf(pidC) == 12, $"inv={invOf(pidC)}");
+
+            // ══ 6) جلستان مفتوحتان مرفوضتان (متتاليًا ومتزامنًا) ══
+            // منتج D يُنشأ قبل فتح الجلسة كي يدخل في لقطتها
+            int pidD = 0;
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                var stock = Svc<clsStockService>(ps);
+                var prod = new Product { Name = tag + "D", Barcode = tag + "D", Type = "stock", BasePrice = 10m, CostPrice = 2m, IsActive = true };
+                pdb.Products.Add(prod);
+                await pdb.SaveChangesAsync();
+                pidD = prod.ProductId;
+                await stock.ReceiveStockAsync(new DtoStockReceiveRequest { ProductId = pidD, BatchNumber = tag + "D", Quantity = 10 }, adminId);
+            }
+
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var first = await cnt.StartSessionAsync(adminId);
+                Check("session #2 started", first.IsSuccess, first.Message);
+                var second = await cnt.StartSessionAsync(adminId);
+                Check("second open session rejected", !second.IsSuccess, second.Message);
+            }
+
+            // ══ 7) ترحيل متزامن: طلبان بالتوازي — تسوية واحدة فقط ══
+            // عدّ كل السطور: D=8 (عجز −2) والباقي بالفعلي — ثم رحّل مرتين بالتوازي
+            using (var s = Scope())
+            {
+                var cnt = Svc<clsStockCountService>(s);
+                var lines = await cnt.GetOpenSessionAsync();
+                foreach (var l in lines)
+                {
+                    int counted = l.ProductId == pidD ? 8
+                        : await VerifyAsync(async db =>
+                            await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
+                                .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
+                    await cnt.SetCountedAsync(l.CountId, counted);
+                }
+            }
+
+            (bool ok1, bool ok2) postResults = (false, false);
+            var postTask1 = Task.Run(async () =>
+            {
+                using var s = Scope();
+                var r = await Svc<clsStockCountService>(s).PostSessionAsync(adminId);
+                postResults.ok1 = r.IsSuccess;
+            });
+            var postTask2 = Task.Run(async () =>
+            {
+                using var s = Scope();
+                var r = await Svc<clsStockCountService>(s).PostSessionAsync(adminId);
+                postResults.ok2 = r.IsSuccess;
+            });
+            await Task.WhenAll(postTask1, postTask2);
+            Check("exactly one concurrent post succeeded", postResults.ok1 ^ postResults.ok2,
+                $"ok1={postResults.ok1} ok2={postResults.ok2}");
+            Check("D final = 8 (adjustment applied once)", invOf(pidD) == 8, $"inv={invOf(pidD)}");
+
+            int postAdjustments = await VerifyAsync(async db =>
+                await db.StockMovements.AsNoTracking()
+                    .CountAsync(m => m.ProductId == pidD && m.SourceType == "ManualAdjustment"));
+            Check("exactly one D adjustment movement", postAdjustments == 1, $"movements={postAdjustments}");
+
+            // ══ 8) فتح متزامن: جلسة واحدة فقط تنجح وأرقام جلسات غير مكررة ══
+            int startedCount = 0, okA = 0, okB = 0;
+            int idA = -1, idB = -1;
+            var startTask1 = Task.Run(async () =>
+            {
+                using var s = Scope();
+                var r = await Svc<clsStockCountService>(s).StartSessionAsync(adminId);
+                okA = r.IsSuccess ? 1 : 0; idA = r.Data;
+            });
+            var startTask2 = Task.Run(async () =>
+            {
+                using var s = Scope();
+                var r = await Svc<clsStockCountService>(s).StartSessionAsync(adminId);
+                okB = r.IsSuccess ? 1 : 0; idB = r.Data;
+            });
+            await Task.WhenAll(startTask1, startTask2);
+            startedCount = okA + okB;
+            Check("exactly one concurrent start succeeded", startedCount == 1, $"started={startedCount}");
+            if (startedCount == 1)
+            {
+                // فائز واحد فقط: معرّفه صالح والآخر 0 (فشل بلا جلسة) — لا تكرار ترقيم
+                Check("loser carries no session id", (okA == 1 ? idA : idB) > 0 && (okA == 1 ? idB : idA) == 0,
+                    $"idA={idA} idB={idB}");
+                // تنظيف: أغلق الجلسة الفائزة بعدّ الجميع بالفعلي (بلا تسويات)
+                using (var s = Scope())
+                {
+                    var cnt = Svc<clsStockCountService>(s);
+                    var lines = await cnt.GetOpenSessionAsync();
+                    foreach (var l in lines)
+                    {
+                        int counted = await VerifyAsync(async db =>
+                            await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
+                                .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
+                        await cnt.SetCountedAsync(l.CountId, counted);
+                    }
+                    var post = await cnt.PostSessionAsync(adminId);
+                    Check("cleanup post of winner session", post.IsSuccess, post.Message);
+                }
+            }
         }
 
         // ───────────────── 18. Inventory ↔ Batch consistency ─────────────────

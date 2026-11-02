@@ -573,6 +573,10 @@ CREATE TABLE StockCounts
     CONSTRAINT FK_StockCounts_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
 );
 GO
+-- جلسة جرد مفتوحة واحدة لكل منتج: فهرس فريد مُرشَّح (السطور غير المرحّلة فقط)
+-- — حاجز قاعدي ضد جلستَي جرد متوازيتين لنفس المنتج
+CREATE UNIQUE INDEX UQ_StockCounts_OpenProduct ON StockCounts(ProductId) WHERE IsPosted = 0;
+GO
 -----------------------------------------------------------
 -- 20) Create Indexes for Performance
 -----------------------------------------------------------

@@ -181,6 +181,10 @@ namespace Sayl.UI
                         // مخطط حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
                         checkoutService.EnsureReservationSchemaAsync().GetAwaiter().GetResult();
 
+                        // فهرس جلسة الجرد المفتوحة الفريدة (UQ_StockCounts_OpenProduct) — idempotent كذلك
+                        scope.ServiceProvider.GetRequiredService<Core.Services.clsStockCountService>()
+                            .EnsureCountSchemaAsync().GetAwaiter().GetResult();
+
                         // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
                         if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())
                             return true;
