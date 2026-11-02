@@ -63,6 +63,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<StockCount> StockCounts { get; set; }
 
+    public virtual DbSet<StockReservation> StockReservations { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<CashMovement>(entity =>
@@ -527,6 +529,30 @@ public partial class SaylDbContext : DbContext
                 .HasForeignKey(d => d.ProductId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_StockMovements_ProductId");
+        });
+
+        modelBuilder.Entity<StockReservation>(entity =>
+        {
+            // حجز المخزون بملكية فاتورة: صف واحد لكل (فاتورة، منتج) — الفهرس الفريد
+            // يمنع الحجز المزدوج لنفس الفاتورة على نفس المنتج حتى تحت التوازي.
+            entity.HasKey(e => e.ReservationId).HasName("PK_StockReservations");
+
+            entity.HasIndex(e => e.ProductId, "IX_StockReservations_ProductId");
+
+            entity.HasIndex(e => new { e.InvoiceId, e.ProductId }, "UQ_StockReservations_Invoice_Product").IsUnique();
+
+            entity.Property(e => e.Quantity).HasDefaultValue(1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.Invoice).WithMany()
+                .HasForeignKey(d => d.InvoiceId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_StockReservations_InvoiceId");
+
+            entity.HasOne(d => d.Product).WithMany()
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_StockReservations_ProductId");
         });
 
         modelBuilder.Entity<Supplier>(entity =>

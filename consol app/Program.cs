@@ -41,6 +41,8 @@ namespace consol_app
                 // ترقية المخطط idempotent أولًا: أي قاعدة قائمة (كقاعدة التطوير)
                 // تكتسب عمود MustChangePassword تلقائيًا قبل أول استعلام.
                 await Svc<clsUsersService>(ws).EnsureSchemaUpgradesAsync();
+                // جدول حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
+                await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
                 var admin = await db.Users
                     .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
                 await stock.ReceiveStockAsync(new DtoStockReceiveRequest
@@ -57,6 +59,7 @@ namespace consol_app
             if (sessionId > 0)
             {
                 await SuspendResumeCancelCycle(sessionId, cashierId);
+                await ReservationOwnershipCycle();
                 await ReturnCycle();
                 await CashDeskCycle(sessionId);
             }
@@ -842,6 +845,169 @@ namespace consol_app
                 db.Inventories.AsNoTracking().Where(i => i.ProductId == prodId)
                     .Select(i => i.QuantityReserved ?? 0).FirstAsync());
             Check("cancel released reservation", finalResv == inv0Resv, $"resv={finalResv}");
+        }
+
+        // ───────────────── 3b. Reservation ownership (suspended invoices) ─────────────────
+        private static async Task ReservationOwnershipCycle()
+        {
+            Console.WriteLine("--- RESERVATION OWNERSHIP ---");
+            int cashierId = await VerifyAsync(db =>
+                db.Users.Where(u => u.Username == "cashier1").Select(u => u.UserId).FirstAsync());
+
+            // منتج معزول بمخزون 10 بالضبط لكل جولة — barcode/اسم فريدان بالوقت ⇒ التكرار آمن
+            string tag = "RESV" + DateTime.Now.Ticks;
+            int prodId = 0;
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                var prod = new Product { Name = tag, Barcode = tag, Type = "stock", BasePrice = 10m, CostPrice = 5m, IsActive = true };
+                pdb.Products.Add(prod);
+                await pdb.SaveChangesAsync();
+                pdb.Inventories.Add(new Inventory { ProductId = prod.ProductId, QuantityAvailable = 10, QuantityReserved = 0 });
+                pdb.Batches.Add(new Batch { ProductId = prod.ProductId, BatchNumber = tag, BatchQuantity = 10 });
+                await pdb.SaveChangesAsync();
+                prodId = prod.ProductId;
+            }
+
+            async Task<(int avail, int reserved, int rowCount, int rowsSum)> Snap()
+                => await VerifyAsync(async db =>
+                {
+                    var inv = await db.Inventories.AsNoTracking().Where(i => i.ProductId == prodId)
+                        .Select(i => new { A = i.QuantityAvailable ?? 0, R = i.QuantityReserved ?? 0 }).FirstAsync();
+                    var rows = await db.StockReservations.AsNoTracking().Where(r => r.ProductId == prodId)
+                        .Select(r => r.Quantity).ToListAsync();
+                    return (inv.A, inv.R, rows.Count, rows.Sum());
+                });
+
+            // كل عملية بـscope جديد — مطابق لاستدعاء الواجهة الفعلي (PosForm/SuspendedInvoicesForm)
+            async Task<(bool ok, string msg, int invoiceId)> SuspendMsg(int qty)
+            {
+                using var os = Scope();
+                var r = await Svc<clsCheckoutService>(os).ProcessCheckoutAsync(new DtoCheckoutRequest
+                {
+                    UserId = cashierId,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = qty } }
+                }, suspend: true);
+                return (r.IsSuccess, r.Message, r.IsSuccess ? r.Data : 0);
+            }
+
+            async Task Provision(int qty)
+            {
+                using var ps = Scope();
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                pdb.Batches.Add(new Batch { ProductId = prodId, BatchNumber = tag + "-" + DateTime.Now.Ticks, BatchQuantity = qty });
+                await pdb.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {qty} WHERE ProductId = {prodId}");
+                await pdb.SaveChangesAsync();
+            }
+
+            async Task<bool> Complete(int invoiceId)
+            {
+                if (invoiceId <= 0) return false; // فشل التعليق سلفًا — لا يُهرَس الهارنس
+                decimal net = await VerifyAsync(db =>
+                    db.Invoices.Where(i => i.InvoiceId == invoiceId).Select(i => i.NetAmount).FirstAsync());
+                using var os = Scope();
+                var r = await Svc<clsCheckoutService>(os).CompleteSuspendedInvoiceAsync(invoiceId, new List<DtoPaymentInfo>
+                {
+                    new() { Amount = net, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                }, actorUserId: cashierId);
+                return r.IsSuccess;
+            }
+
+            // ══ 1) التعليق على كامل المخزون ثم الإكمال — كان يفشل قبل الإصلاح ══
+            var (okA, msgA, invA) = await SuspendMsg(10);
+            Check("suspend A reserves full stock (10)", okA, msgA);
+
+            var (okOver, msgOver, _) = await SuspendMsg(1);
+            Check("other invoice cannot reserve beyond reserved stock", !okOver, msgOver);
+
+            Check("complete A consumes its own reservation", await Complete(invA));
+            var snap1 = await Snap();
+            Check("after A completed: avail=0 reserved=0 rows=0",
+                snap1.avail == 0 && snap1.reserved == 0 && snap1.rowCount == 0,
+                $"avail={snap1.avail} resv={snap1.reserved} rows={snap1.rowCount}");
+
+            // ══ 2) عزل الحجوزات: A(3) و B(4) — إكمال A لا يمس حجز B ══
+            await Provision(10);
+            var pre2 = await Snap();
+            Check("provision 10 before step 2", pre2.avail == 10 && pre2.reserved == 0, $"avail={pre2.avail} resv={pre2.reserved}");
+            var (okA2, msgA2, invA2) = await SuspendMsg(3);
+            var (okB2, msgB2, invB2) = await SuspendMsg(4);
+            Check("suspend A2(3) and B2(4)", okA2 && okB2, $"A2: {msgA2} | B2: {msgB2}");
+            var snap2 = await Snap();
+            Check("aggregate matches invoice rows (7)", snap2.reserved == 7 && snap2.rowsSum == 7 && snap2.rowCount == 2,
+                $"resv={snap2.reserved} rowsSum={snap2.rowsSum} rows={snap2.rowCount}");
+
+            Check("complete A2 succeeds without touching B2", await Complete(invA2));
+            var snap3 = await Snap();
+            Check("B2 reservation intact after A2 completed (reserved=4)",
+                snap3.reserved == 4 && snap3.rowsSum == 4 && snap3.rowCount == 1 && snap3.avail == 7,
+                $"avail={snap3.avail} resv={snap3.reserved} rowsSum={snap3.rowsSum} rows={snap3.rowCount}");
+
+            // ══ 3) بيع مباشر أثناء حجز B: المتاح الصافي 7−4=3 ══
+            async Task<(bool ok, string msg)> DirectSale(int qty)
+            {
+                using var os = Scope();
+                var r = await Svc<clsCheckoutService>(os).ProcessCheckoutAsync(new DtoCheckoutRequest
+                {
+                    UserId = cashierId,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = qty } },
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = qty * 10m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                });
+                return (r.IsSuccess, r.Message);
+            }
+
+            var (d1ok, d1msg) = await DirectSale(3);
+            Check("direct sale allowed up to net available (3)", d1ok, d1msg);
+            var snap4 = await Snap();
+            Check("B2 reservation untouched by direct sale (reserved=4)",
+                snap4.reserved == 4 && snap4.rowsSum == 4 && snap4.rowCount == 1 && snap4.avail == 4,
+                $"avail={snap4.avail} resv={snap4.reserved}");
+
+            var (d2ok, d2msg) = await DirectSale(1);
+            Check("direct sale cannot consume B2 reserved stock", !d2ok, d2msg);
+            var snap5 = await Snap();
+            Check("B2 reservation intact after rejected direct sale",
+                snap5.reserved == 4 && snap5.rowsSum == 4 && snap5.avail == 4,
+                $"avail={snap5.avail} resv={snap5.reserved}");
+
+            // ══ 4) إلغاء B2 يحرر حجزها فقط — والإلغاء المكرر يُرفض ══
+            async Task<(bool ok, string msg)> CancelInv(int invoiceId)
+            {
+                using var os = Scope();
+                var r = await Svc<clsCheckoutService>(os).CancelSuspendedInvoiceAsync(invoiceId, cashierId);
+                return (r.IsSuccess, r.Message);
+            }
+
+            var (cok, cmsg) = await CancelInv(invB2);
+            Check("cancel B2 releases only its own reservation", cok, cmsg);
+            var snap6 = await Snap();
+            Check("after B2 cancelled: reserved=0 rows=0 avail=4",
+                snap6.reserved == 0 && snap6.rowCount == 0 && snap6.avail == 4,
+                $"avail={snap6.avail} resv={snap6.reserved} rows={snap6.rowCount}");
+
+            var (ctok, ctmsg) = await CancelInv(invB2);
+            Check("duplicate cancel rejected", !ctok, ctmsg);
+
+            // ══ 5) إكمال مزدوج متوازٍ: فائز واحد بالضبط وخصم مرة واحدة ══
+            var (okC, msgC, invC) = await SuspendMsg(2);
+            Check("suspend C(2)", okC, msgC);
+            decimal netC = await VerifyAsync(db =>
+                db.Invoices.Where(i => i.InvoiceId == invC).Select(i => i.NetAmount).FirstAsync());
+            var pays = new List<DtoPaymentInfo>
+            {
+                new() { Amount = netC, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+            };
+            var results = await Task.WhenAll(
+                Task.Run(async () => { using var s1 = Scope(); return await Svc<clsCheckoutService>(s1).CompleteSuspendedInvoiceAsync(invC, pays, cashierId); }),
+                Task.Run(async () => { using var s2 = Scope(); return await Svc<clsCheckoutService>(s2).CompleteSuspendedInvoiceAsync(invC, pays, cashierId); }));
+            var (r1, r2) = (results[0], results[1]);
+            Check("concurrent completion: exactly one wins", (r1.IsSuccess ? 1 : 0) + (r2.IsSuccess ? 1 : 0) == 1,
+                $"r1={r1.IsSuccess} r2={r2.IsSuccess}");
+            var snap7 = await Snap();
+            Check("concurrent completion deducted once, rows cleared",
+                snap7.avail == 2 && snap7.reserved == 0 && snap7.rowCount == 0,
+                $"avail={snap7.avail} resv={snap7.reserved} rows={snap7.rowCount}");
         }
 
         // ───────────────── 4. Return ─────────────────

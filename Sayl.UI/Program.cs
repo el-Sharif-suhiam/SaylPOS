@@ -165,6 +165,7 @@ namespace Sayl.UI
             {
                 using var scope = Services.CreateScope();
                 var usersService = scope.ServiceProvider.GetRequiredService<Core.Services.clsUsersService>();
+                var checkoutService = scope.ServiceProvider.GetRequiredService<Core.Services.clsCheckoutService>();
 
                 // ملف pending-owner الوراثي (نسخة مثبّت أقدم) — تنظيف فقط
                 SafeDelete(PendingOwnerFile);
@@ -176,6 +177,9 @@ namespace Sayl.UI
                         // ترقية المخطط idempotent قبل أي استعلام مستخدمين (القواعد الأقدم
                         // بلا عمود MustChangePassword أو بلا جدول Settings)
                         usersService.EnsureSchemaUpgradesAsync().GetAwaiter().GetResult();
+
+                        // مخطط حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
+                        checkoutService.EnsureReservationSchemaAsync().GetAwaiter().GetResult();
 
                         // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
                         if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())

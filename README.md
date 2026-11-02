@@ -137,7 +137,7 @@ English mirror:
 - **قيود مالية CHECK**: مبالغ موجبة، صافٍ غير سالب للبيع/الشراء (المرتجعات سالبة بالتصميم)، أرصدة عملاء/موردين غير سالبة.
 - **فهارس فريدة**: باركود المنتج، بريد الطرف، مستخدم واحد لكل موظف، جلسة درج واحدة مفتوحة لكل مستخدم، دفعة (منتج+رقم)، راتب (موظف+فترة).
 - **توجيه درج**: `Payments.SessionId` يعزو النقد لجلسة الدرج الفعلية التي استلمته وقد تختلف عن جلسة الفاتورة (معلّقات/مرتجعات).
-- **احتياط المعلّقات**: `Inventory.QuantityReserved` يحجز الكمية للفاتورة المعلّقة حتى تُستأنف أو تُلغى.
+- **احتياط المعلّقات**: `Inventory.QuantityReserved` يحجز الكمية للفاتورة المعلّقة حتى تُستأنف أو تُلغى، وجدول `StockReservations` يوثّق ملكية الحجز لكل (فاتورة، منتج) — الإكمال يستهلك حجز الفاتورة ذاته والإلغاء يحرره وحده دون مساس بحجوزات فواتير أخرى.
 - **تحديث تدريجي**: سكربتات `Upgrade_0X` للخوادم المنصوبة مسبقًا دون لمس البيانات.
 
 23 tables in `SaylDB.sql`: parties (customers/suppliers), employees, roles, users, products, batches, inventory, invoices & items, payments, stock movements, expenses, system logs, POS sessions, settings, cash movements, shifts, payroll records, stock counts.

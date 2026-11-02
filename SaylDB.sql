@@ -294,6 +294,34 @@ CREATE TABLE InvoiceItems
 GO
 
 -----------------------------------------------------------
+-- 13b) Create StockReservations
+--      Per-invoice stock reservations for suspended invoices:
+--      one row per (invoice, product) — the owner of a hold.
+--      Inventory.QuantityReserved stays the aggregate (sum of these rows).
+-----------------------------------------------------------
+CREATE TABLE StockReservations
+(
+    ReservationId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    InvoiceId INT NOT NULL,
+    ProductId INT NOT NULL,
+    Quantity INT NOT NULL DEFAULT (1),
+    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+
+    CONSTRAINT FK_StockReservations_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES Invoices(InvoiceId),
+    CONSTRAINT FK_StockReservations_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId),
+    CONSTRAINT CK_StockReservations_Quantity CHECK (Quantity > 0)
+);
+GO
+
+CREATE UNIQUE INDEX UQ_StockReservations_Invoice_Product
+    ON StockReservations(InvoiceId, ProductId);
+GO
+
+CREATE INDEX IX_StockReservations_ProductId
+    ON StockReservations(ProductId);
+GO
+
+-----------------------------------------------------------
 -- 14) Create Payments
 --     Records incoming/outgoing payments; links to invoice or party
 -----------------------------------------------------------

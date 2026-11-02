@@ -14,6 +14,59 @@ namespace Sayl.Core.Services
 
        public clsCheckoutService(SaylDbContext dbContext) => _dbContext = dbContext;
 
+        // ═══ ترقية مخطط حجوزات الفواتير (idempotent) ═══
+        // جدول StockReservations يمنح كل فاتورة معلقة ملكية حجز صريحة (صف لكل
+        // (فاتورة، منتج)) — بدونه لا يمكن تحرير/استهلاك حجز فاتورة دون غيرها.
+        // عند الإنشاء الأول: صفوف الملكية تُرحَّل من الفواتير المعلقة القائمة
+        // والمجموع Inventory.QuantityReserved يُعاد بناؤه ليطابقها.
+        public const string EnsureReservationSchemaSql = @"
+IF OBJECT_ID(N'dbo.StockReservations', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.StockReservations
+    (
+        ReservationId INT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_StockReservations PRIMARY KEY,
+        InvoiceId INT NOT NULL,
+        ProductId INT NOT NULL,
+        Quantity INT NOT NULL CONSTRAINT DF_StockReservations_Quantity DEFAULT (1),
+        CreatedAt DATETIME2 NULL CONSTRAINT DF_StockReservations_CreatedAt DEFAULT (GETDATE()),
+
+        CONSTRAINT FK_StockReservations_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES dbo.Invoices(InvoiceId),
+        CONSTRAINT FK_StockReservations_ProductId FOREIGN KEY (ProductId) REFERENCES dbo.Products(ProductId),
+        CONSTRAINT CK_StockReservations_Quantity CHECK (Quantity > 0)
+    );
+
+    CREATE UNIQUE INDEX UQ_StockReservations_Invoice_Product
+        ON dbo.StockReservations(InvoiceId, ProductId);
+    CREATE INDEX IX_StockReservations_ProductId
+        ON dbo.StockReservations(ProductId);
+
+    /* ترحيل الحجوزات القائمة: كل (فاتورة معلقة، منتج مخزني) يصبح مالك حجزه */
+    INSERT INTO dbo.StockReservations (InvoiceId, ProductId, Quantity, CreatedAt)
+    SELECT ii.InvoiceId, ii.ProductId, SUM(ii.Quantity), GETDATE()
+    FROM dbo.InvoiceItems ii
+    JOIN dbo.Invoices i ON i.InvoiceId = ii.InvoiceId
+    JOIN dbo.Products p ON p.ProductId = ii.ProductId
+    WHERE i.Status = N'suspended' AND p.Type = N'stock'
+    GROUP BY ii.InvoiceId, ii.ProductId;
+
+    /* إعادة بناء المجموع ليطابق صفوف الملكية بعد الترحيل */
+    UPDATE inv
+    SET inv.QuantityReserved = ISNULL(r.TotalReserved, 0),
+        inv.UpdatedAt = GETDATE()
+    FROM dbo.Inventory inv
+    LEFT JOIN (
+        SELECT sr.ProductId, SUM(sr.Quantity) AS TotalReserved
+        FROM dbo.StockReservations sr
+        GROUP BY sr.ProductId
+    ) r ON r.ProductId = inv.ProductId
+    WHERE ISNULL(inv.QuantityReserved, 0) <> ISNULL(r.TotalReserved, 0);
+END";
+
+        /// <summary>يضمن جدول حجوزات الفواتير على أي قاعدة (قديمة أو جديدة) — يُنادى عند الإقلاع قبل أول تعليق فاتورة.</summary>
+        public async Task EnsureReservationSchemaAsync()
+            => await _dbContext.Database.ExecuteSqlRawAsync(EnsureReservationSchemaSql);
+
 
      
         // ─────────────────────────────────────────────────
@@ -90,8 +143,8 @@ namespace Sayl.Core.Services
 
                 if (suspend)
                 {
-                    // حجز المخزون فقط
-                    await ReserveStockAsync(request.Items);
+                    // حجز المخزون فقط — بملكية فاتورة (StockReservations)
+                    await ReserveStockAsync(request.Items, invoice.InvoiceId);
                 }
                 else
                 {
@@ -297,21 +350,9 @@ namespace Sayl.Core.Services
 
                 invoice.Status = enInvoicesStatus.cancelled;
 
-                // تحرير الحجز
-                var items = await _dbContext.InvoiceItems
-                    .Where(ii => ii.InvoiceId == invoiceId)
-                    .Select(ii => new { ii.ProductId, ii.Quantity })
-                    .ToListAsync();
-
-                foreach (var item in items)
-                {
-                    var inv = await _dbContext.Inventories.FindAsync(item.ProductId);
-                    if (inv != null)
-                    {
-                        inv.QuantityReserved -= item.Quantity;
-                        if (inv.QuantityReserved < 0) inv.QuantityReserved = 0; // أمان
-                    }
-                }
+                // تحرير الحجز — من صفوف StockReservations الخاصة بالفاتورة فقط
+                // (لا من المجموع) حتى لا يمس الإلغاء حجز فواتير معلقة أخرى
+                await ReleaseInvoiceReservationsAsync(invoiceId);
 
                 clsAudit.Log(_dbContext, actorUserId, "CancelSuspendedInvoice",
                     $"إلغاء فاتورة معلقة #{invoiceId} — صافي: {invoice.NetAmount:N2}");
@@ -429,43 +470,74 @@ namespace Sayl.Core.Services
              }
          }
 
-        private async Task ReserveStockAsync(List<DtoCheckoutItem> items)
+        // الحجز بملكية فاتورة: صف StockReservations لكل (فاتورة، منتج) + المجموع
+        // في Inventory.QuantityReserved يُحدَّث معه في نفس المعاملة (Serializable).
+        // البنود تُجمَّع حسب المنتج أولًا — سطران لنفس المنتج في السلة يصيران حجزًا واحدًا.
+        private async Task ReserveStockAsync(List<DtoCheckoutItem> items, int invoiceId)
         {
-            foreach (var item in items)
+            foreach (var group in items.GroupBy(i => i.ProductId))
             {
-                var product = await _dbContext.Products.FindAsync(item.ProductId);
+                int quantity = group.Sum(i => i.Quantity);
+                var product = await _dbContext.Products.FindAsync(group.Key);
                 if (product == null || product.Type != "stock") continue;
 
-                var inv = await _dbContext.Inventories.FindAsync(item.ProductId);
+                // منع الحجز المزدوج: نفس الفاتورة تحجز نفس المنتج مرة واحدة فقط
+                // (الفهرس الفريد UQ_StockReservations_Invoice_Product حاجز أخير تحت التوازي).
+                bool alreadyReserved = await _dbContext.StockReservations
+                    .AnyAsync(r => r.InvoiceId == invoiceId && r.ProductId == group.Key);
+                if (alreadyReserved)
+                    throw new InvalidOperationException($"يوجد حجز مسبق للفاتورة على المنتج {product.Name}");
+
+                var inv = await _dbContext.Inventories.FindAsync(group.Key);
                 if (inv == null)
-                    throw new InvalidOperationException($"لا يوجد مخزون للمنتج {item.ProductName}");
+                    throw new InvalidOperationException($"لا يوجد مخزون للمنتج {group.First().ProductName}");
 
                 int available = (inv.QuantityAvailable ?? 0 ) - (inv.QuantityReserved ?? 0);
-                if (available < item.Quantity)
+                if (available < quantity)
                     throw new InvalidOperationException($"المخزون المتاح غير كافٍ للمنتج {product.Name}");
 
-                inv.QuantityReserved += item.Quantity;
+                _dbContext.StockReservations.Add(new StockReservation
+                {
+                    InvoiceId = invoiceId,
+                    ProductId = group.Key,
+                    Quantity = quantity,
+                    CreatedAt = DateTime.UtcNow
+                });
+                inv.QuantityReserved += quantity;
             }
         }
 
-        private async Task ReleaseReservationAsync(List<DtoCheckoutItem> items)
+        // تحرير حجز فاتورة معلقة: يُقرأ من صفوف StockReservations الخاصة بالفاتورة
+        // لا من المجموع — فلا يمكن أن يمس حجز فاتورة معلقة أخرى مهما كانت الكميات.
+        private async Task ReleaseInvoiceReservationsAsync(int invoiceId)
         {
-            foreach (var item in items)
-            {
-                var product = await _dbContext.Products.FindAsync(item.ProductId);
-                if (product == null || product.Type != "stock") continue;
+            var reservations = await _dbContext.StockReservations
+                .Where(r => r.InvoiceId == invoiceId)
+                .ToListAsync();
 
-                var inv = await _dbContext.Inventories.FindAsync(item.ProductId);
+            foreach (var reservation in reservations)
+            {
+                var inv = await _dbContext.Inventories.FindAsync(reservation.ProductId);
                 if (inv != null)
                 {
-                    inv.QuantityReserved -= item.Quantity;
-                    if (inv.QuantityReserved < 0) inv.QuantityReserved = 0;
+                    inv.QuantityReserved -= reservation.Quantity;
+                    if (inv.QuantityReserved < 0) inv.QuantityReserved = 0; // أمان
                 }
             }
+
+            _dbContext.StockReservations.RemoveRange(reservations);
         }
 
         private async Task DeductStockAndCreateMovementsAsync(List<DtoCheckoutItem> items, int invoiceId, bool releaseReservation)
         {
+            // حجوزات هذه الفاتورة وحدها — الإكمال يستهلك حجزها الذاتي ولا يمس
+            // حجز أي فاتورة معلقة أخرى (صف واحد لكل (فاتورة، منتج) بضمان الفهرس الفريد).
+            Dictionary<int, StockReservation> ownReservations = releaseReservation
+                ? await _dbContext.StockReservations
+                    .Where(r => r.InvoiceId == invoiceId)
+                    .ToDictionaryAsync(r => r.ProductId)
+                : new Dictionary<int, StockReservation>();
+
             foreach (var item in items)
             {
                 var product = await _dbContext.Products.FindAsync(item.ProductId);
@@ -475,18 +547,21 @@ namespace Sayl.Core.Services
                 if (inv == null)
                     throw new InvalidOperationException($"لا يوجد مخزون للمنتج {item.ProductName}");
 
-                // B1: التوفر يُحسب من الحجز المتبقي فعلاً فقط
+                ownReservations.TryGetValue(item.ProductId, out var ownRow);
+                int ownRemaining = releaseReservation ? ownRow?.Quantity ?? 0 : 0;
+
+                // B1: التوفر يُحسب من الحجز المتبقي فعلاً فقط — وحين تكمل الفاتورة
+                // نفسها يُستثنى حجزها الذاتي من المحجوز لأنه يُستهلك بهذه العملية.
                 // VULN-10: صف Inventory بـ NULL كان يتخطى فحص التوفر كليًا (is not null)
                 // فباعة بلا حاجز بينما تبقى قيمة NULL تنجرف. الآن: NULL يعامل كصفر —
                 // البيع يرفض برسالة واضحة، والقيمة الفاسدة تظهر بدل أن تختبئ.
-                int availableNow = (inv.QuantityAvailable ?? 0) - (inv.QuantityReserved ?? 0);
+                int availableNow = (inv.QuantityAvailable ?? 0) - ((inv.QuantityReserved ?? 0) - ownRemaining);
                 if (availableNow < item.Quantity)
                     throw new InvalidOperationException($"المخزون غير كافٍ للمنتج {product.Name}");
 
                 // B1: البيع المباشر (releaseReservation=false) لا يحرر أي احتياطي —
                 // القيمة المحجوزة لفواتير معلقة أخرى تبقى كما هي. الإكمال
-                // (releaseReservation=true) يفك حجز هذه الفاتورة المعلمة فقط.
-                int reservedRelease = releaseReservation ? Math.Min(item.Quantity, inv.QuantityReserved ?? 0) : 0;
+                // (releaseReservation=true) يستهلك حجز هذه الفاتورة المعلقة فقط.
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
                     // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
@@ -540,9 +615,16 @@ namespace Sayl.Core.Services
 
                 // تحديث المخزون
                 inv.QuantityAvailable -= item.Quantity;
-                if (releaseReservation)
+                if (releaseReservation && ownRow != null)
                 {
-                    inv.QuantityReserved -= reservedRelease;
+                    // يُحرَّر من حجز هذه الفاتورة الذاتي فقط — عبر صف StockReservations
+                    // الخاص بها (ownRow ينقص عبر بنود نفس المنتج سطرًا سطرًا)
+                    int ownRelease = Math.Min(item.Quantity, ownRow.Quantity);
+                    ownRow.Quantity -= ownRelease;
+                    if (ownRow.Quantity <= 0)
+                        _dbContext.StockReservations.Remove(ownRow);
+
+                    inv.QuantityReserved -= ownRelease;
                     if (inv.QuantityReserved < 0) inv.QuantityReserved = 0; // أمان
                 }
                 inv.UpdatedAt = DateTime.UtcNow;

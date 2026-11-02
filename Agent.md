@@ -32,6 +32,7 @@ All backend services are implemented. Remaining work is listed in TASK.md.
 - `Products`: products. `Type` can be stock, service, manufactured.
 - `Batches`: batches. Columns: BatchId, ProductId, BatchNumber, ExpiryDate, BatchQuantity.
 - `Inventory`: stock summary. Columns: ProductId, QuantityAvailable, QuantityReserved.
+- `StockReservations`: per-invoice reservation ownership. One row per (suspended invoice, product); `Inventory.QuantityReserved` stays the aggregate (sum of these rows).
 - `StockMovements`: stock movement log.
 - `Invoices` and `InvoiceItems`: invoices and line items.
 - `Payments`: payments.
@@ -44,7 +45,7 @@ All backend services are implemented. Remaining work is listed in TASK.md.
 - **Result**: `Result.Ok(msg)`, `Result.Fail(msg)`, `Result<T>.Ok(data, msg)`, `Result<T>.Fail(msg)`.
 - **Partial update**: when updating an entity, only fields that are sent (non-empty/non-null) are updated.
 - **FEFO**: in sales, batches are selected automatically by expiry date (oldest first).
-- **Suspended invoice**: when suspending, stock is reserved (increase `QuantityReserved`) without deducting quantity. When completing, actual deduction happens and reservation is released.
+- **Suspended invoice**: when suspending, stock is reserved (increase `QuantityReserved`) without deducting quantity, and a `StockReservations` row records the invoice's ownership. When completing, the invoice consumes its own reservation (its quantity is excluded from the availability check); completing or cancelling never touches another invoice's reservation rows.
 - **Transactions**: complex operations (Checkout) use `BeginTransactionAsync` with full commit/rollback.
 
 ## 6. Implemented services (all of them)
