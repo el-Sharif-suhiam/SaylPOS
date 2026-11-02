@@ -413,47 +413,58 @@ namespace Sayl.Core.Services
                 _dbContext.Inventories.Add(inventory);
             }
 
-            // B5: لا نُرجع مرتجع البيع إلى دفعة انتهت صلاحيتها أصلاً —
-            // البيع يستبعد `ExpiryDate < اليوم`، فكان المخزون «متاحًا» لا يُباع
-            // أبدًا. عند انتهاء دفعة المصدر نُنشئ دفعة جديدة غير منتهية.
+            // B5 + التوازن: كل زيادة مخزون تمر عبر دفعة تحملها — لا مخزون قابل
+            // للبيع بلا مصدر دفعة صالح.
             DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            Batch? batch = null;
 
             if (batchId.HasValue)
             {
-                var batch = await _dbContext.Batches.FindAsync(batchId.Value);
-                if (batch != null && batch.ProductId == productId)
-                {
-                    if (batch.ExpiryDate.HasValue && batch.ExpiryDate.Value < today)
-                    {
-                        // B5: دفعة المصدر منتهية الصلاحية — دفعة جديدة بلا صلاحية
-                        // تحمل كمية المرتجع ليباع المخزون فعليًا.
-                        batch = new Batch
-                        {
-                            ProductId = productId,
-                            BatchNumber = $"RET-{returnInvoice.InvoiceId}-{productId}-{DateTime.UtcNow.Ticks}",
-                            ExpiryDate = null,
-                            BatchQuantity = quantity,
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        _dbContext.Batches.Add(batch);
-                    }
-                    else
-                    {
-                        batch.BatchQuantity += quantity;
-                    }
-
-                    _dbContext.StockMovements.Add(new StockMovement
-                    {
-                        ProductId = productId,
-                        Batch = batch,
-                        MovementType = enStockMovementType.customer_return,
-                        Quantity = quantity,
-                        SourceType = "Invoice",
-                        SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
-                    });
-                }
+                var source = await _dbContext.Batches.FindAsync(batchId.Value);
+                if (source != null && source.ProductId == productId)
+                    batch = source;
             }
+
+            if (batch != null && batch.ExpiryDate.HasValue && batch.ExpiryDate.Value < today)
+            {
+                // B5: دفعة المصدر منتهية الصلاحية — الكمية تعود إلى دفعتها المنتهية
+                // نفسها فتبقى محجوبة عن البيع تلقائيًا (البيع يستبعد المنتهية).
+                // كانت تُصنع دفعة جديدة بلا صلاحية فيتحول المرتجع المنتهي إلى
+                // مخزون صالح للبيع دون أي فحص — تلف قديم يُباع كأنه جديد.
+                batch.BatchQuantity += quantity;
+            }
+            else if (batch != null)
+            {
+                batch.BatchQuantity += quantity;
+            }
+            else
+            {
+                // بلا دفعة مصدر صالحة (بند قديم بلا BatchId أو دفعة لمنتج آخر):
+                // المخزون يعود إلى دفعة مرتجع محجوبة (حجر) — تظل مستثناة من
+                // البيع وحساب المتاح حتى يُفحص ويُفرج عنه صراحة (نقل/اعتماد)،
+                // فلا يُخلق مخزون قابل للبيع بلا مصدر دفعة.
+                batch = new Batch
+                {
+                    ProductId = productId,
+                    BatchNumber = $"RET-{returnInvoice.InvoiceId}-{productId}-{DateTime.UtcNow.Ticks}",
+                    ExpiryDate = null,
+                    BatchQuantity = quantity,
+                    IsQuarantined = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _dbContext.Batches.Add(batch);
+            }
+
+            _dbContext.StockMovements.Add(new StockMovement
+            {
+                ProductId = productId,
+                Batch = batch,
+                MovementType = enStockMovementType.customer_return,
+                Quantity = quantity,
+                SourceType = "Invoice",
+                SourceId = returnInvoice.InvoiceId,
+                CreatedAt = DateTime.UtcNow
+            });
 
             inventory.QuantityAvailable += quantity;
             inventory.UpdatedAt = DateTime.UtcNow;
@@ -493,10 +504,57 @@ namespace Sayl.Core.Services
                         CreatedAt = DateTime.UtcNow
                     });
                 }
+                else
+                {
+                    await DeductAcrossBatchesAsync(productId, quantity, returnInvoice);
+                }
+            }
+            else
+            {
+                // بند بلا دفعة مصدر: الخصم يمر عبر الدفعات حصرًا (FEFO) — خصم
+                // Inventory وحده يترك الدفعات أعلى من المخزون الكلي (مخزون شبح).
+                await DeductAcrossBatchesAsync(productId, quantity, returnInvoice);
             }
 
             inventory.QuantityAvailable -= quantity;
             inventory.UpdatedAt = DateTime.UtcNow;
+        }
+
+        /// <summary>خصم عبر الدفعات FEFO (الأقرب انتهاءً ثم المحجوبة أولًا) —
+        /// يضمن أن كل نقصان مخزون يحمل من دفعة فعلية فتبقى معادلة
+        /// «مجموع الدفعات = المخزون الكلي» قائمة.</summary>
+        private async Task DeductAcrossBatchesAsync(int productId, int quantity, Invoice returnInvoice)
+        {
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var batches = await _dbContext.Batches
+                .Where(b => b.ProductId == productId && b.BatchQuantity > 0)
+                .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
+                .ThenBy(b => b.IsQuarantined ? 0 : 1)
+                .ThenBy(b => b.CreatedAt)
+                .ToListAsync();
+
+            int remaining = quantity;
+            foreach (var b in batches)
+            {
+                if (remaining <= 0) break;
+                int take = Math.Min(remaining, b.BatchQuantity);
+                b.BatchQuantity -= take;
+                remaining -= take;
+
+                _dbContext.StockMovements.Add(new StockMovement
+                {
+                    ProductId = productId,
+                    BatchId = b.BatchId,
+                    MovementType = enStockMovementType.supplier_return,
+                    Quantity = -take,
+                    SourceType = "Invoice",
+                    SourceId = returnInvoice.InvoiceId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (remaining > 0)
+                throw new InvalidOperationException($"المخزون غير كافٍ لتغطية مرتجع المورد (دفعات المنتج {productId})");
         }
 
         // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —

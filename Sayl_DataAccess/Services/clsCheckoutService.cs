@@ -564,10 +564,11 @@ END";
                 // (releaseReservation=true) يستهلك حجز هذه الفاتورة المعلقة فقط.
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
-                    // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
+                    // FEFO — مع استبعاد الدفعات المنتهية الصلاحية والمحجوبة (حجر)
                     DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
                     var batches = await _dbContext.Batches
                         .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
+                                 && !b.IsQuarantined
                                  && (b.ExpiryDate == null || b.ExpiryDate >= today))
                         .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
                         .ThenBy(b => b.CreatedAt)

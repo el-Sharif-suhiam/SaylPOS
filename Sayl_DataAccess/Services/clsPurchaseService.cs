@@ -166,6 +166,11 @@ namespace Sayl.Core.Services
                             QuantityReserved = 0
                         };
                         _dbContext.Inventories.Add(inventory);
+                        // تثبيت سجل المخزون قبل الزيادة الذرية — UPDATE الخام
+                        // ينفذ فورًا على القاعدة، فلو نُفذ قبل وجود الصف أثّر
+                        // على صفر صفوف وهدرت كمية الشراء من المخزون الكلي
+                        // (الدفعة تحملها والمخزون الكلي لا يراها).
+                        await _dbContext.SaveChangesAsync();
                     }
 
                     // زيادة ذرية للمخزون — محصّنة من فاتورة/استلام متوازٍ

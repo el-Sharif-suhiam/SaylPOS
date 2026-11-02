@@ -171,10 +171,11 @@ namespace Sayl.Core.Services
                 if (available < quantity)
                     return Result.Fail($"المخزون المتاح غير كافٍ للمنتج {product.Name}.");
 
-                // FEFO — مع استبعاد الدفعات المنتهية الصلاحية
+                // FEFO — مع استبعاد الدفعات المنتهية الصلاحية والمحجوبة (حجر)
                 DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
                 var batches = await _dbContext.Batches
                     .Where(b => b.ProductId == productId && b.BatchQuantity > 0
+                             && !b.IsQuarantined
                              && (b.ExpiryDate == null || b.ExpiryDate >= today))
                     .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
                     .ThenBy(b => b.CreatedAt)
@@ -359,6 +360,34 @@ namespace Sayl.Core.Services
                         batch.BatchQuantity -= request.Quantity;
                         batchId = batch.BatchId;
                     }
+                    else
+                    {
+                        // النقصان بلا رقم دفعة يمر عبر الدفعات حصرًا (FEFO) — خصم
+                        // Inventory وحده يكسر المعادلة «مجموع الدفعات = المتاح»
+                        // فيخلق مخزونًا شبحًا على الورق بلا دفعة يحمله (المطلوب:
+                        // كل زيادة/نقصان تحرك الدفعة والمخزون معًا). نقص أولاً من
+                        // الأقرب انتهاءً ثم المحجوبة — عجز الكل = رفض.
+                        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+                        var batches = await _dbContext.Batches
+                            .Where(b => b.ProductId == request.ProductId && b.BatchQuantity > 0)
+                            .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
+                            .ThenBy(b => b.IsQuarantined ? 0 : 1)
+                            .ThenBy(b => b.CreatedAt)
+                            .ToListAsync();
+
+                        int remaining = request.Quantity;
+                        foreach (var b in batches)
+                        {
+                            if (remaining <= 0) break;
+                            int take = Math.Min(remaining, b.BatchQuantity);
+                            b.BatchQuantity -= take;
+                            remaining -= take;
+                            batchId = b.BatchId;
+                        }
+
+                        if (remaining > 0)
+                            return Result.Fail($"المخزون غير كافٍ لتغطية التسوية للمنتج {product.Name}.");
+                    }
 
                     inventory.QuantityAvailable -= request.Quantity;
 
@@ -460,11 +489,25 @@ namespace Sayl.Core.Services
                     if (targetBatch.BatchId == sourceBatch.BatchId)
                         return Result.Fail("لا يمكن نقل الكمية إلى نفس الدفعة.");
 
+                    // دمج دفعات غير متوافقة ممنوع: الصلاحية الفعلية للكمية المنقولة
+                    // (الصريحة من الطلب، وإلا صلاحية المصدر) يجب أن تطابق صلاحية
+                    // الدفعة الهدف القائمة — تغيير صلاحية مخزون موجود يفسد تاريخ
+                    // الدفعة ويخلط منتهيًا بصالح فيكذب FEFO بعدها. النقل إلى صلاحية
+                    // مختلفة يتطلب رقم دفعة جديدًا.
+                    DateOnly? requestedExpiry = request.TargetExpiryDate ?? sourceBatch.ExpiryDate;
+                    if (targetBatch.ExpiryDate != requestedExpiry)
+                        return Result.Fail("لا يمكن دمج دفعات بتواريخ صلاحية مختلفة — استخدم رقم دفعة جديدًا.");
+
+                    // المخزون المحجوب لا يذوب صامتًا في مخزون صالح: الدمج في دفعة
+                    // قائمة يتطلب تطابق حالة الحجر. إفراج محجوب = نقل صريح إلى
+                    // دفعة جديدة بصلاحية معتمدة (يُسجل في سجل النظام).
+                    if (targetBatch.IsQuarantined != sourceBatch.IsQuarantined)
+                        return Result.Fail("لا يمكن دمج مخزون محجوب مع مخزون صالح — استخدم رقم دفعة جديدًا.");
+
                     // زيادة ذرية للدفعة الهدف — محصّنة من استلام/نقل متوازٍ
+                    // (صلاحية الدفعة القائمة لا تُمس أبدًا)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                         $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
-                    if (request.TargetExpiryDate.HasValue)
-                        targetBatch.ExpiryDate = request.TargetExpiryDate.Value;
                 }
 
                 // خصم ذري من المصدر بشرط الكمية — لا يمكن أن يتجاوز المتاح حتى مع تزامن كامل

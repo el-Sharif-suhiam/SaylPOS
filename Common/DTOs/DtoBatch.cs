@@ -16,6 +16,8 @@ namespace Common.DTOs
 
         public int BatchQuantity { get; set; }
 
+        public bool IsQuarantined { get; set; }
+
         public DateTime? CreatedAt { get; set; }
     }
 }

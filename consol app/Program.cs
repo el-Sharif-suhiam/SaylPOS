@@ -71,6 +71,7 @@ namespace consol_app
             await SettingsBackupCycle();
             await CrudSmokeCycle();
             await AdjustBatchConsistencyCycle();
+            await InventoryBatchConsistencyCycle();
             await OwnerRecoveryCycle();
             await PaymentAllocationCycle();
             await RefundPlanCycle();
@@ -1781,6 +1782,296 @@ namespace consol_app
 
             int after = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
             Check("batches track inventory after deduct", after == 3, $"batchSum={after}");
+        }
+
+        // ───────────────── 18. Inventory ↔ Batch consistency ─────────────────
+        private static async Task InventoryBatchConsistencyCycle()
+        {
+            Console.WriteLine("--- INVENTORY/BATCH CONSISTENCY ---");
+            string tag = "IBC" + DateTime.Now.Ticks % 100000000;
+
+            // منتج معزول بلا سجل مخزون ولا دفعات — كل جولة نظيفة وقابلة للتكرار
+            int pid = 0, supplierId = 0, customerId = 0, cashierId = 0, adminId = 0;
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                var prod = new Product { Name = tag, Barcode = tag, Type = "stock", BasePrice = 10m, CostPrice = 5m, IsActive = true };
+                pdb.Products.Add(prod);
+                await pdb.SaveChangesAsync();
+                pid = prod.ProductId;
+                supplierId = await pdb.Suppliers.OrderBy(s => s.PartyId).Select(s => s.PartyId).FirstAsync();
+                customerId = await pdb.Customers.OrderBy(c => c.PartyId).Select(c => c.PartyId).FirstAsync();
+                cashierId = await pdb.Users.Where(u => u.Username == "cashier1").Select(u => u.UserId).FirstAsync();
+                adminId = await pdb.Users.Where(u => u.Username == "admin").Select(u => u.UserId).FirstAsync();
+            }
+
+            async Task<(int inv, int batchSum, int quarantined)> Snap(int productId)
+                => await VerifyAsync(async db =>
+                {
+                    int inv = await db.Inventories.AsNoTracking()
+                        .Where(i => i.ProductId == productId)
+                        .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync();
+                    int batchSum = await db.Batches.AsNoTracking()
+                        .Where(b => b.ProductId == productId)
+                        .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+                    int quarantined = await db.Batches.AsNoTracking()
+                        .Where(b => b.ProductId == productId && b.IsQuarantined)
+                        .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+                    return (inv, batchSum, quarantined);
+                });
+
+            // ══ 1) استلام شراء بلا سجل مخزون (كان يهدر الكمية) ══
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            DateOnly e1 = today.AddDays(30), e2 = today.AddDays(60);
+
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                // حذف سجل المخزون لمحاكاة منتج لم يُستلم من قبل (قاعدة قديمة/استيراد)
+                await pdb.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM Inventory WHERE ProductId = {pid}");
+
+                var purch = await Svc<clsPurchaseService>(ps).CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+                {
+                    SupplierId = supplierId,
+                    UserId = adminId,
+                    Items = new List<DtoPurchaseItem> { new() { ProductId = pid, BatchNumber = tag + "-P1", Quantity = 7, UnitCost = 5m, ExpiryDate = e1 } },
+                    Payment = new DtoPaymentInfo { Amount = 35m, Method = "cash", PaymentDate = today }
+                });
+                Check("purchase invoice created (no prior inventory row)", purch.IsSuccess, purch.Message);
+            }
+
+            var snap1 = await Snap(pid);
+            Check("receive w/o inventory row: inventory = 7", snap1.inv == 7, $"inv={snap1.inv}");
+            Check("receive w/o inventory row: batches = inventory", snap1.batchSum == snap1.inv, $"batches={snap1.batchSum} inv={snap1.inv}");
+
+            // ══ 2) استلام على سجل مخزون موجود + دفعة موجودة ══
+            using (var ps = Scope())
+            {
+                var purch2 = await Svc<clsPurchaseService>(ps).CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+                {
+                    SupplierId = supplierId, UserId = adminId,
+                    Items = new List<DtoPurchaseItem> { new() { ProductId = pid, BatchNumber = tag + "-P1", Quantity = 5, UnitCost = 5m, ExpiryDate = e1 } },
+                    Payment = new DtoPaymentInfo { Amount = 25m, Method = "cash", PaymentDate = today }
+                });
+                Check("purchase onto existing inventory/batch succeeds", purch2.IsSuccess, purch2.Message);
+            }
+            var snap2 = await Snap(pid);
+            Check("receive w/ existing row: inventory = 12", snap2.inv == 12, $"inv={snap2.inv}");
+            Check("receive w/ existing row: batch P1 = 12", snap2.batchSum == 12, $"batches={snap2.batchSum}");
+
+            // ══ 3) تسوية: زيادة بدفعة ثم نقصان بلا رقم دفعة (FEFO عبر الدفعات) ══
+            using (var ps = Scope())
+            {
+                var stock = Svc<clsStockService>(ps);
+                var up = await stock.AdjustStockAsync(new DtoStockAdjustmentRequest
+                { ProductId = pid, Quantity = 3, IsIncrease = true, Reason = "هارنس", BatchNumber = tag + "-P2", ExpiryDate = null, UserId = adminId });
+                Check("adjust +3 with batch P2", up.IsSuccess, up.Message);
+            }
+            var snap3 = await Snap(pid);
+            Check("adjust +3: inventory = 15, batches = inventory", snap3.inv == 15 && snap3.batchSum == 15, $"inv={snap3.inv} batches={snap3.batchSum}");
+
+            using (var ps = Scope())
+            {
+                var down = await Svc<clsStockService>(ps).AdjustStockAsync(new DtoStockAdjustmentRequest
+                { ProductId = pid, Quantity = 2, IsIncrease = false, Reason = "هارنس: نقصان بلا دفعة", UserId = adminId });
+                Check("adjust -2 without batch number", down.IsSuccess, down.Message);
+            }
+            var snap4 = await Snap(pid);
+            Check("adjust -2: inventory = 13 and batches = inventory", snap4.inv == 13 && snap4.batchSum == 13, $"inv={snap4.inv} batches={snap4.batchSum}");
+
+            // FEFO: الأقرب انتهاءً (P1) يُخصم أولًا — P1 12→10 وP2 يبقى 3
+            var (p1After, p2After) = await VerifyAsync(async db => (
+                await db.Batches.AsNoTracking().Where(b => b.ProductId == pid && b.BatchNumber == tag + "-P1").Select(b => b.BatchQuantity).FirstAsync(),
+                await db.Batches.AsNoTracking().Where(b => b.ProductId == pid && b.BatchNumber == tag + "-P2").Select(b => b.BatchQuantity).FirstAsync()));
+            Check("adjust -2 deducted FEFO from P1 (12→10, P2 intact)", p1After == 10 && p2After == 3, $"P1={p1After} P2={p2After}");
+
+            // ══ 4) نقل بين دفعات: صلاحيات مختلفة ممنوعة، والصلاحية القائمة لا تُمس ══
+            var batchIds = await VerifyAsync(async db => await db.Batches.AsNoTracking()
+                .Where(b => b.ProductId == pid)
+                .ToDictionaryAsync(b => b.BatchNumber, b => b.BatchId));
+            int srcId = batchIds[tag + "-P1"];
+
+            using (var ps = Scope())
+            {
+                var stock = Svc<clsStockService>(ps);
+                // 4a: نقل إلى دفعة جديدة بصلاحية صريحة مختلفة — مسموح (إنشاء دفعة جديدة)
+                var toNew = await stock.TransferBatchAsync(new DtoBatchTransferRequest
+                { SourceBatchId = srcId, TargetBatchNumber = tag + "-P3", Quantity = 2, TargetExpiryDate = e2, UserId = adminId });
+                Check("transfer to NEW batch with explicit expiry succeeds", toNew.IsSuccess, toNew.Message);
+            }
+
+            var p3Expiry = await VerifyAsync(db => db.Batches.AsNoTracking()
+                .Where(b => b.ProductId == pid && b.BatchNumber == tag + "-P3").Select(b => (DateOnly?)b.ExpiryDate).FirstOrDefaultAsync());
+            Check("new target batch got the explicit expiry", p3Expiry == e2, $"P3={p3Expiry}");
+
+            using (var ps = Scope())
+            {
+                var stock = Svc<clsStockService>(ps);
+                // 4b: نقل إلى دفعة موجودة بصلاحية مختلفة — ممنوع (دمج غير متوافق)
+                var badMerge = await stock.TransferBatchAsync(new DtoBatchTransferRequest
+                { SourceBatchId = srcId, TargetBatchNumber = tag + "-P3", Quantity = 1, TargetExpiryDate = e1, UserId = adminId });
+                Check("merge into existing batch with different expiry rejected", !badMerge.IsSuccess, badMerge.Message);
+            }
+
+            var (p3Qty, p3ExpiryAfter) = await VerifyAsync(async db => (
+                await db.Batches.AsNoTracking().Where(b => b.ProductId == pid && b.BatchNumber == tag + "-P3").Select(b => b.BatchQuantity).FirstAsync(),
+                await db.Batches.AsNoTracking().Where(b => b.ProductId == pid && b.BatchNumber == tag + "-P3").Select(b => (DateOnly?)b.ExpiryDate).FirstOrDefaultAsync()));
+            Check("rejected merge changed nothing (qty and expiry intact)", p3Qty == 2 && p3ExpiryAfter == e2, $"P3={p3Qty} exp={p3ExpiryAfter}");
+
+            using (var ps = Scope())
+            {
+                var stock = Svc<clsStockService>(ps);
+                // 4c: نقل إلى دفعة موجودة دون تحديد صلاحية — يُحتسب بصلاحية المصدر ≠ صلاحية الهدف → ممنوع
+                var implicitMerge = await stock.TransferBatchAsync(new DtoBatchTransferRequest
+                { SourceBatchId = srcId, TargetBatchNumber = tag + "-P3", Quantity = 1, UserId = adminId });
+                Check("implicit expiry mismatch rejected too", !implicitMerge.IsSuccess, implicitMerge.Message);
+            }
+
+            var snap5 = await Snap(pid);
+            Check("after transfers: batches = inventory (13)", snap5.inv == 13 && snap5.batchSum == 13, $"inv={snap5.inv} batches={snap5.batchSum}");
+
+            // ══ 5) مرتجع على دفعة انتهت صلاحيتها — يبقى محجوبًا لا يصبح صالحًا ══
+            int saleInvoiceId = 0;
+            using (var ps = Scope())
+            {
+                var sale = await Svc<clsCheckoutService>(ps).ProcessCheckoutAsync(new DtoCheckoutRequest
+                {
+                    UserId = cashierId,
+                    Items = new List<DtoCheckoutItem> { new() { ProductId = pid, Quantity = 3 } },
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = 30m, Method = "cash", PaymentDate = today } }
+                });
+                Check("sale of 3 executed (FEFO from P1)", sale.IsSuccess, sale.Message);
+                saleInvoiceId = sale.IsSuccess ? sale.Data : 0;
+            }
+            if (saleInvoiceId > 0)
+            {
+                // الآن P1 = 7 — نُقّدها (انتهت صلاحيتها أمس) ثم نُرجع وحدتين منها
+                await VerifyAsync(async db =>
+                {
+                    await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE Batches SET ExpiryDate = DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) WHERE BatchId = {srcId}");
+                    return true;
+                });
+
+                using (var ps = Scope())
+                {
+                    var ret = await Svc<clsReturnService>(ps).CreateCustomerReturnAsync(new DtoReturnRequest
+                    {
+                        OriginalInvoiceId = saleInvoiceId, UserId = cashierId,
+                        Items = new List<DtoReturnItem> { new() { ProductId = pid, Quantity = 2 } }
+                    });
+                    Check("customer return of expired stock executed", ret.IsSuccess, ret.Message);
+                }
+
+                var (p1Qty, p1Exp) = await VerifyAsync(async db => (
+                    await db.Batches.AsNoTracking().Where(b => b.BatchId == srcId).Select(b => (int?)b.BatchQuantity).SingleAsync(),
+                    await db.Batches.AsNoTracking().Where(b => b.BatchId == srcId).Select(b => (DateOnly?)b.ExpiryDate).SingleAsync()));
+                Check("expired return went back to its expired batch (7)", p1Qty == 7 && p1Exp < today, $"qty={p1Qty} exp={p1Exp}");
+
+                int fabricatedSellable = await VerifyAsync(db => db.Batches.AsNoTracking()
+                    .CountAsync(b => b.ProductId == pid && b.BatchNumber.StartsWith("RET-") && !b.IsQuarantined));
+                Check("no new sellable batch was fabricated for the expired return", fabricatedSellable == 0, $"count={fabricatedSellable}");
+
+                var snap6 = await Snap(pid);
+                Check("expired return kept batches = inventory", snap6.inv == 12 && snap6.batchSum == 12, $"inv={snap6.inv} batches={snap6.batchSum}");
+            }
+
+            // ══ 6) المتاح الصافي يستثني المنتهي والمحجوب ويراعي الحجز ══
+            // صالح للبيع: P2=3 (بلا صلاحية) فقط — P1 منتهي (7) وP3 منتهي؟ لا: P3=e2 (+60 يوم)
+            // صالح: P2=3 + P3=2 = 5، محجوز 0
+            int netBefore = 0;
+            using (var ps = Scope())
+            {
+                netBefore = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
+            }
+            Check("net available excludes expired stock (5)", netBefore == 5, $"net={netBefore}");
+
+            using (var ps = Scope())
+            {
+                var overSell = await Svc<clsStockService>(ps).SellStockAsync(pid, 6);
+                Check("sale beyond non-expired stock rejected", !overSell.IsSuccess, overSell.Message);
+            }
+
+            int suspendedInvoice = 0;
+            using (var ps = Scope())
+            {
+                var susp = await Svc<clsCheckoutService>(ps).ProcessCheckoutAsync(new DtoCheckoutRequest
+                { UserId = cashierId, Items = new List<DtoCheckoutItem> { new() { ProductId = pid, Quantity = 1 } } }, suspend: true);
+                Check("suspend 1 reserves stock", susp.IsSuccess, susp.Message);
+                suspendedInvoice = susp.IsSuccess ? susp.Data : 0;
+            }
+
+            int netReserved = 0;
+            using (var ps = Scope())
+            {
+                netReserved = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
+            }
+            Check("net available accounts reservation (5-1=4)", netReserved == 4, $"net={netReserved}");
+
+            if (suspendedInvoice > 0)
+            {
+                using (var ps = Scope())
+                {
+                    var cancel = await Svc<clsCheckoutService>(ps).CancelSuspendedInvoiceAsync(suspendedInvoice, cashierId);
+                    Check("cancel suspended releases reservation", cancel.IsSuccess, cancel.Message);
+                }
+                int netAfter = 0;
+                using (var ps = Scope())
+                {
+                    netAfter = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
+                }
+                Check("net available restored after cancel (5)", netAfter == 5, $"net={netAfter}");
+            }
+
+            // ══ 7) مرتجع بلا دفعة مصدر — يعود محجوبًا (حجر) لا صالحًا للبيع ══
+            int manualInvoiceId = 0;
+            using (var ps = Scope())
+            {
+                var pdb = Svc<Sayl.Core.Data.SaylDbContext>(ps);
+                // فاتورة بيع قديمة الشكل (بند بلا دفعة) — تحاكي بيانات ما قبل الدفعات
+                var manual = new Invoice
+                {
+                    Type = Common.Enums.enInvoicesType.sale,
+                    Status = Common.Enums.enInvoicesStatus.completed,
+                    PaymentStatus = Common.Enums.enPaymentStatus.paid,
+                    PartyType = 'C', PartyId = customerId, UserId = cashierId,
+                    TotalAmount = 10m, DiscountAmount = 0m, TaxAmount = 0m, NetAmount = 10m,
+                    CreatedAt = DateTime.UtcNow
+                };
+                pdb.Invoices.Add(manual);
+                await pdb.SaveChangesAsync();
+                pdb.InvoiceItems.Add(new InvoiceItem
+                { InvoiceId = manual.InvoiceId, ProductId = pid, Quantity = 1, BatchId = null, ItemPrice = 10m, ItemCost = 5m });
+                await pdb.SaveChangesAsync();
+                manualInvoiceId = manual.InvoiceId;
+            }
+
+            using (var ps = Scope())
+            {
+                var ret = await Svc<clsReturnService>(ps).CreateCustomerReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = manualInvoiceId, UserId = cashierId,
+                    Items = new List<DtoReturnItem> { new() { ProductId = pid, Quantity = 1 } }
+                });
+                Check("return of legacy no-batch item executed", ret.IsSuccess, ret.Message);
+            }
+
+            var snap7 = await Snap(pid);
+            Check("no-batch return quarantined (1) not sellable", snap7.quarantined == 1 && snap7.inv == 13 && snap7.batchSum == 13,
+                $"inv={snap7.inv} batches={snap7.batchSum} quarantined={snap7.quarantined}");
+
+            int netFinal = 0;
+            using (var ps = Scope())
+            {
+                netFinal = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
+            }
+            Check("quarantined stock excluded from net available (5)", netFinal == 5, $"net={netFinal}");
+
+            // ══ 8) مصالحة نهائية: مجموع الدفعات = المخزون الكلي ══
+            var final = await Snap(pid);
+            Check("RECONCILIATION: sum(batches) == QuantityAvailable", final.batchSum == final.inv,
+                $"batches={final.batchSum} inv={final.inv}");
         }
     }
 }

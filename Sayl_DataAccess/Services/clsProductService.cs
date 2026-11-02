@@ -164,16 +164,26 @@ namespace Sayl.Core.Services
         }
 
         /// <summary>المتاح الفعلي للبيع من قاعدة البيانات لحظيًا:
-        /// (QuantityAvailable − QuantityReserved) — المحجوز للمعلّقات يخصم من السقف.
-        /// غير سالب دائمًا (لا نبيع ما لا نملك). المنتج غير المخزّن = غير محدود.</summary>
+        /// (مجموع الدفعات الصالحة) − (QuantityReserved) — الصالح = غير منتهي
+        /// الصلاحية وغير محجوب (حجر)، فلا يعرض الكاشير مخزونًا لا يمكن بيعه.
+        /// المحجوز للمعلّقات يخصم من السقف، وغير سالب دائمًا.
+        /// المنتج غير المخزّن = غير محدود (بلا دفعات ولا مخزون = 0).</summary>
         public async Task<int> GetNetAvailableQuantityAsync(int productId)
         {
-            var net = await _dbContext.Inventories
-                .Where(i => i.ProductId == productId)
-                .Select(i => (i.QuantityAvailable ?? 0) - (i.QuantityReserved ?? 0))
-                .FirstOrDefaultAsync();
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-            return Math.Max(0, net);
+            int reserved = await _dbContext.Inventories
+                .Where(i => i.ProductId == productId)
+                .Select(i => (int?)(i.QuantityReserved ?? 0))
+                .FirstOrDefaultAsync() ?? 0;
+
+            int sellable = await _dbContext.Batches
+                .Where(b => b.ProductId == productId && b.BatchQuantity > 0
+                         && !b.IsQuarantined
+                         && (b.ExpiryDate == null || b.ExpiryDate >= today))
+                .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+
+            return Math.Max(0, sellable - reserved);
         }
 
         public async Task<List<DtoBatch>> GetProductBatchesAsync(int productId)
@@ -189,6 +199,7 @@ namespace Sayl.Core.Services
                     BatchNumber = b.BatchNumber,
                     ExpiryDate = b.ExpiryDate,
                     BatchQuantity = b.BatchQuantity,
+                    IsQuarantined = b.IsQuarantined,
                     CreatedAt = b.CreatedAt
                 })
                 .ToListAsync();

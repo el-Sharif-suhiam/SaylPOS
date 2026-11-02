@@ -231,6 +231,13 @@ namespace Sayl.Core.Services
 IF COL_LENGTH(N'dbo.Users', N'MustChangePassword') IS NULL
     ALTER TABLE dbo.Users ADD MustChangePassword BIT NOT NULL
         CONSTRAINT DF_Users_MustChangePassword DEFAULT (0);
+/* حجب/حجر الدفعات: مخزون موجود فعليًا لكنه غير صالح للبيع (مرتجع منتهي،
+   مرتجع بلا دفعة مصدر) — عمود على القواعد القائمة idempotent، والقواعد
+   الجديدة تنشئه مع الجدول (SaylDB.sql). */
+IF OBJECT_ID(N'dbo.Batches', N'U') IS NOT NULL
+   AND COL_LENGTH(N'dbo.Batches', N'IsQuarantined') IS NULL
+    ALTER TABLE dbo.Batches ADD IsQuarantined BIT NOT NULL
+        CONSTRAINT DF_Batches_IsQuarantined DEFAULT (0);
 IF OBJECT_ID(N'dbo.Settings', N'U') IS NULL
     CREATE TABLE dbo.Settings
     (
