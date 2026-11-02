@@ -138,8 +138,9 @@ END";
                 Invoice invoice = await CreateInvoiceHeaderAsync(request, suspend);
                 await _dbContext.SaveChangesAsync(); // للحصول على InvoiceId
 
-                // إضافة بنود الفاتورة
-                await AddInvoiceItemsAsync(invoice.InvoiceId, request.Items);
+                // إضافة بنود الفاتورة — الصفوف المرتجعة محاذاة مع request.Items
+                // (يُملأ لها ItemCost/BatchId عند خصم الدفعات الفعلية)
+                List<InvoiceItem> itemRows = await AddInvoiceItemsAsync(invoice.InvoiceId, request.Items);
 
                 if (suspend)
                 {
@@ -149,7 +150,7 @@ END";
                 else
                 {
                     // خصم المخزون (معالجة الدُفعات) — B1: بيع مباشر لا يحرر أي حجز
-                    await DeductStockAndCreateMovementsAsync(request.Items, invoice.InvoiceId, releaseReservation: false);
+                    await DeductStockAndCreateMovementsAsync(request.Items, invoice.InvoiceId, releaseReservation: false, itemRows);
 
                     // معالجة الدفع
                     await ProcessPaymentAsync(invoice, request, paymentSessionId);
@@ -277,6 +278,9 @@ END";
                 invoice.Status = enInvoicesStatus.completed;
 
                 // خصم المخزون (معالجة الدُفعات) — B1: الإكمال وحده يحرر الحجز الخاص بهذه الفاتورة
+                // الصفوف محاذاة مع البنود (بُنيت من نفس القائمة) ليُكتب كل صف
+                // تكلفته من الدفعات التي يستهلكها فعليًا
+                var invoiceItemRows = invoice.InvoiceItems.ToList();
                 var items = invoice.InvoiceItems.Select(i => new DtoCheckoutItem
                 {
                     ProductId = i.ProductId,
@@ -284,7 +288,7 @@ END";
                     BatchId = i.BatchId
                 }).ToList();
 
-                await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId, releaseReservation: true);
+                await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId, releaseReservation: true, invoiceItemRows);
 
                 // معالجة الدفع — VULN-05: دفعات الإكمال تُنسب لدرج جلسة المستكمِل
                 // الفعلية (actorSessionId) لا لجلسة التعليق القديمة: النقد دخل درج
@@ -450,8 +454,9 @@ END";
             return invoice;
         }
 
-         private async Task AddInvoiceItemsAsync(int invoiceId, List<DtoCheckoutItem> items)
+         private async Task<List<InvoiceItem>> AddInvoiceItemsAsync(int invoiceId, List<DtoCheckoutItem> items)
          {
+             var rows = new List<InvoiceItem>();
              foreach (var item in items)
              {
                  var product = await _dbContext.Products.FindAsync(item.ProductId);
@@ -460,14 +465,18 @@ END";
                      InvoiceId = invoiceId,
                      ProductId = item.ProductId,
                      Quantity = item.Quantity,
-                     BatchId = item.BatchId, // قد يكون null
+                     BatchId = item.BatchId, // قد يكون null — الدفعة الفعلية تُحدَّد عند الخصم
                      // VULN-14: snapshot سعر السلة — لا السعر الحالي بعد لحظة البناء
-                     ItemPrice = item.UnitPrice ?? product?.BasePrice ?? 0,
-                     ItemCost = product?.CostPrice
+                     ItemPrice = item.UnitPrice ?? product?.BasePrice ?? 0
+                     // ItemCost لا يُقدَّر هنا: يُكتب من الدفعات المستهلكة فعليًا
+                     // في DeductStockAndCreateMovementsAsync (سياسة التكلفة بالدفعات)
                  };
 
             _dbContext.InvoiceItems.Add(invoiceItem);
+            rows.Add(invoiceItem);
              }
+
+             return rows;
          }
 
         // الحجز بملكية فاتورة: صف StockReservations لكل (فاتورة، منتج) + المجموع
@@ -528,7 +537,8 @@ END";
             _dbContext.StockReservations.RemoveRange(reservations);
         }
 
-        private async Task DeductStockAndCreateMovementsAsync(List<DtoCheckoutItem> items, int invoiceId, bool releaseReservation)
+        private async Task DeductStockAndCreateMovementsAsync(
+            List<DtoCheckoutItem> items, int invoiceId, bool releaseReservation, List<InvoiceItem>? itemRows = null)
         {
             // حجوزات هذه الفاتورة وحدها — الإكمال يستهلك حجزها الذاتي ولا يمس
             // حجز أي فاتورة معلقة أخرى (صف واحد لكل (فاتورة، منتج) بضمان الفهرس الفريد).
@@ -538,8 +548,9 @@ END";
                     .ToDictionaryAsync(r => r.ProductId)
                 : new Dictionary<int, StockReservation>();
 
-            foreach (var item in items)
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
             {
+                var item = items[itemIndex];
                 var product = await _dbContext.Products.FindAsync(item.ProductId);
                 if (product == null || product.Type != "stock") continue;
 
@@ -565,6 +576,9 @@ END";
                 // تطبيق FEFO أو استخدام الدُفعة المحددة
               
                     // FEFO — مع استبعاد الدفعات المنتهية الصلاحية والمحجوبة (حجر)
+                    // سياسة التكلفة: FIFO بالتكلفة الفعلية للدفعة المستهلكة (Batches.UnitCost)
+                    // — FEFO يرتب الاستهلاك زمنيًا، أما التكلفة فتُقرأ من كل دفعة
+                    // اقتُنيت بها فعلًا، لا من Product.CostPrice (سعر آخر شراء).
                     DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
                     var batches = await _dbContext.Batches
                         .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
@@ -575,7 +589,7 @@ END";
                         .ToListAsync();
 
                     int remaining = item.Quantity;
-                    int? firstConsumedBatchId = null; // VULN-36: الدفعة الأولى المستهلكة فعليًا
+                    var allocations = new List<(Batch Batch, int Take)>();
                     foreach (var batch in batches)
                     {
                         if (remaining <= 0) break;
@@ -583,7 +597,7 @@ END";
                         batch.BatchQuantity -= take;
                         remaining -= take;
 
-                        firstConsumedBatchId ??= batch.BatchId;
+                        allocations.Add((batch, take));
 
                         _dbContext.StockMovements.Add(new StockMovement
                         {
@@ -600,18 +614,40 @@ END";
                     if (remaining > 0)
                         throw new InvalidOperationException($"المخزون غير كافٍ لتغطية الطلب للمنتج {product.Name}");
 
-                // B17: الدفعة الفعلية المستهلكة تُكتب على بند الفاتورة دائمًا؛
-                // BatchId المرسَل يُعامَل كإرشاد فقط (التوزيع الكامل موثق في StockMovements)
-                if (firstConsumedBatchId.HasValue)
-                {
-                    var trackedItem = _dbContext.InvoiceItems.Local
-                        .FirstOrDefault(ii => ii.InvoiceId == invoiceId && ii.ProductId == item.ProductId);
-                    if (trackedItem != null)
+                    // ══ COGS من الدفعات المستهلكة فعليًا ══
+                    // سطر الفاتورة الذي استهلك عدة دفعات يُقسَّم: صف InvoiceItem
+                    // لكل دفعة بكمايتها وتكلفتها الفعلية (UnitCost، وإلى الدفعة
+                    // بلا تكلفة مخزنة يُرجع إليها سعر المنتج الأخير) — BatchId
+                    // الواحد لا يوهم أن عدة دفعات دفعة واحدة. السعر يبقى سعر
+                    // البيع على كل صف — التكلفة وحدها تتبع الدفعة.
+                    InvoiceItem? row = itemRows != null && itemIndex < itemRows.Count ? itemRows[itemIndex] : null;
+                    decimal rowPrice = row?.ItemPrice ?? 0m;
+                    foreach (var (batch, take) in allocations)
                     {
-                        trackedItem.BatchId = firstConsumedBatchId;
+                        decimal unitCost = batch.UnitCost ?? product.CostPrice;
+
+                        if (row == null)
+                        {
+                            row = new InvoiceItem
+                            {
+                                InvoiceId = invoiceId,
+                                ProductId = item.ProductId,
+                                Quantity = take,
+                                BatchId = batch.BatchId,
+                                ItemPrice = rowPrice,
+                                ItemCost = unitCost
+                            };
+                            _dbContext.InvoiceItems.Add(row);
+                        }
+                        else
+                        {
+                            row.BatchId = batch.BatchId;
+                            row.Quantity = take;
+                            row.ItemCost = unitCost;
+                        }
+
+                        row = null; // الصفوف التالية دفعات إضافية — صف جديد لكل دفعة
                     }
-                    item.BatchId = firstConsumedBatchId; // كائن الطلب — لأسطح لاحقة داخل نفس الطلب
-                }
 
 
                 // تحديث المخزون

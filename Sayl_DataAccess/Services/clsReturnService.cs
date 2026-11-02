@@ -164,18 +164,21 @@ namespace Sayl.Core.Services
                         .OrderBy(a => a.LineIndex)
                         .ToList();
 
-                    _dbContext.InvoiceItems.Add(new InvoiceItem
-                    {
-                        InvoiceId = returnInvoice.InvoiceId,
-                        ProductId = g.ProductId,
-                        Quantity = g.Quantity,
-                        BatchId = productAllocations.Count > 0 ? productAllocations[0].BatchId : null,
-                        ItemPrice = productAllocations.Sum(a => a.ItemPrice * a.Quantity) / g.Quantity,
-                        ItemCost = productAllocations.Sum(a => (a.ItemCost ?? 0m) * a.Quantity) / g.Quantity
-                    });
-
+                    // صف لكل دفعة أصلية مستلمة في المرتجع — الكمية والتكلفة التاريخية
+                    // (وBatchId) تُعاد كما كانت على بند الفاتورة الأصلي بالضبط:
+                    // المرتجع يقلب تكلفة الاستهلاك الفعلية لا Product.CostPrice الحالية.
                     foreach (var a in productAllocations)
                     {
+                        _dbContext.InvoiceItems.Add(new InvoiceItem
+                        {
+                            InvoiceId = returnInvoice.InvoiceId,
+                            ProductId = g.ProductId,
+                            Quantity = a.Quantity,
+                            BatchId = a.BatchId,
+                            ItemPrice = a.ItemPrice,
+                            ItemCost = a.ItemCost
+                        });
+
                         await RestockProductAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
                     }
                 }
@@ -306,18 +309,21 @@ namespace Sayl.Core.Services
                         .OrderBy(a => a.LineIndex)
                         .ToList();
 
-                    _dbContext.InvoiceItems.Add(new InvoiceItem
-                    {
-                        InvoiceId = returnInvoice.InvoiceId,
-                        ProductId = g.ProductId,
-                        Quantity = g.Quantity,
-                        BatchId = productAllocations.Count > 0 ? productAllocations[0].BatchId : null,
-                        ItemPrice = productAllocations.Sum(a => a.ItemPrice * a.Quantity) / g.Quantity,
-                        ItemCost = productAllocations.Sum(a => (a.ItemCost ?? 0m) * a.Quantity) / g.Quantity
-                    });
-
+                    // صف لكل دفعة أصلية مستلمة في المرتجع — الكمية وتكلفتها التاريخية
+                    // (وBatchId) كما على بند الشراء الأصلي: خصم المخزون والتكلفة
+                    // من الدفعة نفسها التي جاءت منها الكمية.
                     foreach (var a in productAllocations)
                     {
+                        _dbContext.InvoiceItems.Add(new InvoiceItem
+                        {
+                            InvoiceId = returnInvoice.InvoiceId,
+                            ProductId = g.ProductId,
+                            Quantity = a.Quantity,
+                            BatchId = a.BatchId,
+                            ItemPrice = a.ItemPrice,
+                            ItemCost = a.ItemCost
+                        });
+
                         await DeductProductStockAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
                     }
                 }

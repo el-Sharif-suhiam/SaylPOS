@@ -120,6 +120,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.BatchNumber).HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.IsQuarantined).HasDefaultValue(false);
+            entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
 
             entity.HasOne(d => d.Product).WithMany(p => p.Batches)
                 .HasForeignKey(d => d.ProductId)

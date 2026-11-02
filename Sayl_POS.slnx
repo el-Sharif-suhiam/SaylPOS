@@ -13,4 +13,5 @@
   <Project Path="PosLicensing/PosLicensing.csproj" />
   <Project Path="Sayl.UI/Sayl.UI.csproj" />
   <Project Path="Sayl_DataAccess/Sayl.Core.csproj" />
+  <Project Path="Sayl.Tests/Sayl.Tests.csproj" />
 </Solution>

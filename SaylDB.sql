@@ -215,6 +215,7 @@ CREATE TABLE Batches
     BatchNumber NVARCHAR(100) NOT NULL,
     ExpiryDate DATE NULL,
     BatchQuantity INT NOT NULL,
+    UnitCost DECIMAL(10,2) NULL, -- تكلفة الاقتناء التاريخية للوحدة (بعد خصم الشراء) — مصدر COGS
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
 
     CONSTRAINT FK_Batches_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId),

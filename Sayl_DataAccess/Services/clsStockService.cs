@@ -64,6 +64,7 @@ namespace Sayl.Core.Services
                         BatchNumber = request.BatchNumber.Trim(),
                         ExpiryDate = request.ExpiryDate,
                         BatchQuantity = request.Quantity,
+                        UnitCost = request.UnitCost, // تكلفة الاقتناء التاريخية إن وُجدت
                         CreatedAt = DateTime.UtcNow
                     };
                     _dbContext.Batches.Add(batch);
@@ -89,6 +90,9 @@ namespace Sayl.Core.Services
                         $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
                     if (request.ExpiryDate.HasValue)
                         batch.ExpiryDate = request.ExpiryDate.Value;
+                    // دفعة قائمة بلا تكلفة مخزنة (استلام قديم) — أول تكلفة صريحة تملؤها
+                    if (batch.UnitCost is null && request.UnitCost.HasValue)
+                        batch.UnitCost = request.UnitCost.Value;
                 }
 
                 await _dbContext.SaveChangesAsync();

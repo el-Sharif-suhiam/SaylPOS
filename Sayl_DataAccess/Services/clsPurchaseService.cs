@@ -78,13 +78,20 @@ namespace Sayl.Core.Services
                 if (request.Payment is { } pay && (pay.Amount < 0 || pay.Amount > total))
                     throw new InvalidOperationException("مبلغ دفع الشراء يجب أن يكون بين صفر وإجمالي الفاتورة (لا دفع زائد).");
 
-                decimal discount = request.DiscountAmount;
+                decimal discount = Math.Round(request.DiscountAmount, 2, MidpointRounding.AwayFromZero);
                 decimal afterDiscount = total - discount;
                 decimal tax = request.TaxPercent > 0 ? afterDiscount * request.TaxPercent / 100 : 0;
                 decimal net = afterDiscount + tax;
 
                 if (net < 0)
                     throw new InvalidOperationException("صافي فاتورة الشراء لا يمكن أن يكون سالبًا.");
+
+                // ══ تخصيص خصم الشراء على البنود (أكبر البواقي — قرش قرشًا) ══
+                // سياسة التكلفة: تكلفة الاقتناء التاريخية تُحفظ على الدفعة (Batches.UnitCost)
+                // وعلى بند الفاتورة (ItemCost) صافية بعد نصيبها من خصم الفاتورة —
+                // فتساوي مخصصات الخصم الخصم الإجمالي بالضبط (لا فلس ضائع/مضاف).
+                // Product.CostPrice يبقى سعر آخر شراء للعرض فقط — ليس مصدر COGS.
+                var discountAllocations = AllocateDiscountAcrossItems(request.Items, discount);
 
                 var invoice = new Invoice
                 {
@@ -105,8 +112,13 @@ namespace Sayl.Core.Services
                 _dbContext.Invoices.Add(invoice);
                 await _dbContext.SaveChangesAsync();
 
-                foreach (var item in request.Items)
+                for (int itemIndex = 0; itemIndex < request.Items.Count; itemIndex++)
                 {
+                    var item = request.Items[itemIndex];
+
+                    // التكلفة الفعلية للوحدة: التكلفة الخام ناقص نصيب البند من خصم الفاتورة
+                    decimal unitEffectiveCost = discountAllocations[itemIndex].EffectiveUnitCost;
+
                     var batch = await _dbContext.Batches
                         .FirstOrDefaultAsync(b => b.ProductId == item.ProductId && b.BatchNumber == item.BatchNumber);
 
@@ -118,6 +130,7 @@ namespace Sayl.Core.Services
                             BatchNumber = item.BatchNumber.Trim(),
                             ExpiryDate = item.ExpiryDate,
                             BatchQuantity = item.Quantity,
+                            UnitCost = unitEffectiveCost, // تكلفة الاقتناء التاريخية للدفعة
                             CreatedAt = DateTime.UtcNow
                         };
                         _dbContext.Batches.Add(batch);
@@ -133,6 +146,11 @@ namespace Sayl.Core.Services
                             batch = await _dbContext.Batches
                                 .FirstAsync(b => b.ProductId == item.ProductId && b.BatchNumber == item.BatchNumber.Trim());
                             batch.BatchQuantity += item.Quantity;
+                            // دفعة أنشأها طلب متوازٍ: وسّط بالوزن إن كان لها تكلفة مختلفة
+                            batch.UnitCost = batch.UnitCost is null || batch.BatchQuantity <= item.Quantity
+                                ? unitEffectiveCost
+                                : Math.Round((batch.UnitCost.Value * (batch.BatchQuantity - item.Quantity)
+                                              + unitEffectiveCost * item.Quantity) / batch.BatchQuantity, 2, MidpointRounding.AwayFromZero);
                         }
                     }
                     else
@@ -142,6 +160,18 @@ namespace Sayl.Core.Services
                             $"UPDATE Batches SET BatchQuantity = BatchQuantity + {item.Quantity} WHERE BatchId = {batch.BatchId}");
                         if (item.ExpiryDate.HasValue)
                             batch.ExpiryDate = item.ExpiryDate.Value;
+
+                        // دمج في دفعة قائمة: تكلفة الدفعة تتوسط بالوزن (الكمية القديمة بتكلفتها
+                        // التاريخية + الكمية الجديدة بتكلفتها الفعلية) — الإجمالي يظل مطابقًا
+                        // لما دُفع فعلًا عبر عمر الدفعة. UPDATE خام بعد الزيادة أعلاه،
+                        // والخصائص المتتبعة لا تُمس حتى لا يكتبها SaveChanges فوقها.
+                        await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE Batches
+SET UnitCost = CASE
+                   WHEN UnitCost IS NULL OR BatchQuantity <= {item.Quantity} THEN {unitEffectiveCost}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {item.Quantity}) + {unitEffectiveCost} * {item.Quantity}) / BatchQuantity, 2)
+               END
+WHERE BatchId = {batch.BatchId}");
                     }
 
                     await _dbContext.SaveChangesAsync();
@@ -152,8 +182,9 @@ namespace Sayl.Core.Services
                         ProductId = item.ProductId,
                         Quantity = item.Quantity,
                         BatchId = batch.BatchId,
+                        // السعر الخام كما جاء في الطلب (التاريخ) — التكلفة صافية بعد الخصم
                         ItemPrice = item.UnitCost,
-                        ItemCost = item.UnitCost
+                        ItemCost = unitEffectiveCost
                     });
 
                     var inventory = await _dbContext.Inventories.FindAsync(item.ProductId);
@@ -189,7 +220,7 @@ namespace Sayl.Core.Services
                     });
 
                     var product = products[item.ProductId];
-                    product.CostPrice = item.UnitCost;
+                    product.CostPrice = unitEffectiveCost;
                 }
 
                 await ProcessPaymentAsync(invoice, request);
@@ -237,6 +268,72 @@ namespace Sayl.Core.Services
             var user = await _dbContext.Users.Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.UserId == userId);
             return user?.Role.RoleValue ?? 0;
+        }
+
+        // ═══ تخصيص خصم الشراء على البنود — أكبر البواقي، قرش قرشًا ═══
+        // نصيب كل بند من الخصم يتناسب مع قيمته الخام (UnitCost×Quantity)،
+        // والبواقي الصغرى (فلسات) توزع على أكبر البنود نسبيًا حتى يساوي
+        // مجموع المخصصات الخصم الإجمالي بالضبط — لا فرق تقريب مهما كان
+        // عدد البنود. فاتورة بلا خصم = أصفار. (public static — دالة حسابية
+        // نقية يختبرها الاختبار مباشرة.)
+        public static Dictionary<int, (decimal AllocatedDiscount, decimal EffectiveUnitCost)> AllocateDiscountAcrossItems(
+            List<DtoPurchaseItem> items, decimal discount)
+        {
+            var result = new Dictionary<int, (decimal, decimal)>();
+            if (discount <= 0m)
+            {
+                for (int i = 0; i < items.Count; i++)
+                    result[i] = (0m, items[i].UnitCost);
+                return result;
+            }
+
+            decimal total = items.Sum(i => i.UnitCost * i.Quantity);
+            if (total <= 0m)
+            {
+                for (int i = 0; i < items.Count; i++)
+                    result[i] = (0m, items[i].UnitCost);
+                return result;
+            }
+
+            // الأساس: نصيب كل بند مقطوعًا إلى قروش (لأسفل) — والباقي يوزع قرشًا قرشًا
+            long totalCents = (long)Math.Round(discount * 100m, 0, MidpointRounding.AwayFromZero);
+            var shares = new List<(int ProductId, long BaseCents, decimal Remainder, decimal Gross, int Index)>();
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                decimal gross = item.UnitCost * item.Quantity;
+                decimal exact = discount * gross / total;
+                long baseCents = (long)Math.Floor(exact * 100m);
+                shares.Add((item.ProductId, baseCents, exact * 100m - baseCents, gross, i));
+            }
+
+            long allocatedCents = shares.Sum(s => s.BaseCents);
+            long leftover = totalCents - allocatedCents;
+
+            var byLeftover = shares
+                .OrderByDescending(s => s.Remainder)
+                .ThenByDescending(s => s.Gross)
+                .ThenBy(s => s.Index)
+                .ToList();
+
+            var extra = new Dictionary<int, long>();
+            for (int i = 0; i < byLeftover.Count && leftover > 0; i++, leftover--)
+                extra[byLeftover[i].Index] = 1;
+
+            foreach (var s in shares)
+            {
+                var item = items[s.Index];
+                decimal lineDiscount = (s.BaseCents + extra.GetValueOrDefault(s.Index)) / 100m;
+                decimal lineNet = s.Gross - lineDiscount;
+                decimal unitCost = item.Quantity > 0
+                    ? Math.Round(lineNet / item.Quantity, 2, MidpointRounding.AwayFromZero)
+                    : item.UnitCost;
+
+                result[s.Index] = (lineDiscount, unitCost);
+            }
+
+            return result;
         }
 
         private async Task ProcessPaymentAsync(Invoice invoice, DtoPurchaseRequest request)

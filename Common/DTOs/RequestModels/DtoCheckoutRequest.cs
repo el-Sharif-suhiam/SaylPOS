@@ -10,7 +10,7 @@ namespace Common.DTOs.RequestModels
         public int? CustomerId { get; set; }      // null للزائر المجهول
         public int UserId { get; set; }           // الكاشير
         public int? SessionId { get; set; }       // جلسة نقطة البيع (اختياري)
-        public List<DtoCheckoutItem> Items { get; set; }
+        public List<DtoCheckoutItem> Items { get; set; } = new();
         public decimal DiscountPercent { get; set; }  // نسبة الخصم على الفاتورة ككل
         public decimal DiscountAmount { get; set; }   // أو مبلغ الخصم الثابت
         public decimal TaxPercent { get; set; }
