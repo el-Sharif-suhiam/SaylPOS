@@ -69,6 +69,8 @@ namespace consol_app
             await CrudSmokeCycle();
             await AdjustBatchConsistencyCycle();
             await OwnerRecoveryCycle();
+            await PaymentAllocationCycle();
+            await RefundPlanCycle();
 
             Console.WriteLine();
             Console.WriteLine($"================ RESULT: {_pass} PASSED / {_fail} FAILED ================");
@@ -165,8 +167,22 @@ namespace consol_app
             else
             {
                 adminUser = await db.Users.FirstAsync(u => u.Username == "admin");
-                var cashierUser = await db.Users.FirstAsync(u => u.Username == "cashier1");
+                var cashierUser = await db.Users.FirstOrDefaultAsync(u => u.Username == "cashier1");
+                if (cashierUser == null)
+                {
+                    // قاعدة تطوير فيها مدير بلا كاشير (أو كاشير معطّل حُذف) — ننشئه
+                    // بدل انهيار الهارنس بـ Sequence contains no elements
+                    var mkCashier = await users.AddNewUserAsync(
+                        new NewUserRequest("cashier1", "Cashier123", cashierRole.RoleId, null),
+                        actorUserId: adminUser.UserId);
+                    if (!mkCashier.IsSuccess)
+                        throw new Exception("Add cashier failed: " + mkCashier.Message);
+                    cashierUser = await db.Users.FirstAsync(u => u.Username == "cashier1");
+                }
                 await users.ResetPasswordAsync(cashierUser.UserId, "Cashier123", adminUser.UserId);
+                // إعادة كلمة مرور المدير الافتراضية أيضًا — قواعد التطوير القديمة قد
+                // تحمل كلمة غير معروفة فينهار باقي الدورات عند الدخول
+                await users.ResetPasswordAsync(adminUser.UserId, "Admin@123", adminUser.UserId);
 
                 // VULN-47: لا إنشاء صامت لمدير افتراضي على نظام له مستخدمون أصلًا
                 var refusedDefault = await users.EnsureDefaultAdminAsync();
@@ -260,6 +276,296 @@ namespace consol_app
                         .SetProperty(x => x.RoleId, u.RoleId));
                 }
             }
+        }
+
+        // ═══════════════════════════════════════════════
+        // PaymentAllocationCycle — تسوية الدفعات العامة على الفواتير (منع التحصيل المزدوج):
+        //  فاتورتان بلا سداد + دفعة عامة ⇒ تخصيص الأقدم أولًا ثم رفض أي سداد يتجاوز
+        //  المتبقي. القديم كان يحسب «متبقي الفاتورة» من دفعاتها المرتبطة فقط فيسمح
+        //  بتحصيل الدَّين نفسه مرتين (مرة عامة ومرة على الفاتورة).
+        // ═══════════════════════════════════════════════
+        private static async Task PaymentAllocationCycle()
+        {
+            Console.WriteLine("--- PAYMENT ALLOCATION (general vs invoice) ---");
+            using var s = Scope();
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+            var parties = Svc<clsPartyService>(s);
+            var checkout = Svc<clsCheckoutService>(s);
+            var purchase = Svc<clsPurchaseService>(s);
+            var payments = Svc<clsPaymentService>(s);
+            var sessions = Svc<clsPosSessionService>(s);
+            var admin = await db.Users.FirstAsync(u => u.Username == "admin");
+
+            var acting = await sessions.GetOpenSessionByUserAsync(admin.UserId);
+            int sessionId = (acting.IsSuccess && acting.Data != null)
+                ? acting.Data.SessionId
+                : (await sessions.OpenSessionAsync(admin.UserId, 0m)).Data;
+            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+
+            string stamp = "PA-" + DateTime.Now.Ticks.ToString()[^8..];
+            int customerId, supplierId;
+            using (var partyScope = Scope())
+            {
+                var psvc = Svc<clsPartyService>(partyScope);
+                var cust = await psvc.AddNewPartyWithRoleAsync(
+                    new DtoParty { PartyType = 'C', Name = "عميل تسوية " + stamp }, actorUserId: admin.UserId);
+                var sup = await psvc.AddNewPartyWithRoleAsync(
+                    new DtoParty { PartyType = 'S', Name = "مورد تسوية " + stamp }, actorUserId: admin.UserId);
+                if (!cust.IsSuccess || !sup.IsSuccess)
+                { Check("allocation parties created", false, cust.Message + " / " + sup.Message); return; }
+                customerId = cust.Data; supplierId = sup.Data;
+            }
+
+            // ── عميل: فاتورتان بلا أي سداد ──
+            var saleA = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId, SessionId = sessionId, CustomerId = customerId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 10, UnitPrice = 10m } },
+                Payments = new List<DtoPaymentInfo>()
+            });
+            var saleB = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId, SessionId = sessionId, CustomerId = customerId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 5, UnitPrice = 10m } },
+                Payments = new List<DtoPaymentInfo>()
+            });
+            Check("allocation unpaid sales created", saleA.IsSuccess && saleB.IsSuccess,
+                saleA.Message + " / " + saleB.Message);
+            if (!saleA.IsSuccess || !saleB.IsSuccess) return;
+
+            // دفعة عامة 120: تُخصَّص A(100) كاملة ثم B(20) — الأقدم أولًا
+            var gen = await payments.ReceiveCustomerPaymentAsync(new DtoPaymentRequest
+            { PartyId = customerId, PartyType = 'C', Amount = 120m, PaymentDate = today, Method = "cash" });
+            Check("general payment 120 accepted", gen.IsSuccess, gen.Message);
+
+            var (statusA, balanceC) = await VerifyAsync(async vdb => (
+                await vdb.Invoices.Where(i => i.InvoiceId == saleA.Data).Select(i => i.PaymentStatus).FirstAsync(),
+                await vdb.Customers.Where(c => c.PartyId == customerId).Select(c => c.Balance ?? 0m).FirstAsync()));
+            Check("oldest invoice fully covered by general payment", statusA == Common.Enums.enPaymentStatus.paid, $"status={statusA}");
+            Check("party balance 150->30", balanceC == 30m, $"balance={balanceC}");
+
+            // التحصيل المزدوج (الثغرة الأصلية): سداد على A المغطاة بدفعة عامة ⇒ مرفوض
+            var dup = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = saleA.Data, Amount = 1m, PaymentDate = today, Method = "cash" });
+            Check("double collection on covered invoice rejected", !dup.IsSuccess, dup.Message);
+
+            // Even with a STALE unpaid status (بيانات قديمة قبل الإصلاح) التخصيص يمنع السداد
+            await VerifyAsync(async vdb =>
+            {
+                await vdb.Invoices.Where(i => i.InvoiceId == saleA.Data)
+                    .ExecuteUpdateAsync(u => u.SetProperty(x => x.PaymentStatus, Common.Enums.enPaymentStatus.unpaid));
+                return true;
+            });
+            var dupStale = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = saleA.Data, Amount = 10m, PaymentDate = today, Method = "cash" });
+            Check("double collection blocked by allocation (stale status)", !dupStale.IsSuccess, dupStale.Message);
+
+            // سداد فاتورة B: المتبقي 30 فقط — 40 يُرفض، و30 يقبَل ويغلق الفاتورة
+            var overB = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = saleB.Data, Amount = 40m, PaymentDate = today, Method = "cash" });
+            Check("invoice payment above allocated remaining rejected", !overB.IsSuccess, overB.Message);
+            var payB = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = saleB.Data, Amount = 30m, PaymentDate = today, Method = "cash" });
+            Check("exact remaining accepted", payB.IsSuccess, payB.Message);
+            var (statusB, balanceC2) = await VerifyAsync(async vdb => (
+                await vdb.Invoices.Where(i => i.InvoiceId == saleB.Data).Select(i => i.PaymentStatus).FirstAsync(),
+                await vdb.Customers.Where(c => c.PartyId == customerId).Select(c => c.Balance ?? 0m).FirstAsync()));
+            Check("invoice B paid via general+invoice mix", statusB == Common.Enums.enPaymentStatus.paid, $"status={statusB}");
+            Check("party balance reaches 0", balanceC2 == 0m, $"balance={balanceC2}");
+
+            // لا تحصيل من رصيد صفري (لا رصيد دائن وهمي)
+            var noPhantom = await payments.ReceiveCustomerPaymentAsync(new DtoPaymentRequest
+            { PartyId = customerId, PartyType = 'C', Amount = 10m, PaymentDate = today, Method = "cash" });
+            Check("collection from zero balance rejected", !noPhantom.IsSuccess, noPhantom.Message);
+
+            // ── مورد: شراء بدفعة جزئية ثم سداد عام ثم سداد فاتورة ──
+            // نطاق مستقل لإنشاء الشراء: خدمة الشراء تحدّث رصيد المورد بـSQL خام
+            // (زيادة ذرية) — ولو شاركنا السياق نفسه لقرأ FindAsync رصيدًا قديمًا
+            // من الـtracker (في الواجهة كل عملية بنطاقها الخاص — نفس النمط هنا)
+            int purchId;
+            using (var ps = Scope())
+            {
+                var psvc = Svc<clsPurchaseService>(ps);
+                var purch = await psvc.CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+                {
+                    SupplierId = supplierId, UserId = admin.UserId,
+                    Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 10m, Quantity = 6, BatchNumber = "PA-" + DateTime.Now.Ticks % 100000 } },
+                    Payment = new DtoPaymentInfo { Amount = 20m, Method = "cash", PaymentDate = today }
+                });
+                Check("partial purchase created (debt 40)", purch.IsSuccess, purch.Message);
+                purchId = purch.IsSuccess ? purch.Data : 0;
+            }
+            if (purchId <= 0) return;
+
+            var paySup = await payments.PaySupplierAsync(new DtoPaymentRequest
+            { PartyId = supplierId, PartyType = 'S', Amount = 25m, PaymentDate = today, Method = "cash" });
+            Check("general supplier payment 25 accepted", paySup.IsSuccess, paySup.Message);
+
+            var (pStatus, balanceS) = await VerifyAsync(async vdb => (
+                await vdb.Invoices.Where(i => i.InvoiceId == purchId).Select(i => i.PaymentStatus).FirstAsync(),
+                await vdb.Suppliers.Where(x => x.PartyId == supplierId).Select(x => x.Balance ?? 0m).FirstAsync()));
+            Check("purchase partially covered by general payment", pStatus == Common.Enums.enPaymentStatus.partial, $"status={pStatus}");
+            Check("supplier balance 40->15", balanceS == 15m, $"balance={balanceS}");
+
+            var dupSup = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = purchId, Amount = 20m, PaymentDate = today, Method = "cash" });
+            Check("double supplier payment rejected", !dupSup.IsSuccess, dupSup.Message);
+            var paySupInv = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            { InvoiceId = purchId, Amount = 15m, PaymentDate = today, Method = "cash" });
+            Check("exact supplier remaining accepted", paySupInv.IsSuccess, paySupInv.Message);
+            int supStatus2 = await VerifyAsync(async vdb =>
+                (int)await vdb.Invoices.Where(i => i.InvoiceId == purchId).Select(i => i.PaymentStatus).FirstAsync());
+            Check("purchase invoice fully paid", supStatus2 == (int)Common.Enums.enPaymentStatus.paid, $"status={supStatus2}");
+
+            // B3: إغلاق درج الدورة ليبقى الهارنس قابلًا للتكرار
+            if (sessionId > 0)
+                await sessions.CloseSessionAsync(sessionId, 0m, admin.UserId);
+        }
+
+        // ═══════════════════════════════════════════════
+        // RefundPlanCycle — أولوية الدَّين في الاسترداد + المرتجعات المتعددة:
+        //  فاتورة 100 (مدفوع 50، دين 50) + مرتجع بضاعة 80
+        //  ⇒ تخفيض الدين 50 (إلى صفر) واسترداد نقد 30.
+        //  القديم كان يرد المدفوع أولًا فيترك دينًا خاطئًا على بضاعة رُجعت كلها.
+        // ═══════════════════════════════════════════════
+        private static async Task RefundPlanCycle()
+        {
+            Console.WriteLine("--- REFUND PLAN (debt-first + multiple returns) ---");
+            using var s = Scope();
+            var db = Svc<Sayl.Core.Data.SaylDbContext>(s);
+            var parties = Svc<clsPartyService>(s);
+            var checkout = Svc<clsCheckoutService>(s);
+            var purchase = Svc<clsPurchaseService>(s);
+            var returns = Svc<clsReturnService>(s);
+            var sessions = Svc<clsPosSessionService>(s);
+            var admin = await db.Users.FirstAsync(u => u.Username == "admin");
+
+            var acting = await sessions.GetOpenSessionByUserAsync(admin.UserId);
+            int sessionId = (acting.IsSuccess && acting.Data != null)
+                ? acting.Data.SessionId
+                : (await sessions.OpenSessionAsync(admin.UserId, 0m)).Data;
+
+            string stamp = "RP-" + DateTime.Now.Ticks.ToString()[^8..];
+            int customerId, supplierId;
+            using (var partyScope = Scope())
+            {
+                var psvc = Svc<clsPartyService>(partyScope);
+                var cust = await psvc.AddNewPartyWithRoleAsync(
+                    new DtoParty { PartyType = 'C', Name = "عميل مرتجعات " + stamp }, actorUserId: admin.UserId);
+                var sup = await psvc.AddNewPartyWithRoleAsync(
+                    new DtoParty { PartyType = 'S', Name = "مورد مرتجعات " + stamp }, actorUserId: admin.UserId);
+                if (!cust.IsSuccess || !sup.IsSuccess)
+                { Check("refund parties created", false, cust.Message + " / " + sup.Message); return; }
+                customerId = cust.Data; supplierId = sup.Data;
+            }
+
+            // بيع 100 (20×5) مدفوع نصفه نقدًا → دين 50
+            var sale = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
+            {
+                UserId = admin.UserId, SessionId = sessionId, CustomerId = customerId,
+                Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 20, UnitPrice = 5m } },
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+            });
+            Check("refund probe sale (100, paid 50) created", sale.IsSuccess, sale.Message);
+            if (!sale.IsSuccess) return;
+
+            // المرتجع الأول: 16 وحدة = 80 → دين يُخفض 50 + نقد 30
+            var ret1 = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+            {
+                OriginalInvoiceId = sale.Data, UserId = admin.UserId, SessionId = sessionId,
+                Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 16 } }
+            });
+            Check("return #1 (80) executed", ret1.IsSuccess, ret1.Message);
+            if (ret1.IsSuccess)
+            {
+                var (retNet, cashOut, balanceAfter) = await VerifyAsync(async vdb => (
+                    await vdb.Invoices.Where(i => i.InvoiceId == ret1.Data).Select(i => i.NetAmount).FirstAsync(),
+                    await vdb.Payments.Where(p => p.InvoiceId == ret1.Data && p.Type == Common.Enums.enPaymentType.outcome)
+                        .SumAsync(p => (decimal?)p.Amount) ?? 0m,
+                    await vdb.Customers.Where(c => c.PartyId == customerId).Select(c => c.Balance ?? 0m).FirstAsync()));
+                Check("return #1 net -80.00", retNet == -80m, $"net={retNet}");
+                Check("return #1 cash refund 30 (debt takes 50 first)", cashOut == 30m, $"cash={cashOut}");
+                Check("return #1 debt cleared 50->0", balanceAfter == 0m, $"balance={balanceAfter}");
+            }
+
+            // المرتجع الثاني: 4 وحدات = 20 → الدين صفر أصلًا ⇒ نقد 20 (ضمن المدفوع المتبقي)
+            var ret2 = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+            {
+                OriginalInvoiceId = sale.Data, UserId = admin.UserId, SessionId = sessionId,
+                Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 4 } }
+            });
+            Check("return #2 (20) executed", ret2.IsSuccess, ret2.Message);
+            if (ret2.IsSuccess)
+            {
+                var (cashOut2, balanceAfter2) = await VerifyAsync(async vdb => (
+                    await vdb.Payments.Where(p => p.InvoiceId == ret2.Data && p.Type == Common.Enums.enPaymentType.outcome)
+                        .SumAsync(p => (decimal?)p.Amount) ?? 0m,
+                    await vdb.Customers.Where(c => c.PartyId == customerId).Select(c => c.Balance ?? 0m).FirstAsync()));
+                Check("return #2 cash refund 20 (no debt left)", cashOut2 == 20m, $"cash={cashOut2}");
+                Check("return #2 balance stays 0", balanceAfter2 == 0m, $"balance={balanceAfter2}");
+            }
+
+            // كل الكمية رُجعت — أي مرتجع إضافي مرفوض
+            var ret3 = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
+            {
+                OriginalInvoiceId = sale.Data, UserId = admin.UserId, SessionId = sessionId,
+                Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 1 } }
+            });
+            Check("return beyond quantity rejected", !ret3.IsSuccess, ret3.Message);
+
+            // ── مورد: شراء 100 مدفوع 50 + مرتجعان (نفس معادلة العميل) ──
+            // نطاق مستقل للشراء (SQL خام لرصيد المورد — نفس سبب دورة التسوية أعلاه)
+            int purchId;
+            using (var ps2 = Scope())
+            {
+                var psvc2 = Svc<clsPurchaseService>(ps2);
+                var purch = await psvc2.CreatePurchaseInvoiceAsync(new DtoPurchaseRequest
+                {
+                    SupplierId = supplierId, UserId = admin.UserId,
+                    Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 5m, Quantity = 20, BatchNumber = "RP-" + DateTime.Now.Ticks % 100000 } },
+                    Payment = new DtoPaymentInfo { Amount = 50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                });
+                Check("refund probe purchase (100, paid 50) created", purch.IsSuccess, purch.Message);
+                purchId = purch.IsSuccess ? purch.Data : 0;
+            }
+            if (purchId > 0)
+            {
+                var sret1 = await returns.CreateSupplierReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = purchId, UserId = admin.UserId, SessionId = sessionId,
+                    Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 16 } }
+                });
+                Check("supplier return #1 (80) executed", sret1.IsSuccess, sret1.Message);
+                if (sret1.IsSuccess)
+                {
+                    var (cashIn, balanceS) = await VerifyAsync(async vdb => (
+                        await vdb.Payments.Where(p => p.InvoiceId == sret1.Data && p.Type == Common.Enums.enPaymentType.income)
+                            .SumAsync(p => (decimal?)p.Amount) ?? 0m,
+                        await vdb.Suppliers.Where(x => x.PartyId == supplierId).Select(x => x.Balance ?? 0m).FirstAsync()));
+                    Check("supplier return #1 cash-in 30 (debt takes 50 first)", cashIn == 30m, $"cash={cashIn}");
+                    Check("supplier return #1 debt cleared 50->0", balanceS == 0m, $"balance={balanceS}");
+                }
+
+                var sret2 = await returns.CreateSupplierReturnAsync(new DtoReturnRequest
+                {
+                    OriginalInvoiceId = purchId, UserId = admin.UserId, SessionId = sessionId,
+                    Items = new List<DtoReturnItem> { new() { ProductId = 1, Quantity = 4 } }
+                });
+                Check("supplier return #2 (20) executed", sret2.IsSuccess, sret2.Message);
+                if (sret2.IsSuccess)
+                {
+                    var (cashIn2, balanceS2) = await VerifyAsync(async vdb => (
+                        await vdb.Payments.Where(p => p.InvoiceId == sret2.Data && p.Type == Common.Enums.enPaymentType.income)
+                            .SumAsync(p => (decimal?)p.Amount) ?? 0m,
+                        await vdb.Suppliers.Where(x => x.PartyId == supplierId).Select(x => x.Balance ?? 0m).FirstAsync()));
+                    Check("supplier return #2 cash-in 20", cashIn2 == 20m, $"cash={cashIn2}");
+                    Check("supplier return #2 balance stays 0", balanceS2 == 0m, $"balance={balanceS2}");
+                }
+            }
+
+            // B3: إغلاق درج الدورة ليبقى الهارنس قابلًا للتكرار
+            if (sessionId > 0)
+                await sessions.CloseSessionAsync(sessionId, 0m, admin.UserId);
         }
 
         // ───────────────── 2. Session + direct sale ─────────────────
@@ -865,14 +1171,11 @@ namespace consol_app
                 }
             }
 
-            // ══ إثبات سلامة تقسيم الاسترداد نقد/دين (تحقق بعد شك ظاهري) ══
+            // ══ إثبات أولوية الدَّين في تقسيم الاسترداد (نقد/دين) ══
             // فاتورة صافي 99: العميل دفع 40 نقدًا والباقي 59 دينًا على عميل مسجل.
-            // إرجاع نصف البضاعة => استرداد نسبي 49.50 => نقد 40 (حد المدفوع)
-            // + 9.50 تخفض الدين. هذا هو التوازن الصحيح الوحيد: النقد المسترد
-            // لا يتجاوز ما دخل الدرج، والدين المتبقي = قيمة البضاعة المُبقاة.
-            // (المعادلة min(الاسترداد, المدفوع) — أُعيد التحقق فيها صراحة
-            //  بعد شكّ ظاهري أثناء VULN-03، فثبت أنها سليمة دائمًا — راجع
-            //  التعليق الموثق في ProcessCustomerRefundAsync.)
+            // إرجاع نصف البضاعة => استرداد نسبي 49.50 => كلّه تخفيض للدين (59 متاح)
+            // ولا نقد خارج الدرج. الدين يُخفَّض أولًا، والنقد المسترد لا يتجاوز أبداً
+            // ما تجاوز الدين — راجع التعليق الموثق في BuildRefundPlanAsync.
             {
                 // عميل تجريبي بالدين: نستخدم customer 1 (أحمد — رصيده متاح)
                 var debtSale = await checkout.ProcessCheckoutAsync(new DtoCheckoutRequest
@@ -901,16 +1204,17 @@ namespace consol_app
                     Check("cash-problem return executed", halfRet.IsSuccess, halfRet.Message);
                     if (halfRet.IsSuccess)
                     {
-                        // النقد المسترد = 40 فقط (min(49.50, 40)) — والـ 9.50 الباقية تخفض الدين
+                        // الدَّين أولًا: المستحق 59 > الاسترداد 49.50 ⇒ كله تخفيض دين
+                        // ولا نقد خارج الدرج (القديم كان يرد 40 كاش ويترك دين 49.50)
                         var refundCash = await VerifyAsync(async vdb =>
                             await vdb.Payments.Where(p => p.InvoiceId == halfRet.Data && p.Type == Common.Enums.enPaymentType.outcome)
                                 .SumAsync(p => (decimal?)p.Amount) ?? 0m);
-                        Check("cash-problem cash refund capped at 40", refundCash == 40m, $"cash={refundCash}");
+                        Check("cash-problem refund is debt-first (cash 0)", refundCash == 0m, $"cash={refundCash}");
 
                         decimal balAfter = await VerifyAsync(vdb =>
                             vdb.Customers.Where(c => c.PartyId == 1).Select(c => c.Balance ?? 0m).FirstAsync());
-                        // الرصيد كان 59 (دين) => يخفض 9.50 => 49.50
-                        Check("cash-problem debt reduced by 9.50", balAfter == balBefore - 9.50m,
+                        // الرصيد كان 59 (دين) => يخفض 49.50 => 9.50
+                        Check("cash-problem debt reduced by 49.50", balAfter == balBefore - 49.50m,
                             $"{balBefore}->{balAfter}");
 
                         // تنظيف أثر الاختبار: إعادة الرصيد لما قبل الجولة (الدين التجريبي مسموح بقاؤه)

@@ -504,7 +504,7 @@ namespace Sayl.Core.Services
         //
         private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
-            var refundPlan = await BuildRefundPlanAsync(originalInvoice, refundTotal);
+            var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
 
             foreach (var refund in refundPlan.Payments)
             {
@@ -538,7 +538,7 @@ namespace Sayl.Core.Services
         // VULN-05: نفس توجيه مرتجع العميل — نقد الاسترداد يعود لدرج جلسة الفعل.
         private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
-            var refundPlan = await BuildRefundPlanAsync(originalInvoice, refundTotal);
+            var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
 
             foreach (var refund in refundPlan.Payments)
             {
@@ -569,27 +569,56 @@ namespace Sayl.Core.Services
             }
         }
 
+        // ═════════════════════════════════════════════════
+        // خطة الاسترداد: الدَّين أولًا ثم النقد
+        // ═════════════════════════════════════════════════
+        // مثال المطلب: فاتورة 100 دفع فيها العميل 50 (دين متبقٍ 50)، ثم أرجع بضاعة
+        // قيمتها 80. الصحيح: الدين ينخفض 50 (إلى صفر) ويُسترد نقدًا 30.
+        // المنطق القديم كان يرد المدفوع النقدي أولًا (50 كاش) ويخفض الدين 30 فقط —
+        // فيبقى على العميل دَين 20 عن بضاعة لم يبق منها شيء.
+        //
+        // الترتيب الجديد الحتمي:
+        //  1) مستحق الفاتورة الآن (بتسوية الدفعات المرتبطة والعامة والمرتجعات —
+        //     clsPaymentAllocation) ناقص ما خفّضته مرتجعات سابقة من الرصيد
+        //     → يُخفَّض أولًا (BalanceRefund).
+        //  2) الباقي يُرد نقدًا بطرق الدفع الأصلية، وسقف كل طريقة هو ما دُفع بها
+        //     فعلًا (مرتبط + نصيب الدفعات العامة بتخصيصها الزمني) ناقص ما رُدّ
+        //     سابقًا بنفس الطريقة — لا استرداد نقدي يتجاوز ما دخل الدرج أبدًا.
         private async Task<DtoRefundPlan> BuildRefundPlanAsync(
-            Invoice originalInvoice, decimal refundTotal)
+            Invoice originalInvoice, int currentReturnInvoiceId, decimal refundTotal)
         {
-            var originalPayments = await _dbContext.Payments
-                .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
-                .Select(p => new { p.PaymentMethod, p.Amount })
-                .ToListAsync();
-
-            var originalByMethod = originalPayments
-                .GroupBy(p => p.PaymentMethod)
-                .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+            char partyType = originalInvoice.PartyType ?? 'C';
+            int partyId = originalInvoice.PartyId ?? 0;
 
             enInvoicesType returnType = originalInvoice.Type == enInvoicesType.purchase
                 ? enInvoicesType.supplier_return
                 : enInvoicesType.customer_return;
 
+            // 1) مستحق الفاتورة وفق التسوية الحتمية (مرتبط + نصيب الدفعات العامة)
+            //    مع استبعاد مرتجع الجلسة الحالية من صافي الالتزام (توزيعه لم يُقرَّر بعد)
+            var outstandingRows = await clsPaymentAllocation
+                .GetPartyOutstandingAsync(_dbContext, partyType, partyId, currentReturnInvoiceId);
+            var row = outstandingRows.FirstOrDefault(r => r.InvoiceId == originalInvoice.InvoiceId);
+
+            // 2) ما خفّضته مرتجعات سابقة من الرصيد على هذه الفاتورة:
+            //    مجموع قيم المرتجعات السابقة ناقص ما رُدّ نقدًا عليها — الباقي
+            //    بالضرورة هو ما خفّض الرصيد (معادلة هذه الخطة نفسها).
+            //    نستثني مرتجع الجلسة الحالية: فاتورته حُفظت داخل المعاملة قبل
+            //    استدعاء هذه الدالة، لكن توزيع استردادها لم يُقرَّر بعد.
+            decimal priorReturnNet = await _dbContext.Invoices
+                .Where(r => r.OriginalInvoiceId == originalInvoice.InvoiceId
+                         && r.InvoiceId != currentReturnInvoiceId
+                         && r.Type == returnType
+                         && r.Status == enInvoicesStatus.completed)
+                .SumAsync(r => (decimal?)r.NetAmount) ?? 0m; // سالبة بالتصميم
+            decimal priorReturnTotals = -priorReturnNet;
+
             var priorRefunds = await _dbContext.Payments
                 .Where(p => p.InvoiceId != null
                          && p.Invoice!.OriginalInvoiceId == originalInvoice.InvoiceId
                          && p.Invoice.Type == returnType
-                         && p.Invoice.Status == enInvoicesStatus.completed)
+                         && p.Invoice.Status == enInvoicesStatus.completed
+                         && p.InvoiceId != currentReturnInvoiceId)
                 .Select(p => new { p.PaymentMethod, p.Amount })
                 .ToListAsync();
 
@@ -597,23 +626,79 @@ namespace Sayl.Core.Services
                 .GroupBy(p => p.PaymentMethod)
                 .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
 
-            var plan = new DtoRefundPlan();
-            decimal remaining = refundTotal;
+            decimal priorCashRefunds = priorRefunds.Sum(p => p.Amount);
+            decimal priorBalanceReduction = Math.Max(0m, priorReturnTotals - priorCashRefunds);
 
-            foreach (var method in originalByMethod.Keys.OrderBy(m => m == "cash" ? 0 : 1))
+            decimal invoiceOutstanding = Math.Max(0m,
+                (row?.Outstanding ?? 0m) - priorBalanceReduction);
+
+            // 3) الدَّين أولًا — ثم ما تبقى يُرد نقدًا
+            var plan = new DtoRefundPlan();
+            decimal balanceRefund = Math.Min(refundTotal, invoiceOutstanding);
+            plan.BalanceRefund = Math.Round(balanceRefund, 2, MidpointRounding.AwayFromZero);
+            decimal remaining = refundTotal - balanceRefund;
+
+            if (remaining <= 0m)
+                return plan;
+
+            // 4) سقوف النقد لكل طريقة
+            var originalPayments = await _dbContext.Payments
+                .Where(p => p.InvoiceId == originalInvoice.InvoiceId)
+                .Select(p => new { p.PaymentMethod, p.Amount })
+                .ToListAsync();
+
+            var linkedByMethod = originalPayments
+                .GroupBy(p => p.PaymentMethod)
+                .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+            // نصيب الفاتورة من الدفعات العامة يُنسَب لطرقها بترتيبها الزمني
+            decimal allocatedGeneral = row?.AllocatedGeneral ?? 0m;
+            var generalAvailByMethod = new Dictionary<string, decimal>();
+            if (allocatedGeneral > 0m)
             {
-                decimal paid = originalByMethod[method];
-                decimal refunded = priorByMethod.TryGetValue(method, out decimal pr) ? pr : 0m;
-                decimal remainingPaid = Math.Max(0m, paid - refunded);
-                if (remainingPaid <= 0 || remaining <= 0m)
+                var generalRows = await _dbContext.Payments
+                    .Where(p => p.InvoiceId == null
+                             && p.PartyType == partyType && p.PartyId == partyId
+                             && p.Type == (partyType == 'S'
+                                 ? enPaymentType.outcome : enPaymentType.income))
+                    .OrderBy(p => p.CreatedAt).ThenBy(p => p.PaymentId)
+                    .Select(p => new { p.PaymentMethod, p.Amount })
+                    .ToListAsync();
+
+                decimal pool = allocatedGeneral;
+                foreach (var g in generalRows)
+                {
+                    if (pool <= 0m) break;
+                    decimal take = Math.Min(g.Amount, pool);
+                    generalAvailByMethod[g.PaymentMethod] =
+                        generalAvailByMethod.GetValueOrDefault(g.PaymentMethod) + take;
+                    pool -= take;
+                }
+            }
+
+            foreach (var method in linkedByMethod.Keys.Union(generalAvailByMethod.Keys)
+                         .OrderBy(m => m == "cash" ? 0 : 1))
+            {
+                if (remaining <= 0m)
+                    break;
+
+                decimal linkedAvail = Math.Max(0m,
+                    (linkedByMethod.TryGetValue(method, out decimal paid) ? paid : 0m)
+                    - (priorByMethod.TryGetValue(method, out decimal refunded) ? refunded : 0m));
+                decimal available = linkedAvail + generalAvailByMethod.GetValueOrDefault(method);
+                if (available <= 0m)
                     continue;
 
-                decimal amount = Math.Min(remaining, remainingPaid);
+                decimal amount = Math.Min(remaining, available);
                 plan.Payments.Add(new DtoRefundPayment(method, Math.Round(amount, 2, MidpointRounding.AwayFromZero)));
                 remaining -= amount;
             }
 
-            plan.BalanceRefund = Math.Round(remaining, 2, MidpointRounding.AwayFromZero);
+            // حارس نظري: ما تعذّر توزيعه نقدًا (لا طرق متاحة) يُخفِّض الدين هو الآخر —
+            // لا يُفقد مبلغ مستحق للطرف ولا يُرد من عدم (الاسترداد لا يتجاوز المدفوع).
+            if (remaining > 0m)
+                plan.BalanceRefund = Math.Round(plan.BalanceRefund + remaining, 2, MidpointRounding.AwayFromZero);
+
             return plan;
         }
     }

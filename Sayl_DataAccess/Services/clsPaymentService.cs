@@ -81,33 +81,23 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
-                if (invoice.PaymentStatus == enPaymentStatus.paid)
-                    return Result.Fail("الفاتورة مسددة بالكامل.");
+                // تسوية الدفعات العامة (InvoiceId = null): كان «المتبقي» محسوبًا على
+                // الدفعات المرتبطة بالفاتورة فقط — فإذا خفّت دفعة عامة دين الفاتورة
+                // عبر رصيد الطرف كانت غير مرئية هنا فيُسمح بسداد الدَّين نفسه مرتين.
+                // الآن المتبقي يُحسب بتخصيص حتمي (الأقدم أولًا) يشمل الدفعات العامة والمرتجعات.
+                var outstandingRows = await clsPaymentAllocation
+                    .GetPartyOutstandingAsync(_dbContext, invoice.PartyType ?? 'C', invoice.PartyId ?? 0);
 
-                decimal paidSoFar = await _dbContext.Payments
-                    .Where(p => p.InvoiceId == invoice.InvoiceId)
-                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+                var row = outstandingRows.FirstOrDefault(r => r.InvoiceId == invoice.InvoiceId);
+                if (row == null)
+                    return Result.Fail("لا يمكن الدفع على فاتورة غير مكتملة.");
 
-                // VULN-07: المرتجعات على هذه الفاتورة خفّضت الالتزام الأصلي —
-                // بدون خصمها كان «المتبقي» يسمح بسداد كامل لفاتورة أُرجع نصفها
-                // (سداد زائد حقيقي للطرفين: المورد يقبض 1000 على بضاعة 500،
-                // والعميل يُحصّل دَينًا رُدّ نصفه). المرتجعات فواتير سالبة
-                // مرتبطة بـ OriginalInvoiceId — نُخصم قيمتها المطلقة.
-                decimal returnedTotal = await _dbContext.Invoices
-                    .Where(i => i.OriginalInvoiceId == invoice.InvoiceId
-                             && i.Status == enInvoicesStatus.completed
-                             && (i.Type == enInvoicesType.customer_return
-                              || i.Type == enInvoicesType.supplier_return))
-                    .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // سالبة بالتصميم
-
-                decimal effectiveNet = invoice.NetAmount + returnedTotal; // صافٍ بعد المرتجعات
-
-                decimal remaining = effectiveNet - paidSoFar;
+                decimal remaining = row.Outstanding;
                 if (remaining <= 0)
-                    return Result.Fail("الفاتورة مسددة بالكامل (مع مراعاة المرتجعات).");
+                    return Result.Fail("الفاتورة مسددة بالكامل (مع مراعاة الدفعات العامة والمرتجعات).");
 
                 if (request.Amount > remaining)
-                    return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة بعد المرتجعات ({remaining:N2}).");
+                    return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة بعد الدفعات العامة والمرتجعات ({remaining:N2}).");
 
                 _dbContext.Payments.Add(new Payment
                 {
@@ -124,9 +114,10 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.UtcNow
                 });
 
-                decimal totalPaid = paidSoFar + request.Amount;
-                // VULN-07: حالة السداد تُقيّم على الصافي الفعلي بعد المرتجعات
-                invoice.PaymentStatus = totalPaid >= effectiveNet
+                // VULN-07 + التسوية: حالة السداد تُقيّم على كل ما دُفع فعليًا
+                // (مرتبط + نصيب الدفعات العامة + هذه الدفعة) مقابل الصافي بعد المرتجعات
+                decimal totalEffectivePaid = row.InvoiceLinkedPaid + row.AllocatedGeneral + request.Amount;
+                invoice.PaymentStatus = totalEffectivePaid >= row.EffectiveNet
                     ? enPaymentStatus.paid
                     : enPaymentStatus.partial;
 
@@ -199,6 +190,12 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.UtcNow
                 });
 
+                // التسوية الحتمية: الدفعة العامة تُخصَّص على الفواتير المستحقة
+                // (الأقدم أولًا) فتتحدث حالات السداد — وإلا بقيت فاتورة مغطاة
+                // بالكامل تظهر «غير مسددة» وتسمح بتحصيل الدَّين مرة ثانية.
+                await clsPaymentAllocation.ApplyGeneralPaymentToInvoiceStatusesAsync(
+                    _dbContext, 'C', request.PartyId.Value, request.Amount);
+
                 customer.Balance = balance - request.Amount;
                 if (customer.Balance < 0) customer.Balance = 0;
 
@@ -248,6 +245,10 @@ namespace Sayl.Core.Services
                     Notes = request.Notes,
                     CreatedAt = DateTime.UtcNow
                 });
+
+                // التسوية الحتمية — نفس منطق تحصيل العميل أعلاه
+                await clsPaymentAllocation.ApplyGeneralPaymentToInvoiceStatusesAsync(
+                    _dbContext, 'S', request.PartyId.Value, request.Amount);
 
                 supplier.Balance = balance - request.Amount;
                 if (supplier.Balance < 0) supplier.Balance = 0;
