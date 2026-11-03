@@ -54,13 +54,16 @@ namespace Common.DTOs.ViewModel
         public decimal CashReturns { get; set; }
         public decimal CustomerPayments { get; set; }
         public decimal SupplierPayments { get; set; }
+        /// <summary>استردادات الموردين الداخلة (نقدًا أو غيره) — ليست تحصيلات عملاء.</summary>
+        public decimal SupplierRefunds { get; set; }
         public decimal CashIn { get; set; }
         public decimal CashOut { get; set; }
         public decimal ExpensesPaid { get; set; }
         public decimal SalariesPaid { get; set; }
-        /// <summary>داخل − خارج: صافي ما زاد في الصندوق خلال الفترة.</summary>
-        public decimal NetMovement => CashSales - CashReturns + CustomerPayments - SupplierPayments
-                                      + CashIn - CashOut - ExpensesPaid - SalariesPaid;
+        /// <summary>داخل − خارج: صافي ما زاد في الصندوق خلال الفترة.
+        /// الرواتب تُحسب مرة واحدة (SalariesPaid — مصروفها المرتبط مستثنى من ExpensesPaid).</summary>
+        public decimal NetMovement => CashSales - CashReturns + CustomerPayments + SupplierRefunds
+                                      - SupplierPayments + CashIn - CashOut - ExpensesPaid - SalariesPaid;
     }
 
     /// <summary>سطر جرد فعلي لمنتج واحد داخل جلسة جرد.</summary>

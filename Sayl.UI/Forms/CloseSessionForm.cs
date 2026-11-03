@@ -41,7 +41,7 @@ namespace Sayl.UI.Forms
         {
             Text = AppLang.T("CloseSession.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(460, 520);
+            ClientSize = new Size(460, 548);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -51,32 +51,32 @@ namespace Sayl.UI.Forms
 
             // بطاقة الملخص: خلفية FieldBg + Padding داخلي — تظهر كصندوق.
             // TextAlign=TopRight: الأسطر تبدأ يمينًا أعلى (عربي طبيعي).
-            // ارتفاع 190 يحتوي 6 أسطر متوقعة من الملخص.
+            // ارتفاع 218 يحتوي 7 أسطر متوقعة من الملخص.
             _lblSummary = new Label
             {
                 Text = AppLang.T("CloseSession.Loading"),
-                Bounds = new Rectangle(30, 58, 400, 190),
+                Bounds = new Rectangle(30, 58, 400, 218),
                 TextAlign = ContentAlignment.TopRight,
                 Font = new Font("Segoe UI", 11.5F),
                 BackColor = AppTheme.FieldBg,
                 Padding = new Padding(12, 10, 12, 10)
             };
 
-            var lblCounted = new Label { Text = AppLang.T("CloseSession.Label.Counted"), Bounds = new Rectangle(30, 258, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            var lblCounted = new Label { Text = AppLang.T("CloseSession.Label.Counted"), Bounds = new Rectangle(30, 286, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             // خط 14 عريض: أهم إدخال — الكاشير يضغط الآلة الحاسبة ويقرأ من بعيد
-            _txtCounted = new TextBox { Bounds = new Rectangle(30, 282, 400, 42), Font = new Font("Segoe UI", 14F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
+            _txtCounted = new TextBox { Bounds = new Rectangle(30, 310, 400, 42), Font = new Font("Segoe UI", 14F, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
 
             // سطر الفرق: فارغ عند البناء — يمتلئ حيًا (انظر CountedChanged
             // في LoadSummaryAsync/الأحداث) — العنوان والنص إحداثيات ثابتة.
-            _lblDifference = new Label { Text = "", Bounds = new Rectangle(30, 334, 400, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading };
+            _lblDifference = new Label { Text = "", Bounds = new Rectangle(30, 362, 400, 32), TextAlign = ContentAlignment.MiddleCenter, Font = AppTheme.FontHeading };
 
             // Danger أحمر: إغلاق الجلسة فعل نهائي (لا جلسة بيع تعود)
             _btnClose = AppTheme.MakeButton(AppLang.T("CloseSession.Button.Close"), AppTheme.Danger, hoverColor: Color.FromArgb(185, 28, 28));
-            _btnClose.Bounds = new Rectangle(30, 380, 240, 52);
+            _btnClose.Bounds = new Rectangle(30, 408, 240, 52);
             _btnClose.Click += async (_, _) => await CloseSessionAsync();
 
             var btnCancel = AppTheme.MakeButton(AppLang.T("CloseSession.Button.Back"), AppTheme.Bg, foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnCancel.Bounds = new Rectangle(290, 380, 140, 52);
+            btnCancel.Bounds = new Rectangle(290, 408, 140, 52);
             btnCancel.DialogResult = DialogResult.Cancel; // Esc = رجوع
 
             Controls.AddRange(new Control[] { lblTitle, _lblSummary, lblCounted, _txtCounted, _lblDifference, _btnClose, btnCancel });
@@ -103,6 +103,7 @@ namespace Sayl.UI.Forms
                     AppLang.T("CloseSession.Summary.Opening", UiHelpers.Money(s.OpeningAmount)) + "\n" +
                     AppLang.T("CloseSession.Summary.CashSales", UiHelpers.Money(s.CashSales)) + "\n" +
                     AppLang.T("CloseSession.Summary.CashReturns", UiHelpers.Money(s.CashReturns)) + "\n" +
+                    AppLang.T("CloseSession.Summary.CashSupplierPayments", UiHelpers.Money(s.CashSupplierPayments)) + "\n" +
                     AppLang.T("CloseSession.Summary.CashIn", UiHelpers.Money(s.CashIn)) + "\n" +
                     AppLang.T("CloseSession.Summary.CashOut", UiHelpers.Money(s.CashOut)) + "\n" +
                     AppLang.T("CloseSession.Summary.Expected", UiHelpers.Money(s.ExpectedCash));

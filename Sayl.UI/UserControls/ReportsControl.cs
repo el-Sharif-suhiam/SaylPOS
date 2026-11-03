@@ -336,6 +336,7 @@ namespace Sayl.UI.UserControls
                         AddRow(AppLang.T("Reports.CashFlow.CashReturns"), UiHelpers.Money(r.Data.CashReturns));
                         AddRow(AppLang.T("Reports.CashFlow.CustomerPayments"), UiHelpers.Money(r.Data.CustomerPayments));
                         AddRow(AppLang.T("Reports.CashFlow.SupplierPayments"), UiHelpers.Money(r.Data.SupplierPayments));
+                        AddRow(AppLang.T("Reports.CashFlow.SupplierRefunds"), UiHelpers.Money(r.Data.SupplierRefunds));
                         AddRow(AppLang.T("Reports.CashFlow.SessionCashOut"), UiHelpers.Money(r.Data.CashOut));
                         AddRow(AppLang.T("Reports.CashFlow.SessionCashIn"), UiHelpers.Money(r.Data.CashIn));
                         AddRow(AppLang.T("Reports.CashFlow.ExpensesPaid"), UiHelpers.Money(r.Data.ExpensesPaid));

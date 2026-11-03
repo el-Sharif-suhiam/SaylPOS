@@ -86,7 +86,11 @@ namespace Sayl.Core.Services
             }
         }
 
-        /// <summary>ملخص نقد الجلسة: الافتتاحي + مبيعات نقدي − مرتجعات نقدي + قبض − صرف.</summary>
+        /// <summary>ملخص نقد الجلسة (المعادلة المعتمدة للمصالحة):
+        /// النقد المتوقع = الافتتاحي + مبيعات نقدي + تحصيلات نقدية (دَين قديم/جديد)
+        ///                − مرتجعات عملاء نقدي − مدفوعات موردين نقدي
+        ///                + قبض (CashIn) − صرف (CashOut).
+        /// الشبكة والتحويل البنكي لا تدخل الدرج — تُستبعد بـ PaymentMethod == "cash".</summary>
         // 📖 VULN-05 — المصدر المزدوج بعد إضافة Payment.SessionId:
         //  1) المسار الجديد: دفعات موجهة صراحة لدرج هذه الجلسة (إكمال المعلقات،
         //     مرتجعات اليوم، تحصيلات لاحقة) — النقد يُنسب حيث استُلم فعليًا.
@@ -98,17 +102,28 @@ namespace Sayl.Core.Services
             if (session == null)
                 return Result<SessionCashSummary>.Fail("الجلسة غير موجودة.");
 
-            // المسار الجديد: درج هذه الجلسة استلم هذه الدفعات صراحة
+            // المسار الجديد: درج هذه الجلسة استلم هذه الدفعات صراحة.
+            // الدخل النقدي: مبيعات + تحصيلات + استردادات موردين نقدية — كل ما زاد الدرج.
             decimal cashSalesNew = await _dbContext.Payments
                 .Where(p => p.SessionId == sessionId
                          && p.PaymentMethod == "cash"
                          && p.Type == enPaymentType.income)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
+            // مرتجعات العملاء النقدية — الطرف 'C' (سداد المورد النقدي ليس مرتجع عميل)
             decimal cashReturnsNew = await _dbContext.Payments
                 .Where(p => p.SessionId == sessionId
                          && p.PaymentMethod == "cash"
-                         && p.Type == enPaymentType.outcome)
+                         && p.Type == enPaymentType.outcome
+                         && p.PartyType == 'C')
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            // مدفوعات الموردين النقدية — الطرف 'S' (تخرج من الدرج فعليًا)
+            decimal cashSupplierNew = await _dbContext.Payments
+                .Where(p => p.SessionId == sessionId
+                         && p.PaymentMethod == "cash"
+                         && p.Type == enPaymentType.outcome
+                         && p.PartyType == 'S')
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             // المسار المتوافق: دفعات قديمة بلا توجيه — تنسب لجلسة فاتورتها
@@ -129,7 +144,17 @@ namespace Sayl.Core.Services
                          && p.InvoiceId != null
                          && legacyInvoiceIds.Contains(p.InvoiceId)
                          && p.PaymentMethod == "cash"
-                         && p.Type == enPaymentType.outcome)
+                         && p.Type == enPaymentType.outcome
+                         && p.PartyType == 'C')
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            decimal cashSupplierLegacy = await _dbContext.Payments
+                .Where(p => p.SessionId == null
+                         && p.InvoiceId != null
+                         && legacyInvoiceIds.Contains(p.InvoiceId)
+                         && p.PaymentMethod == "cash"
+                         && p.Type == enPaymentType.outcome
+                         && p.PartyType == 'S')
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             decimal cashIn = await _dbContext.CashMovements
@@ -142,6 +167,7 @@ namespace Sayl.Core.Services
 
             decimal cashSales = cashSalesNew + cashSalesLegacy;
             decimal cashReturns = cashReturnsNew + cashReturnsLegacy;
+            decimal cashSupplierPayments = cashSupplierNew + cashSupplierLegacy;
 
             var summary = new SessionCashSummary
             {
@@ -149,9 +175,10 @@ namespace Sayl.Core.Services
                 OpeningAmount = session.OpeningAmount,
                 CashSales = cashSales,
                 CashReturns = cashReturns,
+                CashSupplierPayments = cashSupplierPayments,
                 CashIn = cashIn,
                 CashOut = cashOut,
-                ExpectedCash = session.OpeningAmount + cashSales - cashReturns + cashIn - cashOut
+                ExpectedCash = session.OpeningAmount + cashSales - cashReturns - cashSupplierPayments + cashIn - cashOut
             };
 
             return Result<SessionCashSummary>.Ok(summary);
@@ -164,6 +191,8 @@ namespace Sayl.Core.Services
         public decimal OpeningAmount { get; set; }
         public decimal CashSales { get; set; }
         public decimal CashReturns { get; set; }
+        /// <summary>مدفوعات الموردين النقدية — تخرج من الدرج (ليست مرتجعات عملاء).</summary>
+        public decimal CashSupplierPayments { get; set; }
         public decimal CashIn { get; set; }
         public decimal CashOut { get; set; }
         public decimal ExpectedCash { get; set; }

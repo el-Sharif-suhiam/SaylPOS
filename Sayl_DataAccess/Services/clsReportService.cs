@@ -1165,31 +1165,53 @@ namespace Sayl.Core.Services
             return Result<List<DebtAgeingVM>>.Ok(result.OrderByDescending(a => a.Age90plus).ThenByDescending(a => a.Balance).ToList());
         }
 
-        /// <summary>حركة الصندوق لفترة: كل النقد داخلًا وخارجًا (بيع/مرتجع/تحصيل/سداد/جلسات/مصروفات/رواتب).</summary>
+        /// <summary>حركة الصندوق لفترة: كل النقد داخلًا وخارجًا (بيع/مرتجع/تحصيل/سداد/جلسات/مصروفات/رواتب).
+        ///
+        /// التصنيف حسب الطرف والاتجاه والطريقة:
+        ///   • CashSales: دخل نقدي من العملاء (مبيعات + تحصيلات) — الدرج زاد.
+        ///   • CustomerPayments: دخل غير نقدي من العملاء (شبكة/تحويل) — لا يدخل الدرج.
+        ///   • CashReturns: مرتجعات عملاء نقدية — الدرج نقص.
+        ///   • SupplierPayments: كل مدفوعات الموردين (نقدي يخرج من الدرج + غير نقدي).
+        ///   • SupplierRefunds: استردادات الموردين الداخلة (نقدًا أو غيره) — ليست تحصيلات عملاء.
+        ///   • الرواتب تُحسب مرة واحدة (SalariesPaid) — مصروفها المرتبط مستثنى من ExpensesPaid.</summary>
         public async Task<Result<CashFlowVM>> GetCashFlowReportAsync(DateOnly fromDate, DateOnly toDate)
         {
             var start = fromDate.ToDateTime(TimeOnly.MinValue);
             var end = toDate.ToDateTime(TimeOnly.MaxValue);
 
+            // مبيعات وتحصيلات نقدية من العملاء — حسب الطرف (PartyType='C') لا نوع الفاتورة:
+            // استرداد مورد (دخل بطرف 'S') لا يُصنَّف أبدًا تحصيلًا للعملاء
             var cashSales = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income && p.PaymentMethod == "cash"
-                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate
-                          && (p.InvoiceId == null || p.Invoice!.Type != enInvoicesType.supplier_return))
+                          && p.PartyType == 'C'
+                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             var cashReturns = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.outcome && p.PaymentMethod == "cash"
-                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate
-                          && p.InvoiceId != null && p.Invoice!.Type == enInvoicesType.customer_return)
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
-
-            var customerPayments = await _dbContext.Payments
-                .Where(p => p.Type == enPaymentType.income && p.PaymentMethod != "cash"
+                          && p.PartyType == 'C'
                           && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
+            // دخل العملاء غير النقدي — بطرف عميل صراحة كي لا تتسرب استردادات الموردين غير النقدية إليه
+            var customerPayments = await _dbContext.Payments
+                .Where(p => p.Type == enPaymentType.income && p.PaymentMethod != "cash"
+                          && p.PartyType == 'C'
+                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            // مدفوعات الموردين بكل الطرق — السداد النقدي يخرج من الدرج فعليًا
+            // فلا يُحذف من التقرير لأنه «نقدي» (كان مفقودًا كليًا قبل الإصلاح)
             var supplierPayments = await _dbContext.Payments
-                .Where(p => p.Type == enPaymentType.outcome && p.PaymentMethod != "cash"
+                .Where(p => p.Type == enPaymentType.outcome
+                          && p.PartyType == 'S'
+                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            // استردادات الموردين (دخل بطرف مورد) — تصنيف مستقل عن تحصيلات العملاء
+            var supplierRefunds = await _dbContext.Payments
+                .Where(p => p.Type == enPaymentType.income
+                          && p.PartyType == 'S'
                           && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
@@ -1203,8 +1225,11 @@ namespace Sayl.Core.Services
                           && m.CreatedAt >= start && m.CreatedAt <= end)
                 .SumAsync(m => (decimal?)m.Amount) ?? 0m;
 
+            // مصروفات غير رواتب: صرف الراتب ينشئ مصروفًا مرتبطًا (ExpenseId في
+            // PayrollRecord) — استثناؤه هنا كي لا يُحسب مرتين مع SalariesPaid
             var expensesPaid = await _dbContext.Expenses
-                .Where(e => e.ExpenseDate >= fromDate && e.ExpenseDate <= toDate)
+                .Where(e => e.ExpenseDate >= fromDate && e.ExpenseDate <= toDate
+                          && !_dbContext.PayrollRecords.Any(pr => pr.ExpenseId == e.ExpenseId))
                 .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
             var salariesPaid = await _dbContext.PayrollRecords
@@ -1217,6 +1242,7 @@ namespace Sayl.Core.Services
                 CashReturns = cashReturns,
                 CustomerPayments = customerPayments,
                 SupplierPayments = supplierPayments,
+                SupplierRefunds = supplierRefunds,
                 CashIn = cashIn,
                 CashOut = cashOut,
                 ExpensesPaid = expensesPaid,

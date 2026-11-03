@@ -198,6 +198,16 @@ namespace Sayl.UI.Forms
                 using (var scope = Program.Services.CreateScope())
                 {
                     var paymentService = scope.ServiceProvider.GetRequiredService<clsPaymentService>();
+
+                    // VULN-05: السداد النقدي يخرج من درج جلسة المستخدم المفتوحة —
+                    // تُمرَّر الجلسة للتحقق الخدمي (وجودًا وفتحًا وملكية) ولإسناد الحركة لدرجها
+                    int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+                    var posService = scope.ServiceProvider.GetRequiredService<clsPosSessionService>();
+                    var openSession = await posService.GetOpenSessionByUserAsync(actorUserId);
+
+                    request.SessionId = openSession.Data?.SessionId;
+                    request.UserId = actorUserId;
+
                     result = _invoiceId.HasValue
                         ? await paymentService.PayInvoiceAsync(request)
                         : await paymentService.PaySupplierAsync(request);

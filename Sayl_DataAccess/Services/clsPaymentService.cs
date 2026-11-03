@@ -2,6 +2,7 @@ using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -15,6 +16,51 @@ namespace Sayl.Core.Services
         public clsPaymentService(SaylDbContext dbContext)
         {
             _dbContext = dbContext;
+        }
+
+        /// <summary>قيمة دور المستخدم (فحص ملكية جلسة الدرج).</summary>
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return -1;
+
+            return await _dbContext.Users
+                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
+                .Select(u => (int?)u.Role.RoleValue)
+                .FirstOrDefaultAsync() ?? -1;
+        }
+
+        // ─────────────────────────────────────────────────
+        // VULN-05 + التحقق الجلسي: دفعة تُوجَّه لدرج جلسة يجب أن تُقيَّم
+        // وجودًا وفتحًا وملكية قبل قيدها:
+        //   • الجلسة غير موجودة → رفض.
+        //   • الجلسة مغلقة → رفض (لا نقد يدخل أو يخرج من درج مغلق).
+        //   • جلسة مستخدم آخر → رفض إلا لمدير النظام (صلاحية إدارية صريحة).
+        // null = دفعة بلا توجيه درج (توافق/خلفية) — تمر بلا قيد جلسي.
+        // تُستدعى داخل معاملة Serializable لمنع سباق مع إغلاق الجلسة.
+        // ─────────────────────────────────────────────────
+        private async Task<Result> ValidateSessionAsync(int? sessionId, int userId)
+        {
+            if (!sessionId.HasValue)
+                return Result.Ok();
+
+            var session = await _dbContext.PosSessions.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value);
+
+            if (session == null)
+                return Result.Fail("جلسة الدرج غير موجودة.");
+
+            if (session.Status != enPosSessionStatusType.open)
+                return Result.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل تسجيل الدفعة.");
+
+            if (session.UserId != userId)
+            {
+                int actorRole = await GetUserRoleValueAsync(userId);
+                if (!AppPermissions.IsAdmin(actorRole))
+                    return Result.Fail("لا يمكنك تسجيل دفعة في جلسة درج مستخدم آخر — يتطلب ذلك صلاحية مدير النظام.");
+            }
+
+            return Result.Ok();
         }
 
         public async Task<Result<List<PaymentVM>>> GetPaymentsListAsync(DateOnly? fromDate = null, DateOnly? toDate = null, enPaymentType? type = null, int? partyId = null)
@@ -81,6 +127,12 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // VULN-05: التحقق الجلسي داخل المعاملة — الجلسة موجودة ومفتوحة
+                // ومملوكة للفاعل (أو مدير) قبل أن يُقيد لها أي نقد
+                var sessionCheck = await ValidateSessionAsync(request.SessionId, request.UserId);
+                if (!sessionCheck.IsSuccess)
+                    return sessionCheck;
+
                 // تسوية الدفعات العامة (InvoiceId = null): كان «المتبقي» محسوبًا على
                 // الدفعات المرتبطة بالفاتورة فقط — فإذا خفّت دفعة عامة دين الفاتورة
                 // عبر رصيد الطرف كانت غير مرئية هنا فيُسمح بسداد الدَّين نفسه مرتين.
@@ -107,6 +159,9 @@ namespace Sayl.Core.Services
                     InvoiceId = invoice.InvoiceId,
                     PartyType = invoice.PartyType ?? 'C',
                     PartyId = invoice.PartyId,
+                    // VULN-05: النقد يُنسب لدرج الجلسة التي استلمه فعليًا —
+                    // سداد دَين فاتورة قديمة اليوم يخص درج اليوم لا جلسة الفاتورة
+                    SessionId = request.SessionId,
                     Amount = request.Amount,
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
@@ -173,6 +228,11 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // VULN-05: التحقق الجلسي داخل المعاملة — تحصيل اليوم يخص درج جلسة مفتوحة مملوكة للفاعل
+                var sessionCheck = await ValidateSessionAsync(request.SessionId, request.UserId);
+                if (!sessionCheck.IsSuccess)
+                    return sessionCheck;
+
                 decimal balance = customer.Balance ?? 0;
                 if (balance < request.Amount)
                     return Result.Fail($"المبلغ أكبر من رصيد العميل المستحق ({balance:N2}).");
@@ -183,6 +243,8 @@ namespace Sayl.Core.Services
                     InvoiceId = null,
                     PartyType = 'C',
                     PartyId = request.PartyId.Value,
+                    // VULN-05: تحصيل دَين قديم اليوم يخص درج جلسة اليوم — النقد دخلها فعليًا
+                    SessionId = request.SessionId,
                     Amount = request.Amount,
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
@@ -229,6 +291,11 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // VULN-05: التحقق الجلسي داخل المعاملة — سداد نقد للمورد يخرج من درج جلسة مفتوحة مملوكة للفاعل
+                var sessionCheck = await ValidateSessionAsync(request.SessionId, request.UserId);
+                if (!sessionCheck.IsSuccess)
+                    return sessionCheck;
+
                 decimal balance = supplier.Balance ?? 0;
                 if (balance < request.Amount)
                     return Result.Fail($"المبلغ أكبر من رصيد المورد المستحق ({balance:N2}).");
@@ -239,6 +306,8 @@ namespace Sayl.Core.Services
                     InvoiceId = null,
                     PartyType = 'S',
                     PartyId = request.PartyId.Value,
+                    // VULN-05: سداد المورد النقدي يخص درج الجلسة التي صُرف منه
+                    SessionId = request.SessionId,
                     Amount = request.Amount,
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,

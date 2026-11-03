@@ -128,13 +128,22 @@ namespace Sayl.UI.UserControls
             using (var scope = Program.Services.CreateScope())
             {
                 var paymentService = scope.ServiceProvider.GetRequiredService<clsPaymentService>();
+
+                // VULN-05: التحصيل يُوجَّه لدرج جلسة المستخدم المفتوحة — دَين فاتورة
+                // قديمة يُحصَّل اليوم يخص درج اليوم (الجلسة تُتحقق خدميًا: فتحًا وملكية)
+                int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+                var posService = scope.ServiceProvider.GetRequiredService<clsPosSessionService>();
+                var openSession = await posService.GetOpenSessionByUserAsync(actorUserId);
+
                 result = await paymentService.ReceiveCustomerPaymentAsync(new Common.DTOs.RequestModels.DtoPaymentRequest
                 {
                     PartyId = customer.PartyId,
                     Amount = form.PaymentsList.Sum(p => p.Amount),
                     Method = form.PaymentsList[0].Method,
                     PaymentDate = AppClock.Today,
-                    Notes = AppLang.T("Customers.Collect.Notes", customer.Party!.Name)
+                    Notes = AppLang.T("Customers.Collect.Notes", customer.Party!.Name),
+                    SessionId = openSession.Data?.SessionId,
+                    UserId = actorUserId
                 });
             }
 
