@@ -157,6 +157,14 @@ namespace Sayl.Core.Services
             if (!AppPermissions.Has(editorRole, AppPermissions.Expenses))
                 return Result.Fail("تعديل المصروفات يتطلب صلاحية شاشة المصروفات.");
 
+            // ══ حماية السنة المالية المغلقة ══
+            // حُكم القفل يعتمد على تاريخ المصروف المخزَّن لا على ما أرسله المستدعي:
+            // حذف تاريخ التعديل عن الطلب كان يتجاوز الفحص — تعديل مبلغ/وصف مصروف
+            // سنة مغلقة يقلب ربحية سنة مؤرشفة بصمت. تاريخ المصروف المحفوظ هو الحَكَم
+            // دائمًا، وتاريخ التعديل الجديد (إن وُجد) يُفحص هو الآخر.
+            if (await IsBeforeCurrentFiscalYearAsync(expense.ExpenseDate))
+                return Result.Fail("مصروف من سنة مالية مغلقة — لا يمكن تعديله (مؤرشف).");
+
             if (dtoExpense.ExpenseDate != default && await IsBeforeCurrentFiscalYearAsync(dtoExpense.ExpenseDate))
                 return Result.Fail("مصروف من سنة مالية مغلقة — لا يمكن تعديله (مؤرشف).");
 
@@ -193,6 +201,10 @@ namespace Sayl.Core.Services
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
             if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Expenses))
                 return Result.Fail("حذف المصروفات يتطلب صلاحية شاشة المصروفات.");
+
+            // حماية السنة المالية المغلقة: حذف مصروف سنة مغلقة يقلب ربحيتها المؤرشفة
+            if (await IsBeforeCurrentFiscalYearAsync(expense.ExpenseDate))
+                return Result.Fail("مصروف من سنة مالية مغلقة — لا يمكن حذفه (مؤرشف).");
 
             _dbContext.Expenses.Remove(expense);
 

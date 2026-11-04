@@ -216,6 +216,18 @@ END";
             return user?.Role.RoleValue ?? 0;
         }
 
+        /// <summary>هل التاريخ يقع قبل بداية السنة المالية الحالية (سنة مغلقة)؟
+        /// حماية السجلات التاريخية: نفس سياسة clsFiscalYearService/clsExpenseService.</summary>
+        private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date)
+        {
+            var setting = await _dbContext.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
+                return date < fiscalYearStart;
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            return date < new DateOnly(today.Year, 1, 1);
+        }
+
         // B3: جلسة الدفع مفتوحة فقط — العائد null يعني "بلا جلسة" (كما كان) أو "جلسة مغلقة"
         private async Task<int?> ResolveOpenSessionIdAsync(int? sessionId)
         {
@@ -250,6 +262,15 @@ END";
 
             if (invoice == null)
                 return Result.Fail("الفاتورة المعلقة غير موجودة أو تم إكمالها بالفعل.");
+
+            // ══ حماية السنة المالية المغلقة ══
+            // فاتورة معلقة تعود لسنة مُغلقة لا تُستكمَل هنا: إكمالها يُقيّد بيعًا
+            // وCOGS ونقدًا في سنة مؤرشفة فيقلب نتائجها المالية. طريقها المشروع
+            // الوحيد هو عملية تسوية محاسبية مصرّح بها (قيد إغلاق معتمد) — لا إكمال
+            // نقطة بيع صامت. (الفواتير المعلقة داخل السنة الجارية تُحسم قبل الإغلاق
+            // — فحوصات الجاهزية في clsFiscalYearService تمنع الإغلاق دون حسمها.)
+            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(invoice.CreatedAt ?? DateTime.UtcNow)))
+                return Result.Fail("هذه الفاتورة المعلقة تعود لسنة مالية مغلقة — لا يمكن إكمالها إلا عبر قيد تسوية محاسبية معتمد من المحاسب.");
 
             // ملكية الإكمال: نفس قاعدة الإلغاء (CancelSuspendedInvoiceAsync)
             if (invoice.UserId != actorUserId)

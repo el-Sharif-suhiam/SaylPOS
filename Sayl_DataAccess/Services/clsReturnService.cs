@@ -58,6 +58,13 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة بيع مكتملة.");
 
+            // ══ حماية السنة المالية المغلقة ══
+            // مرتجع على فاتورة سنة مغلقة كان يعيد للفترة القديمة مخزونًا واستردادًا
+            // فيقلب نتائج سنة مؤرشفة بصمت. سياسة التسوية: الاعتراف بالمرتجع في
+            // الفترة الحالية عبر قيد محاسبي معتمد — لا إعادة فعل على السجلات القديمة.
+            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(originalInvoice.CreatedAt ?? DateTime.UtcNow)))
+                return Result<int>.Fail("الفاتورة الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
+
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
 
             // ══ VULN-01: حارس الازدواج داخل الطلب الواحد ══
@@ -223,6 +230,10 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة شراء مكتملة.");
 
+            // ══ حماية السنة المالية المغلقة ══ (نفس سياسة مرتجع العميل أعلاه)
+            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(originalInvoice.CreatedAt ?? DateTime.UtcNow)))
+                return Result<int>.Fail("فاتورة الشراء الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
+
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
 
             // VULN-01: حارس الازدواج داخل الطلب — التجميع قبل الفحص (نفس مرتجع العميل)
@@ -344,6 +355,18 @@ namespace Sayl.Core.Services
         // ═════════════════════════════════════════════════
         // الدوال الخاصة
         // ═════════════════════════════════════════════════
+
+        /// <summary>هل التاريخ يقع قبل بداية السنة المالية الحالية (سنة مغلقة)؟
+        /// حماية السجلات التاريخية — نفس سياسة clsFiscalYearService.</summary>
+        private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date)
+        {
+            var setting = await _dbContext.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
+                return date < fiscalYearStart;
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            return date < new DateOnly(today.Year, 1, 1);
+        }
 
         /// <summary>
         /// VULN-01: تجميع بنود طلب المرتجع حسب المنتخ — المجموع لا السطر.
