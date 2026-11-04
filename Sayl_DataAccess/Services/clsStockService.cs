@@ -511,6 +511,10 @@ namespace Sayl.Core.Services
                         BatchNumber = request.TargetBatchNumber.Trim(),
                         ExpiryDate = request.TargetExpiryDate ?? sourceBatch.ExpiryDate,
                         BatchQuantity = request.Quantity,
+                        // الكمية المنقولة تحمل تكلفتها التاريخية (COSTING.md: التكلفة من
+                        // الدفعة المستهلكة فعليًا) — نهايتها الجديدة بلا تكلفة تجعل بيعها
+                        // يرجع إلى Product.CostPrice ويشوّه COGS والتقييم
+                        UnitCost = sourceBatch.UnitCost,
                         CreatedAt = DateTime.UtcNow
                     };
                     _dbContext.Batches.Add(targetBatch);
@@ -531,6 +535,9 @@ namespace Sayl.Core.Services
                             .FirstAsync(b => b.ProductId == sourceBatch.ProductId && b.BatchNumber == request.TargetBatchNumber.Trim());
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                             $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
+                        // دفعة أنشأها طلب متوازٍ قد تحمل تكلفة خاصة بها — الدمج
+                        // يتوسط بالوزن (نفس معادلة دمج الشراء) لا يطمسها
+                        await MergeTransferCostAsync(targetBatch.BatchId, sourceBatch.UnitCost, request.Quantity);
                     }
                 }
                 else
@@ -557,6 +564,11 @@ namespace Sayl.Core.Services
                     // (صلاحية الدفعة القائمة لا تُمس أبدًا)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                         $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
+
+                    // دمج في دفعة قائمة: التكلفة تتوسط بالوزن بالكمية (نفس معادلة
+                    // دمج الشراء — COSTING.md) فيظل إجمالي تكلفة الدفعة مطابقًا
+                    // لتكلفة ما اقتُني فعليًا عبر عمر الدفعة
+                    await MergeTransferCostAsync(targetBatch.BatchId, sourceBatch.UnitCost, request.Quantity);
                 }
 
                 // خصم ذري من المصدر بشرط الكمية — لا يمكن أن يتجاوز المتاح حتى مع تزامن كامل
@@ -607,6 +619,32 @@ namespace Sayl.Core.Services
                 await transaction.RollbackAsync();
                 return Result.Fail("فشلت عملية نقل الكمية بين الدفعات.");
             }
+        }
+
+        /// <summary>دمج تكلفة الكمية المنقولة في الدفعة الهدف — متوسط مرجح بالكمية،
+        /// نفس معادلة دمج الشراء في clsPurchaseService (COSTING.md: «إجمالي الدفعة
+        /// يظل مطابقًا لما دُفع فعليًا»). يُستدعى بعد زيادة BatchQuantity بالكمية
+        /// المنقولة، فالقسمة على BatchQuantity الحالي تعيد القسمة القديمة.
+        /// UPDATE خام بعد الزيادة، والخصائص المتتبعة لا تُمس حتى لا يكتبها
+        /// SaveChanges فوقها.
+        /// قواعد null (لا تُخترع تكلفة بديل ولا Product.CostPrice):
+        /// - تكلفة المصدر null: لا شيء يُكتب — تكلفة الهدف القائمة تبقى كما هي
+        ///   (والهدف القديم بلا تكلفة يظل بلا تكلفة).
+        /// - تكلفة الهدف null: تُملأ بتكلفة المصدر — أول تكلفة صريحة تملؤها
+        ///   (نفس قاعدة ReceiveStockAsync)، والكمية المنقولة تحملها فعلًا.
+        /// - دفعة هدف فارغة (كمية 0): كل وحداتها منقولة من المصدر → تكلفة المصدر.</summary>
+        private async Task MergeTransferCostAsync(int targetBatchId, decimal? sourceUnitCost, int transferredQuantity)
+        {
+            if (sourceUnitCost is null)
+                return;
+
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE Batches
+SET UnitCost = CASE
+                   WHEN UnitCost IS NULL OR BatchQuantity <= {transferredQuantity} THEN {sourceUnitCost.Value}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {transferredQuantity}) + {sourceUnitCost.Value} * {transferredQuantity}) / BatchQuantity, 2)
+               END
+WHERE BatchId = {targetBatchId}");
         }
     }
 }
