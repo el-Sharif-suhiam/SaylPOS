@@ -105,12 +105,8 @@ namespace Sayl.Core.Services
                             QuantityAvailable = inv.QuantityAvailable ?? 0,
                             QuantityReserved = inv.QuantityReserved ?? 0,
                             ReorderLevel = p.ReorderLevel ?? 0,
-                            IsLowStock = (inv.QuantityAvailable ?? 0) <= (p.ReorderLevel ?? 0),
                             LastCountedAt = inv.LastCountedAt
                         };
-
-            if (lowStockOnly)
-                query = query.Where(x => x.IsLowStock);
 
             // C1: تقرير جزئي لأصناف بعينها (IN(...)) — نافذة POS بعد البيع
             // تُحدث أصناف السلة الملموسة فقط بدل نقل الكتالوج كاملًا.
@@ -118,6 +114,21 @@ namespace Sayl.Core.Services
                 query = query.Where(x => productIds.Contains(x.ProductId));
 
             var result = await query.OrderBy(x => x.ProductName).ToListAsync();
+
+            // المتاح للبيع فعليًا من القاعدة الوحيدة (clsProductService — دفعات
+            // صالحة − محجوز): المنتهي/المحجوب لا يُبقي المنتج «متاحًا» على الورق.
+            // مؤشر الانخفاض على المتاح للبيع بعتبة ≤ نفسها (لا على الفعلي).
+            var netAvailable = await new clsProductService(_dbContext)
+                .GetNetAvailableQuantitiesAsync(result.Select(x => x.ProductId));
+            foreach (var row in result)
+            {
+                row.NetAvailable = netAvailable.GetValueOrDefault(row.ProductId);
+                row.IsLowStock = row.NetAvailable <= row.ReorderLevel;
+            }
+
+            if (lowStockOnly)
+                result = result.Where(x => x.IsLowStock).ToList();
+
             return Result<List<InventoryStatusVM>>.Ok(result);
         }
 
@@ -128,30 +139,40 @@ namespace Sayl.Core.Services
             page = Math.Max(1, page);
             pageSize = Math.Max(1, pageSize);
 
-            var query = from p in _dbContext.Products
-                        join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
-                        where p.Type == "stock" && p.IsActive
-                        select new InventoryStatusVM
-                        {
-                            ProductId = p.ProductId,
-                            ProductName = p.Name,
-                            Unit = p.Unit,
-                            QuantityAvailable = inv.QuantityAvailable ?? 0,
-                            QuantityReserved = inv.QuantityReserved ?? 0,
-                            ReorderLevel = p.ReorderLevel ?? 0,
-                            IsLowStock = (inv.QuantityAvailable ?? 0) <= (p.ReorderLevel ?? 0),
-                            LastCountedAt = inv.LastCountedAt
-                        };
+            var rows = await (from p in _dbContext.Products
+                              join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
+                              where p.Type == "stock" && p.IsActive
+                              select new InventoryStatusVM
+                              {
+                                  ProductId = p.ProductId,
+                                  ProductName = p.Name,
+                                  Unit = p.Unit,
+                                  QuantityAvailable = inv.QuantityAvailable ?? 0,
+                                  QuantityReserved = inv.QuantityReserved ?? 0,
+                                  ReorderLevel = p.ReorderLevel ?? 0,
+                                  LastCountedAt = inv.LastCountedAt
+                              })
+                             .ToListAsync();
 
+            // المتاح للبيع فعليًا من القاعدة الوحيدة (clsProductService — دفعات
+            // صالحة − محجوز): المنتهي/المحجوب لا يُبقي المنتج «متاحًا» على الورق.
+            // مؤشر الانخفاض (وعمود «المنخفض فقط») على المتاح للبيع بعتبة ≤.
+            var netAvailable = await new clsProductService(_dbContext)
+                .GetNetAvailableQuantitiesAsync(rows.Select(x => x.ProductId));
+            foreach (var row in rows)
+            {
+                row.NetAvailable = netAvailable.GetValueOrDefault(row.ProductId);
+                row.IsLowStock = row.NetAvailable <= row.ReorderLevel;
+            }
+
+            // C4: الترقيم على المستوى النهائي (بعد فلتر الانخفاض إن طُلب —
+            // إجمالي الشاملة يعدها كي لا يختل ترقيم «المنخفض فقط»).
+            IEnumerable<InventoryStatusVM> ordered = rows.OrderBy(x => x.ProductName);
             if (lowStockOnly)
-                query = query.Where(x => x.IsLowStock);
+                ordered = ordered.Where(x => x.IsLowStock);
 
-            int total = await query.CountAsync();
-            var items = await query
-                .OrderBy(x => x.ProductName)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
+            var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+            int total = ordered.Count();
 
             return Result<PagedResult<InventoryStatusVM>>.Ok(new PagedResult<InventoryStatusVM>
             {
@@ -724,34 +745,54 @@ namespace Sayl.Core.Services
             int totalActiveProducts = await _dbContext.Products
                 .CountAsync(p => p.IsActive);
 
-            decimal totalStockValue = await (from p in _dbContext.Products
-                                             join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
-                                             where p.Type == "stock" && p.IsActive
-                                             select (decimal)(inv.QuantityAvailable ?? 0) * p.CostPrice)
+            // قيمة المخزون بتكلفة الدفعات (COSTING.md: تكلفة الاقتناء تُقرأ من
+            // Batches.UnitCost — Product.CostPrice سعر آخر شراء للعرض فقط).
+            // الدفعة بلا تكلفة مخزنة (استلام قديم/يدوي) تعود إلى Product.CostPrice
+            // كما وقت البيع — نفس السلوك الموثق في clsCheckoutService/DeductStock
+            // (unitCost = batch.UnitCost ?? product.CostPrice) لا اختراع تكلفة أخرى.
+            // الكمية المُقيَّمة هي كل ما هو على الرفوف (بما فيه المحجوز/المحجوب/
+            // المنتهي — أصل قائم حتى لو لم يُبع) = مجموع الدفعات الموجبة.
+            decimal totalStockValue = await (from b in _dbContext.Batches
+                                             join p in _dbContext.Products on b.ProductId equals p.ProductId
+                                             where p.Type == "stock" && p.IsActive && b.BatchQuantity > 0
+                                             select b.BatchQuantity * (b.UnitCost ?? p.CostPrice))
                                             .SumAsync();
 
-            var lowStockQuery = from p in _dbContext.Products
-                                join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
-                                where p.Type == "stock" && p.IsActive
-                                   && (inv.QuantityAvailable ?? 0) <= (p.ReorderLevel ?? 0)
-                                select new InventoryStatusVM
-                                {
-                                    ProductId = p.ProductId,
-                                    ProductName = p.Name,
-                                    Unit = p.Unit,
-                                    QuantityAvailable = inv.QuantityAvailable ?? 0,
-                                    QuantityReserved = inv.QuantityReserved ?? 0,
-                                    ReorderLevel = p.ReorderLevel ?? 0,
-                                    IsLowStock = true,
-                                    LastCountedAt = inv.LastCountedAt
-                                };
+            // مؤشر المخزون المنخفض على المتاح للبيع فعليًا (القاعدة الموحّدة
+            // clsProductService.GetNetAvailableQuantitiesAsync): مجموع دفعات
+            // غير منتهية الصلاحية وغير محجوبة − المحجوز. العتبة ≤ حد الطلب كما
+            // كانت على الفعلي — العدد الفعلي وحده كان يخفي نُفَادًا محجوزًا أو
+            // منتهيًا خلف مخزون ورقي.
+            var stockRows = await (from p in _dbContext.Products
+                                   join inv in _dbContext.Inventories on p.ProductId equals inv.ProductId
+                                   where p.Type == "stock" && p.IsActive
+                                   select new InventoryStatusVM
+                                   {
+                                       ProductId = p.ProductId,
+                                       ProductName = p.Name,
+                                       Unit = p.Unit,
+                                       QuantityAvailable = inv.QuantityAvailable ?? 0,
+                                       QuantityReserved = inv.QuantityReserved ?? 0,
+                                       ReorderLevel = p.ReorderLevel ?? 0,
+                                       LastCountedAt = inv.LastCountedAt
+                                   })
+                                  .ToListAsync();
 
-            int lowStockCount = await lowStockQuery.CountAsync();
+            var netAvailable = await new clsProductService(_dbContext)
+                .GetNetAvailableQuantitiesAsync(stockRows.Select(x => x.ProductId));
+            foreach (var row in stockRows)
+            {
+                row.NetAvailable = netAvailable.GetValueOrDefault(row.ProductId);
+                row.IsLowStock = row.NetAvailable <= row.ReorderLevel;
+            }
 
-            var lowStockItems = await lowStockQuery
-                .OrderBy(x => x.QuantityAvailable)
+            var lowStockItems = stockRows
+                .Where(x => x.IsLowStock)
+                .OrderBy(x => x.NetAvailable)
                 .Take(10)
-                .ToListAsync();
+                .ToList();
+
+            int lowStockCount = stockRows.Count(x => x.IsLowStock);
 
             // ── أفضل المنتجات (آخر 30 يوماً شاملة اليوم) ──
             var topProductsResult = await GetTopSellingProductsAsync(date.AddDays(-29), date, 5);

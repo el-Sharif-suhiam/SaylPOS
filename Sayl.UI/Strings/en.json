@@ -556,6 +556,8 @@
 
   "Inventory.Section.Title": "Inventory",
   "Inventory.Label.Available": "Available",
+  "Inventory.Label.OnHand": "On Hand",
+  "Inventory.Label.AvailableForSale": "Available for Sale",
   "Inventory.Label.Reserved": "Reserved",
   "Inventory.Label.LastCount": "Last Count",
   "Inventory.OnlyLow": "Low only",

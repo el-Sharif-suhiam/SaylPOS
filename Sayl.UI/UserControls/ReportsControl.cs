@@ -256,9 +256,10 @@ namespace Sayl.UI.UserControls
                         var r = await reportService.GetInventoryStatusAsync(lowStockOnly: false);
                         if (!CheckResult(r) || r.Data == null) return;
                         _currentTitle = AppLang.T("Reports.Type.Inventory");
-                        AddColumns((AppLang.T("Common.Label.Product"), 40), (AppLang.T("Inventory.Label.Available"), 15), (AppLang.T("Inventory.Label.Reserved"), 15), (AppLang.T("Common.Label.Reorder"), 15), (AppLang.T("Common.Label.Status"), 15));
+                        AddColumns((AppLang.T("Common.Label.Product"), 30), (AppLang.T("Inventory.Label.OnHand"), 13), (AppLang.T("Inventory.Label.AvailableForSale"), 14), (AppLang.T("Inventory.Label.Reserved"), 13), (AppLang.T("Common.Label.Reorder"), 15), (AppLang.T("Common.Label.Status"), 15));
                         foreach (var i in r.Data)
-                            AddRow(i.ProductName, i.QuantityAvailable.ToString(), i.QuantityReserved.ToString(),
+                            AddRow(i.ProductName, i.QuantityAvailable.ToString(), i.NetAvailable.ToString(),
+                                i.QuantityReserved.ToString(),
                                 i.ReorderLevel.ToString(),
                                 i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"));
                         break;

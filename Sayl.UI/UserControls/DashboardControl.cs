@@ -161,11 +161,13 @@ namespace Sayl.UI.UserControls
             _gridLowStock = new DataGridView { Dock = DockStyle.Fill };
             UiHelpers.StyleGrid(_gridLowStock);
             _gridLowStock.Columns.Add("colName", AppLang.T("Common.Label.Product"));
-            _gridLowStock.Columns.Add("colQty", AppLang.T("Inventory.Label.Available"));
+            _gridLowStock.Columns.Add("colQty", AppLang.T("Inventory.Label.OnHand"));
+            _gridLowStock.Columns.Add("colNet", AppLang.T("Inventory.Label.AvailableForSale"));
             _gridLowStock.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
-            _gridLowStock.Columns["colName"].FillWeight = 55;
-            _gridLowStock.Columns["colQty"].FillWeight = 22;
-            _gridLowStock.Columns["colReorder"].FillWeight = 23;
+            _gridLowStock.Columns["colName"].FillWeight = 46;
+            _gridLowStock.Columns["colQty"].FillWeight = 18;
+            _gridLowStock.Columns["colNet"].FillWeight = 18;
+            _gridLowStock.Columns["colReorder"].FillWeight = 18;
             lowPanel.Controls.Add(_gridLowStock);
             lowPanel.Controls.Add(_lblLowStockHeader);
 
@@ -219,7 +221,7 @@ namespace Sayl.UI.UserControls
 
                 _gridLowStock.Rows.Clear();
                 foreach (var item in s.LowStockItems)
-                    _gridLowStock.Rows.Add(item.ProductName, item.QuantityAvailable, item.ReorderLevel);
+                    _gridLowStock.Rows.Add(item.ProductName, item.QuantityAvailable, item.NetAvailable, item.ReorderLevel);
 
                 _lblLowStockHeader.Text = s.LowStockCount > 0
                     ? AppLang.T("Dashboard.LowStock.Count", s.LowStockCount)

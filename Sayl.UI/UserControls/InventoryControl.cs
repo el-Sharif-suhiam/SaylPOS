@@ -38,7 +38,7 @@ internal class InventoryControl : SectionListControl
                 _shown = result.Data.Items;
                 Grid.Rows.Clear();
                 foreach (var i in _shown)
-                    Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.QuantityReserved,
+                    Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.NetAvailable, i.QuantityReserved,
                         i.ReorderLevel, i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"),
                         i.LastCountedAt?.ToString("yyyy-MM-dd") ?? "-");
             }
@@ -56,18 +56,20 @@ internal class InventoryControl : SectionListControl
 
             Grid.Columns.Add("colName", AppLang.T("Common.Label.Product"));
             Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
-            Grid.Columns.Add("colAvailable", AppLang.T("Inventory.Label.Available"));
+            Grid.Columns.Add("colOnHand", AppLang.T("Inventory.Label.OnHand"));
+            Grid.Columns.Add("colNet", AppLang.T("Inventory.Label.AvailableForSale"));
             Grid.Columns.Add("colReserved", AppLang.T("Inventory.Label.Reserved"));
             Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
             Grid.Columns.Add("colCounted", AppLang.T("Inventory.Label.LastCount"));
-            Grid.Columns["colName"].FillWeight = 34;
-            Grid.Columns["colUnit"].FillWeight = 10;
-            Grid.Columns["colAvailable"].FillWeight = 12;
-            Grid.Columns["colReserved"].FillWeight = 12;
-            Grid.Columns["colReorder"].FillWeight = 12;
+            Grid.Columns["colName"].FillWeight = 26;
+            Grid.Columns["colUnit"].FillWeight = 8;
+            Grid.Columns["colOnHand"].FillWeight = 10;
+            Grid.Columns["colNet"].FillWeight = 10;
+            Grid.Columns["colReserved"].FillWeight = 10;
+            Grid.Columns["colReorder"].FillWeight = 10;
             Grid.Columns["colStatus"].FillWeight = 10;
-            Grid.Columns["colCounted"].FillWeight = 10;
+            Grid.Columns["colCounted"].FillWeight = 16;
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.

@@ -555,6 +555,8 @@
 
   "Inventory.Section.Title": "المخزون",
   "Inventory.Label.Available": "المتاح",
+  "Inventory.Label.OnHand": "الفعلي",
+  "Inventory.Label.AvailableForSale": "المتاح للبيع",
   "Inventory.Label.Reserved": "محجوز",
   "Inventory.Label.LastCount": "آخر جرد",
   "Inventory.OnlyLow": "المنخفض فقط",

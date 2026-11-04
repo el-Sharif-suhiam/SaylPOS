@@ -186,6 +186,57 @@ namespace Sayl.Core.Services
             return Math.Max(0, sellable - reserved);
         }
 
+        /// <summary>المتاح الفعلي للبيع لعدة منتجات دفعة واحدة — نفس قواعد
+        /// GetNetAvailableQuantityAsync حرفيًا: (مجموع الدفعات الصالحة) −
+        /// (QuantityReserved) وغير سالب، والصالح = غير منتهي الصلاحية وغير
+        /// محجوب (حجر). موجّه للتقارير الجماعية (لوحة التحكم/حالة المخزون)
+        /// حتى لا تُعاد كتابة القاعدة بمعادلة منفصلة في خدمة التقارير —
+        /// استعلامان اثنان مهما كان عدد المنتجات (لا استعلام لكل منتج).</summary>
+        public async Task<Dictionary<int, int>> GetNetAvailableQuantitiesAsync(IEnumerable<int>? productIds = null)
+        {
+            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+            var sellableQuery = _dbContext.Batches
+                .Where(b => b.BatchQuantity > 0
+                         && !b.IsQuarantined
+                         && (b.ExpiryDate == null || b.ExpiryDate >= today));
+
+            if (productIds != null)
+            {
+                int[] ids = productIds.Distinct().ToArray();
+                if (ids.Length == 0)
+                    return new Dictionary<int, int>();
+                sellableQuery = sellableQuery.Where(b => ids.Contains(b.ProductId));
+            }
+
+            // مجموع الدفعات الصالحة لكل منتج
+            Dictionary<int, int> sellableByProduct = await sellableQuery
+                .GroupBy(b => b.ProductId)
+                .Select(g => new { ProductId = g.Key, Qty = g.Sum(b => b.BatchQuantity) })
+                .ToDictionaryAsync(x => x.ProductId, x => x.Qty);
+
+            // المحجوز لكل منتج
+            var reservedQuery = _dbContext.Inventories.Select(i => new { i.ProductId, Reserved = i.QuantityReserved ?? 0 });
+            if (productIds != null)
+            {
+                int[] ids = productIds.Distinct().ToArray();
+                reservedQuery = reservedQuery.Where(i => ids.Contains(i.ProductId));
+            }
+
+            Dictionary<int, int> reservedByProduct = await reservedQuery
+                .ToDictionaryAsync(x => x.ProductId, x => x.Reserved);
+
+            // المتاح الصافي = غير سالب دائمًا (نفس معادلة النسخة الأحادية)
+            var result = new Dictionary<int, int>();
+            foreach (int productId in sellableByProduct.Keys.Union(reservedByProduct.Keys))
+            {
+                sellableByProduct.TryGetValue(productId, out int sellable);
+                reservedByProduct.TryGetValue(productId, out int reserved);
+                result[productId] = Math.Max(0, sellable - reserved);
+            }
+            return result;
+        }
+
         public async Task<List<DtoBatch>> GetProductBatchesAsync(int productId)
         {
             return await _dbContext.Batches
