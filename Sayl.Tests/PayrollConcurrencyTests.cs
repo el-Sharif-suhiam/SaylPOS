@@ -349,7 +349,8 @@ public class PayrollConcurrencyTests
                 "الكشف الناجي يجب أن يطابق أحد الفترتين المطلوبتين تمامًا");
             Assert.Equal(100m, records[0].Rate);
             // الحساب سليم للفائز: أجر أيام العمل (بدون الجمعة/السبت) × 100
-            decimal expectedNet = records[0].PeriodTo == periodA.To ? 1000m : 800m;
+            // periodB (10..20 مارس 2025) = 11 يومًا شاملة الطرفين − الجمعة 14 − السبت 15 = 9 أيام عمل
+            decimal expectedNet = records[0].PeriodTo == periodA.To ? 1000m : 900m;
             Assert.Equal(expectedNet, records[0].Net);
         }
         finally
