@@ -1153,6 +1153,13 @@
   "Activation.Msg.ReadFileFailed": "Could not read the file: {0}",
   "Activation.Msg.PasteFirst": "Please paste the activation key or import a .lic file first.",
   "Activation.Msg.Failed": "Activation failed",
+  "Activation.Err.Invalid": "The license is invalid or has been tampered with. Make sure the full activation key was pasted.",
+  "Activation.Err.WrongDevice": "This license is issued for another device and cannot be activated here.",
+  "Activation.Err.Expired": "This license has expired. Contact your distributor for a renewal license.",
+  "Activation.Err.ClockRolledBack": "This device's date/time appears to be set incorrectly. Fix the Windows date and time, then activate again.",
+
+  "License.Gate.ClockRolledBack": "A clock rollback beyond the allowed tolerance was detected on this device, or the time-verification data was deleted.\nThe license will not work until the Windows date and time are set correctly and the program is activated again.\nIf you did not change the clock yourself, the motherboard battery may be weak — contact a technician.",
+  "License.Gate.ValidationUnavailable": "License validation could not run right now due to a system problem.\nThis is not an issue with your license — please retry, and if it persists, restart the program.",
 
   "Display.Label.Item": "Item",
   "Display.Label.Qty": "Qty",

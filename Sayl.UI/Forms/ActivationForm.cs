@@ -448,13 +448,13 @@ namespace Sayl.UI.Forms
                 btnActivate.Enabled = false;
                 try
                 {
-                    if (ActivationManager.Activate(license, out string error))
+                    if (ActivationManager.TryActivate(license, out ActivationFailure failure))
                     {
                         DialogResult = DialogResult.OK;
                         Close();
                     }
                     else
-                        ShowError(lblStatus, error ?? AppLang.T("Activation.Msg.Failed"));
+                        ShowError(lblStatus, DescribeFailure(failure));
                 }
                 finally
                 {
@@ -481,6 +481,20 @@ namespace Sayl.UI.Forms
         {
             status.ForeColor = AppTheme.Danger;
             status.Text = message;
+        }
+
+        /// <summary>ترجمة سبب فشل التفعيل للغة الواجهة — رسائل انتهاء الصلاحية
+        /// ورجوع الساعة تشرح الإجراء المطلوب بدل اتهام عام بالتلاعب.</summary>
+        private static string DescribeFailure(ActivationFailure failure)
+        {
+            return failure switch
+            {
+                ActivationFailure.InvalidLicense => AppLang.T("Activation.Err.Invalid"),
+                ActivationFailure.WrongDevice => AppLang.T("Activation.Err.WrongDevice"),
+                ActivationFailure.Expired => AppLang.T("Activation.Err.Expired"),
+                ActivationFailure.ClockRolledBack => AppLang.T("Activation.Err.ClockRolledBack"),
+                _ => AppLang.T("Activation.Msg.Failed")
+            };
         }
     }
 }

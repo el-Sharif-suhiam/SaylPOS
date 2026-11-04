@@ -73,13 +73,10 @@ namespace Sayl.UI
 
             Services = services.BuildServiceProvider();
 
-            // بوابة التفعيل: لا يعمل البرنامج إلا بعد تفعيل صالح لهذا الجهاز
-            if (!PosLicensing.ActivationManager.IsActivated())
-            {
-                using var activation = new ActivationForm();
-                if (activation.ShowDialog() != DialogResult.OK)
-                    return;
-            }
+            // بوابة التفعيل: لا يعمل البرنامج إلا بعد تفعيل صالح لهذا الجهاز —
+            // ورسائل الحالة تميّز انتهاء الصلاحية/رجوع الساعة/الخلل المؤقت
+            if (!LicenseGate.EnsureValidated(null))
+                return;
 
             // VULN-47: بوابة حساب المدير الأول — يُنشأ الحساب الافتراضي (admin)
             // صامتًا عند صفر مستخدمين نشطين مع إجبار تغيير كلمة المرور أول دخول
