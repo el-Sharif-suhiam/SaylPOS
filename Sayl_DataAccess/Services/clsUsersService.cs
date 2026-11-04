@@ -267,6 +267,32 @@ BEGIN
                  AND name = N'parties_email_unique')
         DROP INDEX parties_email_unique ON dbo.Parties;
     EXEC(N'CREATE UNIQUE INDEX parties_email_unique ON dbo.Parties(Email) WHERE Email IS NOT NULL');
+END;
+/* Upgrade_11: Batches.UnitCost — تكلفة الاقتناء التاريخية للوحدة (بعد تخصيص
+   خصم الشراء) وهي مصدر COGS عند البيع/المرتجع. القواعد الجديدة تنشئه مع
+   الجدول (SaylDB.sql)؛ القواعد القديمة تأخذ العمود هنا ثم تُرحَّل دفعاتها
+   بلا تكلفة إلى تكلفة أحدث بند شراء مكتمل (ItemCost كما سُجل وقت الشراء) —
+   لا قيم مُخترَعة ولا مساس بأي بيانات أخرى. EXEC ديناميكي لأن ALTER في نفس
+   الدفعة لا يُرى وقت تجميعها (deferred name resolution لا يشمل الأعمدة).
+   Idempotent: العمود يُنشأ إن غاب فقط، والترحيل يملأ الدفعات بلا تكلفة فقط. */
+IF OBJECT_ID(N'dbo.Batches', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'dbo.Batches', N'UnitCost') IS NULL
+        ALTER TABLE dbo.Batches ADD UnitCost DECIMAL(10,2) NULL;
+    EXEC(N'
+    UPDATE b SET b.UnitCost = pi.UnitCost
+    FROM dbo.Batches b
+    CROSS APPLY (
+        SELECT TOP (1) ii.ItemCost AS UnitCost
+        FROM dbo.InvoiceItems ii
+        JOIN dbo.Invoices i ON i.InvoiceId = ii.InvoiceId
+        WHERE ii.BatchId = b.BatchId
+          AND ii.ItemCost IS NOT NULL
+          AND i.Type = N''purchase''
+          AND i.Status = N''completed''
+        ORDER BY i.CreatedAt DESC, ii.InvoiceItemId DESC
+    ) pi
+    WHERE b.UnitCost IS NULL AND pi.UnitCost IS NOT NULL;');
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
