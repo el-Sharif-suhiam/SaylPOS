@@ -1,4 +1,5 @@
 using Common.DTOs.RequestModels;
+using Common.Enums;
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
@@ -22,6 +23,11 @@ namespace Sayl.UI.Forms
         private decimal _invoiceTotal;
         private decimal _invoiceNet;
         private decimal _netRatio;
+
+        // المتبقي للإرجاع لكل منتج (المباع − المرتجع سابقًا) — يُحسب عند التحميل
+        // من بيانات الخدمة نفسها التي يحرس بها المرتجع. عرض وتنبيه فقط:
+        // الفيصل النهائي يبقى حارس clsReturnService داخل المعاملة.
+        private Dictionary<int, int> _remainingByProduct = new();
 
         /// <summary>VULN-05: جلسة الدرج النشطة — نقد الاسترداد يُنسب لها في تقرير Z
         /// (لا لجلسة الفاتورة الأصلية المتجمدة). يمرَّر من PosForm عند الفتح.</summary>
@@ -168,13 +174,17 @@ namespace Sayl.UI.Forms
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             _grid.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
             _grid.Columns.Add("colSold", AppLang.T("Return.Label.Sold"));
+            _grid.Columns.Add("colReturned", AppLang.T("Return.Label.Returned"));
+            _grid.Columns.Add("colRemaining", AppLang.T("Return.Label.Remaining"));
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("Return.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
-            _grid.Columns["colProduct"].FillWeight = 45;
-            _grid.Columns["colSold"].FillWeight = 15;
-            _grid.Columns["colPrice"].FillWeight = 18;
-            _grid.Columns["colReturnQty"].FillWeight = 22;
+            _grid.Columns["colProduct"].FillWeight = 30;
+            _grid.Columns["colSold"].FillWeight = 10;
+            _grid.Columns["colReturned"].FillWeight = 13;
+            _grid.Columns["colRemaining"].FillWeight = 13;
+            _grid.Columns["colPrice"].FillWeight = 14;
+            _grid.Columns["colReturnQty"].FillWeight = 20;
             // عمود الكمية «دعوة بصرية» للتحرير: خلفية مختلفة عن بقية الجدول
             // (نفس حيلة سلة الكاشير في PosForm.StyleCartGrid).
             _grid.Columns["colReturnQty"].DefaultCellStyle.BackColor = AppTheme.FieldBg;
@@ -274,9 +284,29 @@ namespace Sayl.UI.Forms
                 _invoiceNet = result.Data.NetAmount;
                 _netRatio = _invoiceTotal > 0 ? _invoiceNet / _invoiceTotal : 0m;
 
+                // المرتجع سابقًا لكل منتج — من الخدمة نفسها التي يحرس بها المرتجع،
+                // ليبدو «المتبقي للإرجاع» مطابقًا لما سيقبله الحارس فعلًا.
+                Dictionary<int, int> previouslyReturned;
+                using (var returnScope = Program.Services.CreateScope())
+                {
+                    var returnService = returnScope.ServiceProvider.GetRequiredService<clsReturnService>();
+                    previouslyReturned = await returnService.GetPreviouslyReturnedQuantitiesAsync(
+                        invoiceId, enInvoicesType.customer_return);
+                }
+
+                // المتبقي لكل منتج يُجمع عبر سطوره (السحب عند البيع يقسم السطر صفًا لكل دفعة
+                // فقد يتكرر المنتج على أكثر من سطر) — فالحصة الكاملة متاحة للإرجاع.
+                _remainingByProduct = _items
+                    .GroupBy(i => i.ProductId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Sum(i => i.Quantity) - previouslyReturned.GetValueOrDefault(g.Key));
+
                 _grid.Rows.Clear();
                 foreach (var item in _items)
                     _grid.Rows.Add(item.ProductName, item.Quantity,
+                        previouslyReturned.GetValueOrDefault(item.ProductId),
+                        _remainingByProduct.GetValueOrDefault(item.ProductId),
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
 
                 _lblInfo.Text = AppLang.T("Return.Info.Loaded", invoiceId,
@@ -299,20 +329,30 @@ namespace Sayl.UI.Forms
             var returnItems = new List<DtoReturnItem>();
             decimal grossTotal = 0;
 
+            // الإدخال يُجمَّع لكل منتج أولاً (قد يتكرر المنتج على سطور متعددة لدفاعاته)
+            // ثم يُفحص ضد المتبقي للإرجاع — نفس حارس الخدمة بالضبط (عرض هنا، فيصل هناك).
+            var enteredByProduct = new Dictionary<int, int>();
+
             for (int i = 0; i < _grid.Rows.Count && i < _items.Count; i++)
             {
                 if (!int.TryParse(_grid.Rows[i].Cells["colReturnQty"].Value?.ToString(), out int qty) || qty <= 0)
                     continue;
 
                 var item = _items[i];
-                if (qty > item.Quantity)
-                {
-                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.QtyExceedsSold", item.ProductName, item.Quantity));
-                    return;
-                }
-
+                enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + qty;
                 returnItems.Add(new DtoReturnItem { ProductId = item.ProductId, Quantity = qty });
                 grossTotal += item.ItemPrice * qty;
+            }
+
+            foreach (var entered in enteredByProduct)
+            {
+                int remaining = _remainingByProduct.GetValueOrDefault(entered.Key);
+                if (entered.Value > remaining)
+                {
+                    string productName = _items.First(i => i.ProductId == entered.Key).ProductName;
+                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.QtyExceedsRemaining", productName, remaining));
+                    return;
+                }
             }
 
             decimal returnTotal = Math.Round(grossTotal * _netRatio, 2, MidpointRounding.AwayFromZero);

@@ -121,7 +121,8 @@ namespace Sayl.Core.Services
                 decimal invNet = originalInvoice.NetAmount;
                 decimal netRatio = invTotal > 0 ? invNet / invTotal : 0m;
 
-                var allocations = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items));
+                var returnedByBatch = await GetReturnedQuantitiesByBatchAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
+                var allocations = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items), returnedByBatch);
                 decimal rawRefund = allocations.Sum(a => a.ItemPrice * a.Quantity) * netRatio;
                 // تقريب واحد نهائي — لا تقارب متسلسل يتراكم خطؤه
                 decimal total = Math.Round(rawRefund, 2, MidpointRounding.AwayFromZero);
@@ -275,7 +276,8 @@ namespace Sayl.Core.Services
                 decimal invNetSup = originalInvoice.NetAmount;
                 decimal netRatioSup = invTotalSup > 0 ? invNetSup / invTotalSup : 0m;
 
-                var allocationsSup = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items));
+                var returnedByBatchSup = await GetReturnedQuantitiesByBatchAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+                var allocationsSup = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items), returnedByBatchSup);
                 decimal rawRefundSup = allocationsSup.Sum(a => a.ItemPrice * a.Quantity) * netRatioSup;
                 decimal total = Math.Round(rawRefundSup, 2, MidpointRounding.AwayFromZero);
 
@@ -356,6 +358,14 @@ namespace Sayl.Core.Services
         // الدوال الخاصة
         // ═════════════════════════════════════════════════
 
+        /// <summary>كميات المرتجع السابقة (لكل منتج) على فاتورة أصلية — للعرض في
+        /// شاشة المرتجع: المباع والمرتجع سابقًا والمتبقي. عرض وحسب: الفيصل النهائي
+        /// في الصلاحية يبقى حارس CreateCustomerReturnAsync/CreateSupplierReturnAsync
+        /// داخل المعاملة، فلا يُعتمد على الواجهة وحدها أبدًا.</summary>
+        public async Task<Dictionary<int, int>> GetPreviouslyReturnedQuantitiesAsync(
+            int originalInvoiceId, enInvoicesType returnType) =>
+            await GetReturnedQuantitiesAsync(originalInvoiceId, returnType);
+
         /// <summary>هل التاريخ يقع قبل بداية السنة المالية الحالية (سنة مغلقة)؟
         /// حماية السجلات التاريخية — نفس سياسة clsFiscalYearService.</summary>
         private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date)
@@ -379,9 +389,23 @@ namespace Sayl.Core.Services
                 .GroupBy(i => i.ProductId)
                 .Select(g => (g.Key, g.Sum(i => i.Quantity)));
 
+        /// <summary>
+        /// توزيع الكميات المطلوبة على سطور الفاتورة الأصلية بنفس الترتيب القائم
+        /// (FEFO: الأقرب انتهاءً ثم الأقدم ثم الأرخص ثم ترتيب السطر).
+        ///
+        /// تصحيح تسريب الكمية: سعة كل دفعة = مجموع ما بِيع/اشتري منها عبر سطور
+        /// الفاتورة الأصلية ناقص المرتجع سابقًا من الدفعة نفسها (returnedByBatch).
+        /// كان التوزيع يعامل كمية السطر الأصلية كأنها كاملة صالحة في كل مرة —
+        /// مرتجعان جزئيان متتاليان يعيدان إلى الدفعة الأولى أكثر مما بِيع منها
+        /// (مخزون وهمي في الدفعة، وحرمان الدفعات الأخرى من حصتها).
+        /// الدفعات التي تشاركها سطور متعددة تُجمع سعاتها (السحب عند البيع يقسم
+        /// السطر صفًا لكل دفعة، فقد تكرر الدفعة نفسها على أكثر من سطر).
+        /// الحارس الإجمالي لكل منتج يبقى مسؤول الرفض النهائي خارج هذه الدالة.
+        /// </summary>
         private static List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)> AllocateAcrossOriginalLines(
             IEnumerable<InvoiceItem> originalItems,
-            IEnumerable<(int ProductId, int Quantity)> groupedRequest)
+            IEnumerable<(int ProductId, int Quantity)> groupedRequest,
+            IReadOnlyDictionary<(int ProductId, int? BatchId), int> returnedByBatch)
         {
             var ordered = originalItems
                 .Select((ii, index) => (Item: ii, Index: index))
@@ -393,6 +417,14 @@ namespace Sayl.Core.Services
                 .ThenBy(x => x.Index)
                 .ToList();
 
+            // سعة كل دفعة المتبقية للإرجاع: المباع منها عبر سطور الفاتورة ناقص المرتجع سابقًا
+            var batchRemaining = ordered
+                .GroupBy(x => (x.Item.ProductId, x.Item.BatchId))
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Sum(x => x.Item.Quantity)
+                         - returnedByBatch.GetValueOrDefault(g.Key));
+
             var request = groupedRequest.ToDictionary(g => g.ProductId, g => g.Quantity);
             var result = new List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)>();
 
@@ -401,12 +433,17 @@ namespace Sayl.Core.Services
                 if (!request.TryGetValue(x.Item.ProductId, out int remaining) || remaining <= 0)
                     continue;
 
-                int take = Math.Min(remaining, x.Item.Quantity);
+                var key = (x.Item.ProductId, x.Item.BatchId);
+                if (!batchRemaining.TryGetValue(key, out int lineCapacity) || lineCapacity <= 0)
+                    continue;
+
+                int take = Math.Min(remaining, lineCapacity);
                 if (take <= 0)
                     continue;
 
                 result.Add((x.Index, x.Item.ProductId, take, x.Item.ItemPrice, x.Item.ItemCost, x.Item.BatchId));
                 request[x.Item.ProductId] = remaining - take;
+                batchRemaining[key] = lineCapacity - take;
             }
 
             return result;
@@ -423,6 +460,28 @@ namespace Sayl.Core.Services
                 .ToListAsync();
 
             return returnedItems.ToDictionary(x => x.ProductId, x => x.Quantity);
+        }
+
+        /// <summary>
+        /// الكميات المرتجعة سابقًا على الفاتورة الأصلية مصنّفة حسب (المنتج، الدفعة).
+        /// بند المرتجع يحمل BatchId الدفعة الأصلية كما سُجلت على سطر البيع/الشراء
+        /// (السحب عند البيع يقسم السطر صفًا لكل دفعة فعلية) — فالتتبع دقيق
+        /// ولا يُخمَّن الدفعة من ProductId وحده. هذا المفتاح يصحح سعة كل
+        /// سطر/دفعة في AllocateAcrossOriginalLines: التوزيع لا يعيد إلى دفعة
+        /// أكثر مما بِيع منها أصلًا عند تكرار المرتجعات الجزئية.
+        /// </summary>
+        private async Task<Dictionary<(int ProductId, int? BatchId), int>> GetReturnedQuantitiesByBatchAsync(
+            int originalInvoiceId, enInvoicesType returnType)
+        {
+            var returnedItems = await _dbContext.InvoiceItems
+                .Where(ii => ii.Invoice.OriginalInvoiceId == originalInvoiceId
+                          && ii.Invoice.Type == returnType
+                          && ii.Invoice.Status == enInvoicesStatus.completed)
+                .GroupBy(ii => new { ii.ProductId, ii.BatchId })
+                .Select(g => new { g.Key.ProductId, g.Key.BatchId, Quantity = g.Sum(ii => ii.Quantity) })
+                .ToListAsync();
+
+            return returnedItems.ToDictionary(x => (x.ProductId, x.BatchId), x => x.Quantity);
         }
 
         private async Task RestockProductAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
