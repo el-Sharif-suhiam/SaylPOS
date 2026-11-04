@@ -34,11 +34,15 @@ namespace Sayl.Core.Services
           // بوابة الخدمة: الإضافة الكاملة (كل الأنواع) والـ S/B من أي مكان
           // تتطلب شاشة العملاء (عملاء) أو الموردين (موردين) حسب النوع؛
           // الإضافة السريعة من POS مسموحة للعميل النقدي فقط (قراءة مشتركة).
+          // الطرف المشترك ('B') يُنشئ سجلي عميل ومورد معًا — كلا البتّين مطلوب.
           if (!fromPosQuickAdd || dtoParty.PartyType != 'C')
           {
-              int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              int required = dtoParty.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-              if (!AppPermissions.Has(actorRole, required))
+              int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId ?? 0);
+              bool needsCustomer = dtoParty.PartyType == 'C' || dtoParty.PartyType == 'B';
+              bool needsSupplier = dtoParty.PartyType == 'S' || dtoParty.PartyType == 'B';
+              if (actorRole < 0 ||
+                  (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
+                  (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
                   return Result<int>.Fail("إضافة هذا النوع من الأطراف تتطلب صلاحية شاشته المخصصة.");
           }
 
@@ -106,6 +110,9 @@ namespace Sayl.Core.Services
 
         /// <summary>
         /// تحديث طرف (القيم المرسلة فقط) — VULN-26: بوابة محاسب فأعلى.
+        /// الصلاحية تتبع السجلات المتأثرة: تعديل الطرف المشترك ('B') يمسّ
+        /// سجلي العميل والمورد معًا فكلا البتّين مطلوب (فجوة سابقة: كان
+        /// يمر بلا فحص)، والتحويل إلى 'B' يتطلب البتّين أيضًا.
         ///
         /// الأطراف المشتركة ('B' عميل + مورد معًا): التحويل من 'C' أو 'S' إلى 'B'
         /// يُنشئ السجل الناقص (سجل مورد لعميل، أو سجل عميل لمورد) بنفس PartyId —
@@ -123,23 +130,34 @@ namespace Sayl.Core.Services
             if (party == null)
                 return Result.Fail("الطرف غير موجود.");
 
-            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId ?? 0);
 
             // ══ تحويل النوع: قواعد البوابة والسجلات ══
+            // الصلاحية تتبع السجلات المتأثرة فعلًا (فجوة سابقة: تعديل طرف
+            // مشترك قائم كان يمرّ بلا أي فحص): 'B' يمسّ سجلي العميل والمورد
+            // معًا فكلا البتّين مطلوب، والتحويل إلى 'B' يُنشئ السجل الناقص
+            // ويترك القائم فالطرفان يتأثران. الطرف الوحيد ('C'/'S') ببت شاشته فقط.
             bool convertingToCombined = false;
             if (party.PartyType == 'B')
             {
                 if (dtoParty.PartyType != 'B')
                     return Result.Fail("لا يمكن تحويل طرف مشترك إلى عميل أو مورد وحيد.");
+
+                if (actorRole < 0 ||
+                    !AppPermissions.Has(actorRole, AppPermissions.Customers) ||
+                    !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
+                    return Result.Fail("تعديل الطرف المشترك يمسّ سجلي العميل والمورد معًا — يتطلب صلاحية شاشتي العملاء والموردين.");
             }
             else if (dtoParty.PartyType == 'B')
             {
                 // التحويل من عميل ← مشترك يُنشئ سجل مورد: صلاحية الموردين مطلوبة أيضًا
-                if (party.PartyType == 'C' && !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
+                if (actorRole < 0 ||
+                    !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
                     return Result.Fail("تحويل عميل إلى طرف مشترك يتطلب صلاحية الموردين أيضًا.");
 
                 // التحويل من مورد ← مشترك يُنشئ سجل عميل: صلاحية العملاء مطلوبة أيضًا
-                if (party.PartyType == 'S' && !AppPermissions.Has(actorRole, AppPermissions.Customers))
+                if (actorRole < 0 ||
+                    !AppPermissions.Has(actorRole, AppPermissions.Customers))
                     return Result.Fail("تحويل مورد إلى طرف مشترك يتطلب صلاحية العملاء أيضًا.");
 
                 convertingToCombined = true;
@@ -147,7 +165,7 @@ namespace Sayl.Core.Services
             else
             {
                 int required = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-                if (!AppPermissions.Has(actorRole, required))
+                if (actorRole < 0 || !AppPermissions.Has(actorRole, required))
                     return Result.Fail("تعديل بيانات هذا الطرف يتطلب صلاحية شاشته المخصصة.");
             }
 
@@ -201,7 +219,9 @@ namespace Sayl.Core.Services
         /// والدين يبقى في التقارير للأبد. المطلوب: سدّد ثم عطّل.
         /// الأطراف المشتركة ('B'): يُفحص رصيد العميل ورصيد المورد معًا —
         /// أي رصيد مستحق على أي من السجلين يمنع التعطيل.
-        /// VULN-26: وبوابة محاسب فأعلى — التعطيل قرار إداري.
+        /// VULN-26: وبوابة محاسب فأعلى — التعطيل قرار إداري. الصلاحية تتبع
+        /// السجلات المتأثرة فعلًا (فجوة سابقة: الطرف المشترك كان يُقاس ببت
+        /// العملاء وحده بينما التعطيل يخفي سجل المورد من شاشته أيضًا).
         /// </summary>
         public async Task<Result> DeactivatePartyAsync(int id, int? actorUserId = null)
         {
@@ -209,18 +229,30 @@ namespace Sayl.Core.Services
             if (party == null)
                 return Result.Fail("الطرف غير موجود.");
 
-            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-            int requiredDeact = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-            if (!AppPermissions.Has(actorRole, requiredDeact))
-                return Result.Fail("تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId ?? 0);
 
             // الفحص بالسجلات الفعلية لا بالنوع فقط: الطرف المشترك ('B') له
             // سجلا عميل ومورد كلاهما يحمل رصيدًا مستقلًا يجب فحصه.
             var customer = await _dbContext.Customers.FindAsync(id);
+            var supplier = await _dbContext.Suppliers.FindAsync(id);
+
+            // بوابة الصلاحية أولًا (قبل أي كشف عن الأرصدة): التعطيل يخفي كل
+            // سجلات الطرف من شاشاتها — طرف 'C' ببت العملاء، طرف 'S' ببت
+            // الموردين، والطرف المشترك بالبتّين معًا.
+            bool needsCustomer = party.PartyType == 'C' || party.PartyType == 'B' || customer != null;
+            bool needsSupplier = party.PartyType == 'S' || party.PartyType == 'B' || supplier != null;
+            if (actorRole < 0 ||
+                (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
+                (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
+            {
+                return Result.Fail(party.PartyType == 'B'
+                    ? "تعطيل الطرف المشترك يخفي سجلي العميل والمورد معًا — يتطلب صلاحية شاشتي العملاء والموردين."
+                    : "تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
+            }
+
             if (customer != null && (customer.Balance ?? 0) > 0)
                 return Result.Fail($"لا يمكن تعطيل العميل '{party.Name}' — عليه رصيد مستحق ({customer.Balance:N2}). حصّل الرصيد أولًا.");
 
-            var supplier = await _dbContext.Suppliers.FindAsync(id);
             if (supplier != null && (supplier.Balance ?? 0) > 0)
                 return Result.Fail($"لا يمكن تعطيل المورد '{party.Name}' — له رصيد مستحق ({supplier.Balance:N2}). سدّد الرصيد أولًا.");
 
@@ -229,31 +261,29 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تعطيل الطرف بنجاح.");
         }
 
-        /// <summary>إعادة تفعيل طرف — VULN-26: بوابة محاسب فأعلى (قرار إداري معاكس).</summary>
+        /// <summary>إعادة تفعيل طرف — VULN-26: بوابة محاسب فأعلى (قرار إداري معاكس).
+        /// نفس بوابة التعطيل: الطرف المشترك يظهر مجددًا في الشاشتين فالبتّان معًا.</summary>
         public async Task<Result> ActivatePartyAsync(int id, int? actorUserId = null)
         {
             Party? party = await _dbContext.Parties.FindAsync(id);
             if (party == null)
                 return Result.Fail("الطرف غير موجود.");
 
-            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-            int requiredAct = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-            if (!AppPermissions.Has(actorRole, requiredAct))
-                return Result.Fail("إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId ?? 0);
+            bool needsCustomer = party.PartyType == 'C' || party.PartyType == 'B';
+            bool needsSupplier = party.PartyType == 'S' || party.PartyType == 'B';
+            if (actorRole < 0 ||
+                (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
+                (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
+            {
+                return Result.Fail(party.PartyType == 'B'
+                    ? "إعادة تفعيل الطرف المشترك تُظهر سجليه في شاشتي العملاء والموردين معًا — تتطلب صلاحية الشاشتين."
+                    : "إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");
+            }
 
             party.IsActive = true;
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم إعادة تفعيل الطرف بنجاح.");
-        }
-
-        /// <summary>قيمة دور المستخدم (VULN-26 — بوابات الأطراف الخدمية).</summary>
-        private async Task<int> GetUserRoleValueAsync(int userId)
-        {
-            if (userId <= 0)
-                return 0;
-            var user = await _dbContext.Users.Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.UserId == userId);
-            return user?.Role.RoleValue ?? 0;
         }
     }
   }
