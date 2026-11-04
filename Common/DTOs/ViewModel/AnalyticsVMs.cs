@@ -76,8 +76,11 @@ namespace Common.DTOs.ViewModel
         public int BookQuantity { get; set; }
         /// <summary>null = لم يُعد بعد.</summary>
         public int? CountedQuantity { get; set; }
+        /// <summary>لحظة العد — null إن لم يُعد بعد.</summary>
+        public DateTime? CountedAt { get; set; }
         public decimal UnitCost { get; set; }
         public bool IsPosted { get; set; }
+        /// <summary>الفرق = المعدود − BookQuantity (المطابق لما سيُرحَّل بالضبط).</summary>
         public int? Difference => CountedQuantity - BookQuantity;
         public decimal DifferenceCost => (Difference ?? 0) * UnitCost;
     }

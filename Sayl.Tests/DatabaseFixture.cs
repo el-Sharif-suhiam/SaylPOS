@@ -32,6 +32,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             // مسار الإقلاع الفعلي: EnsureSchema يضيف ما تأخر عن SaylDB.sql (مثل IsQuarantined)
             ExecuteBatches(clsUsersService.EnsureSchemaSql);
             ExecuteBatches(LoadUpgrade11Script());
+            // مسار الإقلاع الفعلي: أعمدة الجرد الجديدة (CountedAt / BookQuantityAtCount)
+            ExecuteBatches(LoadUpgrade12Script());
             return Task.CompletedTask;
         }
         catch (Exception ex)
@@ -72,6 +74,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade11Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_11_BatchUnitCost.sql"));
+
+    private static string LoadUpgrade12Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_12_StockCountCountedAt.sql"));
 
     private static void DropDatabase()
     {

@@ -255,6 +255,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.ProductName).HasMaxLength(100);
             entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            // CountedAt and BookQuantityAtCount are nullable with no default — conventions handle
 
             entity.HasOne(d => d.Product).WithMany()
                 .HasForeignKey(d => d.ProductId)

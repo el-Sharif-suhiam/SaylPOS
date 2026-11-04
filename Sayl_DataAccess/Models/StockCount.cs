@@ -4,7 +4,8 @@ namespace Sayl.Core.Models
 {
     /// <summary>
     /// سطر جرد فعلي لمنتج في جلسة جرد واحدة: الكمية الدفترية لحظة البدء (Snapshot)
-    /// مقابل المُعدّاة فعليًا، والفرق وتكلفته — يُرحَّل عبر AdjustStockAsync.
+    /// والكمية الدفترية لحظة العد الفعلي لكل سطر، والمُعدّاة فعليًا،
+    /// والفرق وتكلفته — يُرحَّل عبر AdjustStockAsync.
     /// </summary>
     public partial class StockCount
     {
@@ -25,8 +26,11 @@ namespace Sayl.Core.Models
 
         public decimal UnitCost { get; set; }
 
-        /// <summary>الفرق = الفعلي − الدفتري (يُحسب عند الترحيل أو للعرض).</summary>
-        public int? Difference => CountedQuantity - BookQuantity;
+        /// <summary>
+        /// الفرق = المعدود − الدفتري عند لحظة العد الفعلي (BookQuantityAtCount).
+        /// يحافظ على أي حركات حصلت بعد العد في الرصيد النهائي.
+        /// </summary>
+        public int? Difference => CountedQuantity - (BookQuantityAtCount ?? BookQuantity);
 
         public decimal DifferenceCost => (Difference ?? 0) * UnitCost;
 
@@ -35,6 +39,15 @@ namespace Sayl.Core.Models
         public int CountedBy { get; set; }
 
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>لحظة العد الفعلي لهذا السطر — null إن لم يُعد بعد.</summary>
+        public DateTime? CountedAt { get; set; }
+
+        /// <summary>
+        /// الكمية الدفترية لحظة العد الفعلي (snapshot). تُستخدم لحساب الفرق عند الترحيل —
+        /// لا لقطة قديمة من بدء الجلسة. null يعني أنه لم يُعد بعد.
+        /// </summary>
+        public int? BookQuantityAtCount { get; set; }
 
         public virtual Product Product { get; set; } = null!;
     }

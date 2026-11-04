@@ -13,10 +13,12 @@ namespace Sayl.Core.Services
     /// المعدود فعليًا، تقرير الفروق وتكلفتها، ثم ترحيل الفروق عبر AdjustStockAsync
     /// القائمة (بترانزاكشناتها وصلاحياتها) — لا كتابة مباشرة في المخزون أبدًا.
     ///
-    /// FIX (لقطة قديمة): البيع/الشراء يستمران أثناء الجرد، فتصبح اللقطة قديمة.
-    /// عند الترحيل يُعاد حساب الدفتري الفعّال: BookQuantity + صافي حركات
-    /// StockMovements منذ بداية الجلسة — والفرق (المعدود − الفعّال) هو ما يُرحَّل.
-    /// لا يُطبَّق فرق لقطة قديمة على الرصيد الحالي أبدًا.
+    /// FIX (لقطة وقت العد): يحفظ كل سطر وقت عدّه الفعلي (CountedAt) والكمية
+    /// الدفترية عند تلك اللحظة (BookQuantityAtCount) — snapshot فوري للمخزون
+    /// لحظة العد. الفرق = المعدود − BookQuantityAtCount.
+    /// عند الترحيل: final = currentInventory + diff = (bookAtCount + postCountMovements)
+    ///              + (counted − bookAtCount) = counted + postCountMovements.
+    /// أي حركة (بيع/استلام/تسوية) حصلت بعد العد تُحفظ في الرصيد النهائي كما يجب.
     ///
     /// FIX (تزامن): فتح الجلسة والترحيل داخل ترانزاكشن Serializable مع
     /// sp_getapplock — يمنع جلستين مفتوحتين متوازيتين، وتكرار رقم الجلسة،
@@ -38,10 +40,32 @@ namespace Sayl.Core.Services
             return await _dbContext.StockCounts.AnyAsync(sc => !sc.IsPosted);
         }
 
-        /// <summary>يضمن فهرس الجلسة المفتوحة الفريد على أي قاعدة (قديمة أو جديدة) — يُنادى عند الإقلاع.</summary>
+        /// <summary>
+        /// يضمن فهرس الجلسة المفتوحة الفريد + العمودين الجديدين على أي قاعدة
+        /// (قديمة أو جديدة) — يُنادى عند الإقلاع. Upgrade_12 مدمج هنا.
+        /// </summary>
         public const string EnsureCountSchemaSql = @"
 IF OBJECT_ID(N'dbo.StockCounts', N'U') IS NOT NULL
-    AND NOT EXISTS (
+BEGIN
+    -- أضف العمودين الجديدين Upgrade_12 إن لم يكونا موجودين
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.StockCounts') AND name = N'CountedAt'
+    )
+    BEGIN
+        ALTER TABLE dbo.StockCounts ADD CountedAt DATETIME2 NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.StockCounts') AND name = N'BookQuantityAtCount'
+    )
+    BEGIN
+        ALTER TABLE dbo.StockCounts ADD BookQuantityAtCount INT NULL;
+    END;
+
+    -- الفهرس الفريد للجلسة المفتوحة
+    IF NOT EXISTS (
         SELECT 1 FROM sys.indexes
         WHERE object_id = OBJECT_ID(N'dbo.StockCounts')
           AND name = N'UQ_StockCounts_OpenProduct'
@@ -51,8 +75,9 @@ IF OBJECT_ID(N'dbo.StockCounts', N'U') IS NOT NULL
         SELECT 1 FROM dbo.StockCounts WHERE IsPosted = 0
         GROUP BY ProductId HAVING COUNT(*) > 1
     )
-BEGIN
-    EXEC(N'CREATE UNIQUE INDEX UQ_StockCounts_OpenProduct ON dbo.StockCounts(ProductId) WHERE IsPosted = 0');
+    BEGIN
+        EXEC(N'CREATE UNIQUE INDEX UQ_StockCounts_OpenProduct ON dbo.StockCounts(ProductId) WHERE IsPosted = 0');
+    END;
 END";
 
         public async Task EnsureCountSchemaAsync()
@@ -62,7 +87,8 @@ END";
         /// فتح جلسة جرد جديدة: لقطة كل منتج مخزني نشط بكميته الدفترية وتكلفته الحالية.
         /// يُرفض إن وُجدت جلسة مفتوحة. داخل ترانزاكشن Serializable + قفل تطبيقي
         /// — طلبان متوازيان يتصافحان: الثاني يرى الجلسة المفتوحة ويرفض،
-        /// ورقم الجلسة (أعلى + 1) لا يتكرر أبدًا.
+        /// ورقم الجلسة (أعلى + 1) لا يتكرر أبدًا. الكمية الدفترية لحظة البدء
+        /// = BookQuantity (لا تتغير بعد بدء الجلسة).
         /// </summary>
         public async Task<Result<int>> StartSessionAsync(int userId)
         {
@@ -138,9 +164,12 @@ END";
             }
         }
 
-        /// <summary>سطور جلسة الجرد الحالية (المفتوحة = غير المرحّلة).
-        /// BookQuantity المعرض = اللقطة + صافي الحركات منذ بدء الجلسة
-        /// — الفرق المعروض والتكلفة يحسوبان على الدفتري الفعّال الحالي.</summary>
+        /// <summary>
+        /// سطور جلسة الجرد الحالية (المفتوحة = غير المرحّلة).
+        /// • غير المعدود: BookQuantity المعروض = اللقطة + صافي الحركات منذ بدء الجلسة (الكتيب الحي الحالي).
+        /// • المعدود: BookQuantity المعروض = BookQuantityAtCount (الكمية الدفترية عند العد الفعلي).
+        ///   الفرق المعروض = counted − bookAtCount — هذا هو ما سيُرحَّل بالضبط.
+        /// </summary>
         public async Task<List<StockCountVM>> GetOpenSessionAsync()
         {
             return await _dbContext.StockCounts
@@ -152,10 +181,15 @@ END";
                     CountSessionId = sc.CountSessionId,
                     ProductId = sc.ProductId,
                     ProductName = sc.ProductName,
-                    BookQuantity = sc.BookQuantity + (_dbContext.StockMovements
-                        .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
-                        .Sum(m => (int?)m.Quantity) ?? 0),
+                    // uncounted line: live book (snapshot + movements since session start)
+                    // counted line: book quantity at the moment of counting
+                    BookQuantity = sc.CountedAt.HasValue
+                        ? sc.BookQuantityAtCount ?? 0
+                        : sc.BookQuantity + (_dbContext.StockMovements
+                            .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
+                            .Sum(m => (int?)m.Quantity) ?? 0),
                     CountedQuantity = sc.CountedQuantity,
+                    CountedAt = sc.CountedAt,
                     UnitCost = sc.UnitCost
                 })
                 .ToListAsync();
@@ -186,8 +220,14 @@ END";
             await conn.CloseAsync();
         }
 
-        /// <summary>تسجيل الكمية المعدودة لسطر واحد (أو تصفيره إلى غير معدود بـ null).
-        /// تحت قفل الترحيل — لا تعديل لسطر بينما يُرحَّل من مستخدم آخر.</summary>
+        /// <summary>
+        /// تسجيل الكمية المعدودة لسطر واحد. عند العد الفعلي يُؤخذ snapshot للكمية
+        /// الدفترية الحالية (BookQuantityAtCount) ولحظتها (CountedAt) — لا وقت بدء
+        /// الجلسة. يحفظ أي حركة (بيع/استلام/تسوية) حصلت بعد العد في الرصيد النهائي.
+        ///
+        /// تحت قفل الترحيل — لا تعديل لسطر بينما يُرحَّل من مستخدم آخر.
+        /// إذا كان السطر معدودًا سابقًا وأُعيد عدّه، تؤخذ لقطة جديدة بلحظة العد الجديد.
+        /// </summary>
         public async Task<Result> SetCountedAsync(int countId, int? counted)
         {
             var (locked, conn) = await TryAcquirePostLockAsync();
@@ -206,7 +246,26 @@ END";
                 if (counted.HasValue && counted.Value < 0)
                     return Result.Fail("الكمية المعدودة لا يمكن أن تكون سالبة.");
 
-                line.CountedQuantity = counted;
+                if (counted.HasValue)
+                {
+                    // snapshot الكمية الدفترية لحظة العد — يُقرأ من القاعدة مباشرة
+                    // (AsNoTracking: تجنب كيان متتبعًا قديمًا من نفس السياق)،
+                    // ويحفظ أي حركات لاحقة للعد في الرصيد النهائي
+                    var inventory = await _dbContext.Inventories
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(i => i.ProductId == line.ProductId);
+                    line.BookQuantityAtCount = inventory?.QuantityAvailable ?? 0;
+                    line.CountedAt = DateTime.UtcNow;
+                    line.CountedQuantity = counted;
+                }
+                else
+                {
+                    // إلغاء العد: يُصبح السطر غير معدود (null)
+                    line.CountedQuantity = null;
+                    line.CountedAt = null;
+                    line.BookQuantityAtCount = null;
+                }
+
                 await _dbContext.SaveChangesAsync();
                 return Result.Ok();
             }
@@ -216,14 +275,19 @@ END";
             }
         }
 
-        /// <summary>ملخص جلسة الجرد المفتوحة: المعدود/غير المعدود/الفروق وتكلفتها — على الدفتري الفعّال (اللقطة + الحركات منذ البدء).</summary>
+        /// <summary>
+        /// ملخص جلسة الجرد المفتوحة: المعدود/غير المعدود/الفروق وتكلفتها.
+        /// الفرق لكل سطر = المعدود − BookQuantityAtCount (الكمية الدفترية لحظة العد).
+        /// أعمدة BookQuantityAtCount = null: تستخدم الفرق من الكتيب الحي (توافق خلفي).
+        /// </summary>
         public async Task<StockCountSummaryVM> GetSummaryAsync()
         {
             var lines = await _dbContext.StockCounts
-                .Where(sc => !sc.IsPosted)
+                .Where(sc => !sc.IsPosted && sc.CountedQuantity.HasValue)
                 .Select(sc => new
                 {
                     sc.BookQuantity,
+                    sc.BookQuantityAtCount,
                     sc.CountedQuantity,
                     sc.UnitCost,
                     Movements = _dbContext.StockMovements
@@ -234,14 +298,16 @@ END";
 
             var summary = new StockCountSummaryVM
             {
-                TotalLines = lines.Count,
-                CountedLines = lines.Count(l => l.CountedQuantity.HasValue),
-                UncountedLines = lines.Count(l => !l.CountedQuantity.HasValue)
+                TotalLines = await _dbContext.StockCounts.CountAsync(sc => !sc.IsPosted),
+                CountedLines = lines.Count,
+                UncountedLines = await _dbContext.StockCounts.CountAsync(sc => !sc.IsPosted && !sc.CountedQuantity.HasValue)
             };
 
-            foreach (var l in lines.Where(l => l.CountedQuantity.HasValue))
+            foreach (var l in lines)
             {
-                int diff = l.CountedQuantity.Value - (l.BookQuantity + l.Movements);
+                // BookQuantityAtCount = snapshot لحظة العد; null = توافق خلفي (live book)
+                int effectiveBook = l.BookQuantityAtCount ?? (l.BookQuantity + l.Movements);
+                int diff = l.CountedQuantity!.Value - effectiveBook;
                 summary.AbsolutDiff += Math.Abs(diff);
                 summary.NetDiff += diff;
                 summary.CostOfDifferences += diff * l.UnitCost;
@@ -255,14 +321,20 @@ END";
 
         /// <summary>
         /// ترحيل الفروق: كل سطر معدود بفرق ≠ 0 يُرحَّل عبر AdjustStockAsync القائمة
-        /// (زيادة للفائض / نقصان للعجز). FIX (لقطة قديمة): الدفتري عند الترحيل =
-        /// اللقطة + صافي حركات StockMovements منذ بدء الجلسة — فبيعة/شراء حصل
-        /// أثناء العد لا يُحتسب عليه مرتين، ولا يُطبَّق فرق لقطة قديمة على الرصيد
-        /// الحالي أبدًا. FIX (تزامن): قفل تطبيقي على مستوى الاتصال (بلا ترانزاكشن
-        /// خارجية — AdjustStockAsync لها ترانزاكشنها الداخلية) يمنع ترحيلًا مزدوجًا
-        /// من طلبين متزامنين. والمصالحة عبر سجل الحركات تجعل إعادة الترحيل بعد فشل
-        /// جزئي محصورة: السطر المُرحَّل فعلًا يظهر فرقه صفرًا فيتخطى.
-        /// السطور غير المعدودة تُقفل مرحّلة بلا ترحيل (الدفتري الفعّال = الصحيح المفترض).
+        /// (زيادة للفائض / نقصان للعجز). الفرق = المعدود − BookQuantityAtCount (snapshot لحظة العد).
+        /// finalInventory = currentInventory + diff = (bookAtCount + postCountMovements)
+        ///                + (counted − bookAtCount) = counted + postCountMovements —
+        /// أي حركة حصلت بعد العد تُحفظ في الرصيد النهائي كما يجب.
+        ///
+        /// توافق خلفي: سطر معدود بقيم null من Upgrade_12 السابقة —
+        /// BookQuantityAtCount = null → يحسب effectiveBook = bookSnapshot + movementsSinceSessionStart
+        /// (السلوك القديم، أقل دقة لكنه لا يكسر بيانات قديمة).
+        ///
+        /// FIX (تزامن): قفل تطبيقي على مستوى الاتصال (بلا ترانزاكشن خارجية —
+        /// AdjustStockAsync لها ترانزاكشنها الداخلية) يمنع ترحيلًا مزدوجًا من طلبين
+        /// متزامنين. والمصالحة عبر سجل الحركات تجعل إعادة الترحيل بعد فشل جزئي محصورة:
+        /// السطر المُرحَّل فعلًا يظهر فرقه صفرًا فيتخطى. السطور غير المعدودة تُقفل
+        /// مرحّلة بلا ترحيل.
         /// </summary>
         public async Task<Result> PostSessionAsync(int userId)
         {
@@ -286,7 +358,8 @@ END";
                 int sessionId = lines[0].CountSessionId;
                 int adjustments = 0;
 
-                // صافي الحركات منذ بدء الجلسة لكل منتج — دفعة استعلام واحدة
+                // للحالات الخلفيّة (BookQuantityAtCount = null): net movements since session start per product
+                // — تحسب مرة واحدة خارج الحلقة (أقل كفاءة لكن نادرًا ما يُستخدم)
                 DateTime startedAt = lines.Min(l => l.CreatedAt);
                 var movementNet = await _dbContext.StockMovements
                     .Where(m => m.CreatedAt >= startedAt)
@@ -298,13 +371,25 @@ END";
 
                 foreach (var line in lines)
                 {
-                    // الدفتري الفعّال = اللقطة + الحركات منذ البدء — لا لقطة قديمة أبدًا
-                    int effectiveBook = line.BookQuantity + (movementNet.TryGetValue(line.ProductId, out int net) ? net : 0);
+                    // BookQuantityAtCount = snapshot لحظة العد الفعلي — الدفتري الصحيح للمقارنة
+                    // null = توافق خلفي: استخدم الكتيب الحي عند بدء الجلسة
+                    int effectiveBook;
+                    if (line.BookQuantityAtCount.HasValue)
+                    {
+                        effectiveBook = line.BookQuantityAtCount.Value;
+                    }
+                    else
+                    {
+                        // سلوك قديم للتوافق: دفتري = لقطة الجلسة + صافي حركات منذ بدئها
+                        effectiveBook = line.BookQuantity
+                            + (movementNet.TryGetValue(line.ProductId, out int net) ? net : 0);
+                    }
+
                     int diff = line.CountedQuantity!.Value - effectiveBook;
                     if (diff == 0)
                         continue;
 
-                    // ترحيل عبر الخدمة القائمة — التراني وصلاحيات المحاسب تعمل مجانًا
+                    // ترحيل عبر الخدمة القائمة — الترانزاكشن وصلاحيات المحاسب تعمل مجانًا
                     var r = await stockService.AdjustStockAsync(new Common.DTOs.RequestModels.DtoStockAdjustmentRequest
                     {
                         ProductId = line.ProductId,
@@ -330,7 +415,7 @@ END";
                 await _dbContext.SaveChangesAsync();
 
                 clsAudit.Log(_dbContext, userId, "PostStockCount",
-                    $"ترحيل جلسة جرد #{sessionId} — {adjustments} تسوية من {lines.Count} منتجًا (مصالحة حركات الجلسة)");
+                    $"ترحيل جلسة جرد #{sessionId} — {adjustments} تسوية من {lines.Count} منتجًا (مصالحة حركات ما بعد العد)");
                 await _dbContext.SaveChangesAsync();
 
                 return Result.Ok($"تم ترحيل الجرد: {adjustments} تسوية على {lines.Count} منتجًا.");
@@ -364,6 +449,7 @@ END";
                     ProductName = sc.ProductName,
                     BookQuantity = sc.BookQuantity,
                     CountedQuantity = sc.CountedQuantity,
+                    CountedAt = sc.CountedAt,
                     UnitCost = sc.UnitCost,
                     IsPosted = sc.IsPosted
                 })

@@ -570,6 +570,8 @@ CREATE TABLE StockCounts
     IsPosted BIT NOT NULL DEFAULT (0),       -- difference applied to inventory?
     CountedBy INT NOT NULL,
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CountedAt DATETIME2 NULL,                -- moment this specific line was physically counted
+    BookQuantityAtCount INT NULL,            -- system quantity at the moment of counting (snapshot)
 
     CONSTRAINT FK_StockCounts_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
 );

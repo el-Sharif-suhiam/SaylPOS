@@ -26,6 +26,9 @@ namespace Sayl.UI.Forms
         private int _currentPage = 1;
         private int _pageSize = 20;
 
+        // سطور أُعيد عدّها أثناء هذه الجلسة (لعرض علامة «أُعيد العد» في الشبكة)
+        private readonly HashSet<int> _recountedIds = new();
+
         // فهرس السطر الكامل لصف الشبكة المعروض (ترقيم العرض — الإدخال يحفظ فوريًا للقاعدة)
         private int VisibleLineIndex(int gridRow) => (_currentPage - 1) * _pageSize + gridRow;
 
@@ -124,6 +127,10 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colCost", AppLang.T("StockCount.Col.DiffCost"));
             _grid.Columns["colCost"].FillWeight = 14;
             _grid.Columns["colCost"].ReadOnly = true;
+            // عمود الحالة: ✓ + وقت العد (وللسطر المُعاد عدّه علامة ↻) — فارغ لغير المعدود
+            _grid.Columns.Add("colStatus", AppLang.T("StockCount.Col.Status"));
+            _grid.Columns["colStatus"].FillWeight = 15;
+            _grid.Columns["colStatus"].ReadOnly = true;
 
             _grid.CellEndEdit += async (_, args) => await CountedEditedAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };
@@ -206,11 +213,24 @@ namespace Sayl.UI.Forms
 
             foreach (var l in _lines.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
             {
+                // الحالة: ✓ + وقت العد (↻ للسطر المُعاد عدّه) — فارغة لغير المعدود
+                string status = "";
+                if (l.CountedAt.HasValue)
+                {
+                    string mark = _recountedIds.Contains(l.CountId) ? "↻ " : "✓ ";
+                    status = mark + l.CountedAt.Value.ToLocalTime().ToString("HH:mm");
+                }
+
                 int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString(),
                     l.CountedQuantity?.ToString() ?? "",
                     l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "",
-                    l.CountedQuantity.HasValue ? UiHelpers.Money(l.DifferenceCost) : "");
+                    l.CountedQuantity.HasValue ? UiHelpers.Money(l.DifferenceCost) : "",
+                    status);
                 _grid.Rows[row].Tag = l;
+
+                if (l.CountedAt.HasValue)
+                    _grid.Rows[row].Cells["colStatus"].ToolTipText =
+                        AppLang.T("StockCount.Status.CountedAt", l.CountedAt.Value.ToLocalTime());
 
                 if (l.Difference.HasValue)
                 {
@@ -276,6 +296,7 @@ namespace Sayl.UI.Forms
             {
                 using var scope = Program.Services.CreateScope();
                 var countService = scope.ServiceProvider.GetRequiredService<clsStockCountService>();
+                bool wasCounted = line.CountedQuantity.HasValue;
                 var r = await countService.SetCountedAsync(line.CountId, counted);
                 if (!r.IsSuccess)
                 {
@@ -284,8 +305,14 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
-                line.CountedQuantity = counted;
-                RefreshGrid();
+                // إعادة تحميل من القاعدة: تجلب BookQuantityAtCount وCountedAt الحقيقيين.
+                // تتبع «أُعيد العد» محلي فقط — علامة ↻ لهذه الجلسة من فتح النافذة.
+                if (wasCounted && counted.HasValue)
+                    _recountedIds.Add(line.CountId);
+                else if (!counted.HasValue)
+                    _recountedIds.Remove(line.CountId);
+
+                await LoadSessionAsync();
             }
             catch
             {
@@ -357,12 +384,13 @@ namespace Sayl.UI.Forms
         // ───────────────── التصدير ─────────────────
         private (string[] headers, List<string[]> rows) CurrentTable()
         {
-            string[] headers = { AppLang.T("StockCount.Col.Product"), AppLang.T("StockCount.Col.Book"), AppLang.T("StockCount.Col.Counted"), AppLang.T("StockCount.Col.Diff"), AppLang.T("StockCount.Col.DiffCost") };
+            string[] headers = { AppLang.T("StockCount.Col.Product"), AppLang.T("StockCount.Col.Book"), AppLang.T("StockCount.Col.Counted"), AppLang.T("StockCount.Col.CountedAt"), AppLang.T("StockCount.Col.Diff"), AppLang.T("StockCount.Col.DiffCost") };
             var rows = _lines.Select(l => new[]
             {
                 l.ProductName,
                 l.BookQuantity.ToString(),
                 l.CountedQuantity?.ToString() ?? "-",
+                l.CountedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-",
                 l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
                 l.CountedQuantity.HasValue ? l.DifferenceCost.ToString("N2") : "-"
             }).ToList();

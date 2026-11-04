@@ -60,6 +60,7 @@ Source: "staging\database\DataSeed.sql"; DestDir: "{app}\Database"; Flags: ignor
 Source: "staging\database\Upgrade_09_SaylLeastPrivilege.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_10_PartyEmailNullableUnique.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_11_BatchUnitCost.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
+Source: "staging\database\Upgrade_12_StockCountCountedAt.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\xml\*"; DestDir: "{app}\Database\xml"; Flags: ignoreversion
 Source: "staging\redist\SQLEXPR_x64_ENU.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
 
