@@ -78,6 +78,17 @@ namespace Sayl.Core.Services
                         _dbContext.ChangeTracker.Clear();
                         batch = await _dbContext.Batches
                             .FirstAsync(b => b.ProductId == request.ProductId && b.BatchNumber == request.BatchNumber.Trim());
+                        // دفعة أنشأها طلب متوازٍ: لا دمج بصلاحية مختلفة (نفس قاعدة الدمج أعلاه)
+                        if (request.ExpiryDate.HasValue && request.ExpiryDate.Value != batch.ExpiryDate)
+                        {
+                            await transaction.RollbackAsync();
+                            string existingStr = batch.ExpiryDate.HasValue
+                                ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd")
+                                : "(بدون)";
+                            string newStr = request.ExpiryDate.Value.ToString("yyyy-MM-dd");
+                            return Result.Fail(
+                                $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
+                        }
                         // زيادة ذرية — محصّنة من استلام متوازٍ
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                             $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
@@ -85,11 +96,22 @@ namespace Sayl.Core.Services
                 }
                 else
                 {
+                    // دفعة قائمة: تاريخ صلاحية الدفعة القائمة لا يُمس أبدًا —
+                    // توريد نفس رقم الدفعة بصلاحية مختلفة يُرفض (يتوافق مع TransferBatchAsync).
+                    // يسمح فقط بالملء الأولي لتكلفة قديمة أو بزيادة الكمية بلا تحديد صلاحية.
+                    if (request.ExpiryDate.HasValue && request.ExpiryDate.Value != batch.ExpiryDate)
+                    {
+                        await transaction.RollbackAsync();
+                        string existingStr = batch.ExpiryDate.HasValue
+                            ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd")
+                            : "(بدون)";
+                        string newStr = request.ExpiryDate.Value.ToString("yyyy-MM-dd");
+                        return Result.Fail(
+                            $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
+                    }
                     // زيادة ذرية — محصّنة من استلام متوازٍ
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                         $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
-                    if (request.ExpiryDate.HasValue)
-                        batch.ExpiryDate = request.ExpiryDate.Value;
                     // دفعة قائمة بلا تكلفة مخزنة (استلام قديم) — أول تكلفة صريحة تملؤها
                     if (batch.UnitCost is null && request.UnitCost.HasValue)
                         batch.UnitCost = request.UnitCost.Value;
@@ -294,12 +316,35 @@ namespace Sayl.Core.Services
                                 inventory = await _dbContext.Inventories.FindAsync(request.ProductId);
                                 batch = await _dbContext.Batches
                                     .FirstAsync(b => b.ProductId == request.ProductId && b.BatchNumber == request.BatchNumber.Trim());
+                                // دفعة أنشأها طلب متوازٍ: لا دمج بصلاحية مختلفة (نفس قاعدة الدمج أعلاه)
+                                if (request.ExpiryDate.HasValue && request.ExpiryDate.Value != batch.ExpiryDate)
+                                {
+                                    await transaction.RollbackAsync();
+                                    string existingStr = batch.ExpiryDate.HasValue
+                                        ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd")
+                                        : "(بدون)";
+                                    string newStr = request.ExpiryDate.Value.ToString("yyyy-MM-dd");
+                                    return Result.Fail(
+                                        $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
+                                }
                                 await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                                     $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
                             }
                         }
                         else
                         {
+                            // دفعة قائمة: تاريخ صلاحية الدفعة القائمة لا يُمس —
+                            // تسوية بصلاحية مختلفة تُرفض (يتوافق مع TransferBatchAsync).
+                            if (request.ExpiryDate.HasValue && request.ExpiryDate.Value != batch.ExpiryDate)
+                            {
+                                await transaction.RollbackAsync();
+                                string existingStr = batch.ExpiryDate.HasValue
+                                    ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd")
+                                    : "(بدون)";
+                                string newStr = request.ExpiryDate.Value.ToString("yyyy-MM-dd");
+                                return Result.Fail(
+                                    $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
+                            }
                             // زيادة ذرية — محصّنة من تسوية/استلام متوازٍ
                             await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                                 $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");

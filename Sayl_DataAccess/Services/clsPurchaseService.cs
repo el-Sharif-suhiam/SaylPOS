@@ -145,6 +145,10 @@ namespace Sayl.Core.Services
                             _dbContext.ChangeTracker.Clear();
                             batch = await _dbContext.Batches
                                 .FirstAsync(b => b.ProductId == item.ProductId && b.BatchNumber == item.BatchNumber.Trim());
+                            // دفعة أنشأها طلب متوازٍ: لا دمج بصلاحية مختلفة (نفس قاعدة الدمج أعلاه)
+                            if (item.ExpiryDate.HasValue && item.ExpiryDate.Value != batch.ExpiryDate)
+                                throw new InvalidOperationException(
+                                    $"لا يمكن دمج الكمية: رقم الدفعة '{item.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{(batch.ExpiryDate.HasValue ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd") : "(بدون)")}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {item.ExpiryDate.Value:yyyy-MM-dd}). استخدم رقم دفعة جديدًا.");
                             batch.BatchQuantity += item.Quantity;
                             // دفعة أنشأها طلب متوازٍ: وسّط بالوزن إن كان لها تكلفة مختلفة
                             batch.UnitCost = batch.UnitCost is null || batch.BatchQuantity <= item.Quantity
@@ -155,11 +159,16 @@ namespace Sayl.Core.Services
                     }
                     else
                     {
+                        // دمج في دفعة قائمة: صلاحية الدفعة القائمة لا تُمس أبدًا —
+                        // توريد نفس رقم الدفعة بصلاحية مختلفة يُرفض (يتوافق مع TransferBatchAsync)،
+                        // فتغيير الصلاحية يفسد تاريخ المخزون القائم ويخلط منتهيًا بصالح فيكذب FEFO.
+                        if (item.ExpiryDate.HasValue && item.ExpiryDate.Value != batch.ExpiryDate)
+                            throw new InvalidOperationException(
+                                $"لا يمكن دمج الكمية: رقم الدفعة '{item.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{(batch.ExpiryDate.HasValue ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd") : "(بدون)")}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {item.ExpiryDate.Value:yyyy-MM-dd}). استخدم رقم دفعة جديدًا.");
+
                         // زيادة ذرية على مستوى القاعدة — لا يمكن أن تضيع مع فاتورة شراء متوازية
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                             $"UPDATE Batches SET BatchQuantity = BatchQuantity + {item.Quantity} WHERE BatchId = {batch.BatchId}");
-                        if (item.ExpiryDate.HasValue)
-                            batch.ExpiryDate = item.ExpiryDate.Value;
 
                         // دمج في دفعة قائمة: تكلفة الدفعة تتوسط بالوزن (الكمية القديمة بتكلفتها
                         // التاريخية + الكمية الجديدة بتكلفتها الفعلية) — الإجمالي يظل مطابقًا
