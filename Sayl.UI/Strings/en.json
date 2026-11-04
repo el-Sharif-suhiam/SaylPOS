@@ -1137,6 +1137,7 @@
   "Fiscal.Close.ConfirmTitle": "Confirm Final Close",
   "Fiscal.Close.ConfirmBody": "The fiscal year will roll over to {0:yyyy-MM-dd}.\nThis is a major annual decision — continue?",
   "Fiscal.Close.MsgFailed": "Close failed.",
+  "Fiscal.Close.MsgUnauthorized": "Unauthorized — you need the Inventory screen permission to close the fiscal year.",
 
   "Activation.Title": "Activate the Program",
   "Activation.Header": "Sayl Activation — Sayl POS",

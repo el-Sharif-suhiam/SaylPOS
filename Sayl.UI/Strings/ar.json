@@ -1136,6 +1136,7 @@
   "Fiscal.Close.ConfirmTitle": "تأكيد الإغلاق النهائي",
   "Fiscal.Close.ConfirmBody": "سيتم قلب السنة المالية إلى {0:yyyy-MM-dd}.\nهذا قرار سنوي كبير — متابعة؟",
   "Fiscal.Close.MsgFailed": "تعذر الإغلاق.",
+  "Fiscal.Close.MsgUnauthorized": "غير مصرّح — إغلاق السنة المالية يتطلب صلاحية شاشة المخزون.",
 
   "Activation.Title": "تفعيل البرنامج",
   "Activation.Header": "تفعيل سيل — Sayl POS",

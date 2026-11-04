@@ -414,6 +414,12 @@ namespace Sayl.UI.Forms
                 using var scope = Program.Services.CreateScope();
                 var fiscal = scope.ServiceProvider.GetRequiredService<clsFiscalYearService>();
                 var r = await fiscal.CloseYearAsync(SessionState.CurrentUser?.UserId ?? 0, newStart);
+                if (!r.IsSuccess && r.Message.Contains("صلاحية"))
+                {
+                    // رسالة محلية مفهومة بدل النص الخام للخدمة (بوابة الصلاحية خدمية)
+                    UiHelpers.ShowError(this, AppLang.T("Fiscal.Close.MsgUnauthorized"));
+                    return;
+                }
                 UiHelpers.ShowResult(this, r);
                 if (r.IsSuccess)
                 {

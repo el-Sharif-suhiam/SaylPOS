@@ -1,6 +1,7 @@
 using Common.DTOs;
 using Common.DTOs.RequestModels;
 using Common.Enums;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -529,6 +530,450 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
         }
         finally
         {
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // مساعدات اختبارات الرواتب والصلاحيات
+    // ─────────────────────────────────────────────────
+
+    /// <summary>Seed a minimal active employee for payroll seeding.</summary>
+    private static async Task<int> SeedEmployeeAsync(SaylDbContext db, string marker)
+    {
+        var emp = new Employee
+        {
+            Name = $"موظف-{marker}",
+            Position = "test",
+            Status = "active",
+            SalaryType = enSalaryType.monthly,
+            Salary = 1000m,
+            HireDate = Today.AddYears(-1),
+            CreatedAt = DateTime.UtcNow
+        };
+        db.Employees.Add(emp);
+        await db.SaveChangesAsync();
+        return emp.EmployeeId;
+    }
+
+    /// <summary>Seed a payroll record with an explicit period and status.</summary>
+    private static async Task<int> SeedPayrollAsync(SaylDbContext db, TestSeed seed,
+        DateOnly periodFrom, DateOnly periodTo, enPayrollStatus status = enPayrollStatus.pending)
+    {
+        int empId = await SeedEmployeeAsync(db, $"pay{Guid.NewGuid():N}"[..10]);
+        var payroll = new PayrollRecord
+        {
+            EmployeeId = empId,
+            PeriodFrom = periodFrom,
+            PeriodTo = periodTo,
+            SalaryType = enSalaryType.monthly,
+            Rate = 1000m,
+            WorkedUnits = 1m,
+            HolidayUnits = 0m,
+            Gross = 1000m,
+            Deductions = 0m,
+            Additions = 0m,
+            Net = 1000m,
+            Status = status,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.PayrollRecords.Add(payroll);
+        await db.SaveChangesAsync();
+        return payroll.PayrollId;
+    }
+
+    /// <summary>Seed a user with an explicit role value (for permission tests).</summary>
+    private static async Task<int> SeedUserWithRoleAsync(SaylDbContext db, string marker, int roleValue)
+    {
+        var role = new Role { Name = $"role-{marker}", RoleValue = roleValue, IsActive = true };
+        db.Roles.Add(role);
+        var user = new User
+        {
+            Username = $"user-{marker}",
+            PasswordHash = "test-hash",
+            Role = role,
+            IsActive = true
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user.UserId;
+    }
+
+    // ─────────────────────────────────────────────────
+    // 6) الفواتير المعلقة: حدّا الفترة المغلقة معًا
+    // ─────────────────────────────────────────────────
+
+    /// <summary>فاتورة معلقة من سنة مغلقة سلفًا (قبل بداية السنة الحالية) لا تسدّ إغلاق السنة الحالية.</summary>
+    [Fact]
+    public async Task CloseReadiness_IgnoresSuspendedInvoiceFromEarlierClosedPeriod()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today; // الفترة المغلقة: [start, today)
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            // فاتورة معلقة قبل بداية السنة المغلقة — من فترة أقدم أُغلقت سلفًا
+            DateTime earlierClosedPeriodUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSuspendedInvoiceAsync(db, seed, earlierClosedPeriodUtc);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // لا تُحسب: ليست من الفترة [start, today) — لا تسدّ الإغلاق بلا سبب
+            Assert.Equal(0, vm.OldSuspendedInvoices);
+            Assert.DoesNotContain(vm.Errors, e => e.Contains("معلقة"));
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فاتورة معلقة عند حدّ البداية تمامًا (== FiscalYearStart) تُحسب داخل الفترة.</summary>
+    [Fact]
+    public async Task CloseReadiness_CountsSuspendedInvoiceExactlyAtPeriodStart()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            // CreatedAt = بداية الفترة تمامًا — حدّ الشمول: >= fysUtc تُحسب داخلها
+            // (حد الفترة في الخدمة يقارن تاريخ 00:00 المخزّن كما هو)
+            DateTime atStartUtc = start.ToDateTime(TimeOnly.MinValue);
+            await SeedSuspendedInvoiceAsync(db, seed, atStartUtc);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            Assert.Equal(1, vm.OldSuspendedInvoices);
+            Assert.False(vm.CanClose);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 7) كشوف الرواتب المعلقة: التقاطع الفعلي مع الفترة المغلقة
+    // ─────────────────────────────────────────────────
+
+    /// <summary>كشف معلق كامل داخل الفترة المغلقة — يمنع الإغلاق.</summary>
+    [Fact]
+    public async Task CloseReadiness_CountsPendingPayrollFullyInsideClosingPeriod()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            await SeedPayrollAsync(db, seed, start.AddDays(2), start.AddDays(8));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+            Assert.Equal(1, vm.PendingPayrolls);
+            Assert.False(vm.CanClose);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>كشف معلق يمتد عبر حدّي الفترة (بدأت قبلها وتمتد بعدها) — يمنع الإغلاق.</summary>
+    [Fact]
+    public async Task CloseReadiness_CountsPendingPayrollOverlappingPeriodBoundaries()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            // كشف عبر حد البداية: بدأ قبل FiscalYearStart وينتهي داخلها
+            await SeedPayrollAsync(db, seed, start.AddDays(-5), start.AddDays(3));
+            // كشف عبر حد النهاية: بدأ داخل الفترة ويمتد إلى ما بعد newYearStart
+            await SeedPayrollAsync(db, seed, newYearStart.AddDays(-3), newYearStart.AddDays(5));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+            Assert.Equal(2, vm.PendingPayrolls);
+            Assert.False(vm.CanClose);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>كشف معلق خارج الفترة كلها (قبل بدايتها أو يبدأ من نهايتها فصاعدًا) — لا يمنع الإغلاق.</summary>
+    [Fact]
+    public async Task CloseReadiness_IgnoresPendingPayrollEntirelyOutsideClosingPeriod()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            // كشف انتهى قبل بداية الفترة المغلقة (فترة أقدم)
+            await SeedPayrollAsync(db, seed, start.AddDays(-20), start.AddDays(-5));
+            // كشف يبدأ من نهاية الفترة فصاعدًا (سنة جديدة — بعد الإغلاق)
+            await SeedPayrollAsync(db, seed, newYearStart, newYearStart.AddDays(15));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+            Assert.Equal(0, vm.PendingPayrolls);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 8) أول إغلاق على الإطلاق: صف FiscalYearStart غير موجود
+    // ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// أول إغلاق بلا صف FiscalYearStart: مانع داخل الفترة الفعلية [الافتراضي, newYearStart)
+    /// يمنع الإغلاق ولا يُدرج صف البداية (الجاهزية تُحسب قبل أي كتابة).
+    /// </summary>
+    [Fact]
+    public async Task CloseYear_FirstCloseMissingStartRow_ChecksPreviousPeriodBeforeInsert()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly newYearStart = Today;
+        DateOnly defaultStart = new DateOnly(Today.Year, 1, 1); // الافتراضي عند غياب الصف
+        try
+        {
+            // حذف صف البداية تمامًا — أول إغلاق على الإطلاق
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM Settings WHERE SettingKey = {0}", clsFiscalYearService.KeyFiscalYearStart);
+            await ClearCloseBlockersAsync(db);
+
+            // فاتورة معلقة داخل الفترة الفعلية [الافتراضي, today) — يجب أن تُرى قبل الإدراج
+            // (إن كان اليوم 1 أو 2 يناير فالفترة أقصر من يومين كاملين — يتعذر بذر فاتورة
+            //  strictly داخلها؛ يُتخطى الفرع، وإدراج الصف نفسه يُغطى في اختبار النجاح التالي)
+            if (defaultStart.AddDays(2) <= newYearStart)
+            {
+                DateTime insidePeriodUtc = defaultStart.AddDays(1).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+                await SeedSuspendedInvoiceAsync(db, seed, insidePeriodUtc);
+
+                var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+                var r = await fiscal.CloseYearAsync(seed.UserId, newYearStart);
+
+                Assert.False(r.IsSuccess);
+                // الجاهزية حُسبت قبل الإدراج: الفاتورة المعلقة رُئيت والصف لم يُدرج
+                bool startRowInserted = await db.Settings
+                    .AnyAsync(s => s.SettingKey == clsFiscalYearService.KeyFiscalYearStart);
+                Assert.False(startRowInserted);
+            }
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>
+    /// أول إغلاق ناجح بلا صف FiscalYearStart: الصف يُدرج بقيمة السنة الجديدة
+    /// وتاريخ الإغلاق يُسجل معه — لا حالة نصفية.
+    /// </summary>
+    [Fact]
+    public async Task CloseYear_FirstCloseMissingStartRow_InsertsBothSettingsAtomically()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly newYearStart = Today;
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM Settings WHERE SettingKey = {0}", clsFiscalYearService.KeyFiscalYearStart);
+            await ClearCloseBlockersAsync(db);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var r = await fiscal.CloseYearAsync(seed.UserId, newYearStart);
+            Assert.True(r.IsSuccess, r.Message);
+
+            await using var verify = _fx.CreateContext();
+            var startRow = await verify.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            var closeRow = await verify.Settings.FindAsync(clsFiscalYearService.KeyLastCloseDate);
+            Assert.Equal(newYearStart.ToString("yyyy-MM-dd"), startRow?.SettingValue);
+            Assert.Equal(Today.ToString("yyyy-MM-dd"), closeRow?.SettingValue);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 9) الإغلاق المتكرر: بعد إغلاق ناجح، المحاولة الثانية بنفس التاريخ تُرفض
+    // ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CloseYear_RepeatedAttemptWithSameDate_IsRejected()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var first = await fiscal.CloseYearAsync(seed.UserId, newYearStart);
+            Assert.True(first.IsSuccess, first.Message);
+
+            // المحاولة الثانية بنفس التاريخ: newYearStart <= البداية الحالية — تُرفض
+            var second = await fiscal.CloseYearAsync(seed.UserId, newYearStart);
+            Assert.False(second.IsSuccess);
+
+            // الحالة بعد المحاولتين متسقة: البداية ما زالت قيمة الإغلاق الأول
+            await using var verify = _fx.CreateContext();
+            var startRow = await verify.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            Assert.Equal(newYearStart.ToString("yyyy-MM-dd"), startRow?.SettingValue);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 10) بوابة الصلاحية داخل الخدمة
+    // ─────────────────────────────────────────────────
+
+    /// <summary>مستخدم بصلاحية المخزون (أدمن) — الإغلاق يمر.</summary>
+    [Fact]
+    public async Task CloseYear_AuthorizedUser_Succeeds()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker); // أدمن 4095 — يملك بت المخزون
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var r = await fiscal.CloseYearAsync(seed.UserId, newYearStart);
+            Assert.True(r.IsSuccess, r.Message);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>مستخدم بلا صلاحية المخزون (كاشير 0) — يُرفض ولا يتغير شيء.</summary>
+    [Fact]
+    public async Task CloseYear_UnauthorizedUser_IsRejectedWithoutChanges()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            // كاشير: RoleValue = 0 — لا يملك أي بت شاشة
+            int cashierId = await SeedUserWithRoleAsync(db, $"csh-{marker[..6]}", AppPermissions.CashierRoleValue);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var r = await fiscal.CloseYearAsync(cashierId, newYearStart);
+
+            Assert.False(r.IsSuccess);
+            Assert.Contains("صلاحية", r.Message);
+
+            // لا شيء تغيّر: لا سنة جديدة ولا تاريخ إغلاق لهذه المحاولة
+            await using var verify = _fx.CreateContext();
+            var startRow = await verify.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
+            Assert.Equal(start.ToString("yyyy-MM-dd"), startRow?.SettingValue);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>معرّف مستخدم غير صالح (0 / غير موجود) — يُرفض (دور -1 لا يملك أي بت).</summary>
+    [Fact]
+    public async Task CloseYear_InvalidUserId_IsRejected()
+    {
+        string marker = $"fy-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var r0 = await fiscal.CloseYearAsync(0, newYearStart);
+            var rMissing = await fiscal.CloseYearAsync(seed.UserId + 10_000, newYearStart);
+
+            Assert.False(r0.IsSuccess);
+            Assert.False(rMissing.IsSuccess);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
             await ResetFiscalYearStartAsync(db);
         }
     }

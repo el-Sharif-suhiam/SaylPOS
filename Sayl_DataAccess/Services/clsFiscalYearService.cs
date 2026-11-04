@@ -1,6 +1,7 @@
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -70,17 +71,30 @@ namespace Sayl.Core.Services
                 vm.Errors.Add($"{vm.OpenSessions} جلسة بيع مفتوحة — أغلقها قبل الإغلاق السنوي.");
 
             // 2) فواتير معلقة داخل الفترة المغلقة [FiscalYearStart, periodEnd) — خطأ مانع
-            // (أي فاتورة معلقة ستنجز نتائجها المالية في السنة الجديدة بعد الإغلاق
-            //  — يجب حسمها قبل الإغلاق: إكمالها إن كانت لسنة جارية، أو إلغاؤها)
+            //    (أي فاتورة معلقة ستنجز نتائجها المالية في السنة الجديدة بعد الإغلاق
+            //     — يجب حسمها قبل الإغلاق: إكمالها إن كانت لسنة جارية، أو إلغاؤها)
+            //    الحدان معًا: فاتورة معلقة من سنة أقدم مغلقة سلفًا (قبل FiscalYearStart)
+            //    لا تعود لهذه الفترة — لا يصح أن تسدّ إغلاق سنة لا تعنيها.
             var fys = vm.FiscalYearStart;
+            DateTime fysUtc = fys.ToDateTime(TimeOnly.MinValue);
             vm.OldSuspendedInvoices = await _dbContext.Invoices
-                .CountAsync(i => i.Status == enInvoicesStatus.suspended && i.CreatedAt < periodEndUtc);
+                .CountAsync(i => i.Status == enInvoicesStatus.suspended
+                              && i.CreatedAt >= fysUtc
+                              && i.CreatedAt < periodEndUtc);
             if (vm.OldSuspendedInvoices > 0)
                 vm.Errors.Add($"{vm.OldSuspendedInvoices} فاتورة معلقة داخل الفترة المغلقة — أكملها أو ألغها قبل الإغلاق.");
 
-            // 3) كشوف رواتب معلقة داخل السنة — خطأ مانع (لا تُترك راتب بلا مصير)
+            // 3) كشوف رواتب معلقة تتقاطع مع الفترة المغلقة — خطأ مانع (لا تُترك راتب بلا مصير)
+            //    التقاطع الفعلي [PeriodFrom, PeriodTo] ∩ [fys, periodEnd) ≠ ∅:
+            //    • كشف داخل الفترة كلها — يُحسب.
+            //    • كشف يمتد عبر أحد الحدين (بدأت قبل fys ولم تُحسم، أو بدأت داخلها
+            //      وتمتد إلى ما بعد periodEnd) — يُحسب: جزء من نتائجه المالية في الفترة المغلقة.
+            //    • كشف قبل fys أو يبدأ من periodEnd فصاعدًا (سنة جديدة) — لا يُحسب.
+            //    الحدّان معًا (الشرطان) — حد واحد وحده يفلت كشوفًا عبر الحدود.
             vm.PendingPayrolls = await _dbContext.PayrollRecords
-                .CountAsync(p => p.Status == enPayrollStatus.pending && p.PeriodFrom >= fys);
+                .CountAsync(p => p.Status == enPayrollStatus.pending
+                              && p.PeriodFrom < periodEnd
+                              && p.PeriodTo >= fys);
             if (vm.PendingPayrolls > 0)
                 vm.Errors.Add($"{vm.PendingPayrolls} كشف رواتب معلق — صرفها أو عكسها قبل الإغلاق.");
 
@@ -94,7 +108,7 @@ namespace Sayl.Core.Services
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt < fys.ToDateTime(TimeOnly.MinValue))
+                          && i.CreatedAt < fysUtc)
                 .Select(i => new { i.InvoiceId, i.NetAmount, i.CreatedAt })
                 .ToListAsync();
             var paidByInv = await _dbContext.Payments
@@ -119,8 +133,8 @@ namespace Sayl.Core.Services
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt >= fys.ToDateTime(TimeOnly.MinValue)
-                          && i.CreatedAt < DateTime.UtcNow)
+                          && i.CreatedAt >= fysUtc
+                          && i.CreatedAt < periodEndUtc)
                 .Select(i => new { i.InvoiceId, i.NetAmount })
                 .ToListAsync();
 
@@ -145,6 +159,19 @@ namespace Sayl.Core.Services
         /// لا يُحذف ولا يُعدّل أي سجل بيانات — فقط مفتاحا Settings.
         /// يستدعيه معالج الإغلاق بعد النسخ الاحتياطي والتقارير الختامية.
         ///
+        /// ══ الصلاحية ══ الإغلاق يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق
+        /// السنوي) — نفس بوابة الزر في شاشة الإعدادات. الفحص هنا في الخدمة لا
+        /// يكتفي بإخفاء الزر في الواجهة (الإخفاء تجميل؛ البوابة خدمية).
+        ///
+        /// ══ الترتيب عند أول إغلاق ══ صف FiscalYearStart قد يكون غير موجود:
+        /// GetFiscalYearStartAsync يعود حينها بالافتراضي (1 يناير للسنة الحالية)
+        /// وهو فعليًا ما كانت تعتبره بقية الخدمات بداية للسنة. لذا تُحسب فحوصات
+        /// الجاهزية للفترة السابقة [الافتراضي/المخزّن, newYearStart) قبل أي كتابة —
+        /// الإدراج الخام لصف البداية الجديد قبل الفحص كان يجعل GetAsync (عبر
+        /// FindAsync) يقرأ القيمة الجديدة لحظًا فيرى الفحص «الفترة السابقة» فارغة
+        /// ويمرّ كل شيء دون فحص حقيقي. وبعد القلب يُفرَّغ ChangeTracker حتى لا
+        /// تعيد قيم Settings المتتبعة (القديمة) الكتابة فوق القيم الخام الجديدة.
+        ///
         /// ══ الذرية ══ كلا المفتاحين + سجل التدقيق يُحدَّثون داخل معاملة واحدة:
         /// تحديث FiscalYearStart يُنفَّذ بمقارنة-وتبديل ذرية (CAS) على القيمة المتوقعة،
         /// فمحاولة إغلاق متزامنة ثانية تفشل بأمان بدل أن تُغلق مرتين — وفشل أي
@@ -152,6 +179,12 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result> CloseYearAsync(int userId, DateOnly newYearStart)
         {
+            // 0) بوابة الصلاحية: شاشة المخزون (الجرد ركن الإغلاق السنوي) —
+            //    مطابقة لبوابة الزر في SettingsControl؛ المستخدم بلا دور نشط (-1) يُرفض.
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
+            if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
+                return Result.Fail("إغلاق السنة المالية يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).");
+
             var current = await GetFiscalYearStartAsync();
             if (newYearStart <= current)
                 return Result.Fail($"تاريخ السنة الجديدة يجب أن يكون بعد {current:yyyy-MM-dd} (بداية السنة الحالية).");
@@ -162,7 +195,17 @@ namespace Sayl.Core.Services
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
-                // 1) المقارنة-والتبديل الذرية: التحديث ينجح فقط إن كانت بداية السنة
+                // 1) فحوصات الجاهزية أولًا — قبل أي كتابة للبداية الجديدة:
+                //    الفترة المغلقة [current, newYearStart) حيث current هو المخزّن
+                //    أو الافتراضي عند غياب الصف (أول إغلاق على الإطلاق). حسابها
+                //    بعد الإدراج الخام كان يجعل FindAsync يقرأ البداية الجديدة
+                //    فيفحص فترة فارغة. ولا يوجد متتبَّع لصف البداية قبل هذا الحد
+                //    إلا بقيمته القديمة الصحيحة، فالقراءة هنا صحيحة في الحالتين.
+                var readiness = await GetCloseReadinessAsync(newYearStart);
+                if (!readiness.CanClose)
+                    return Result.Fail("فحوصات الجاهزية لم تكتمل:\n- " + string.Join("\n- ", readiness.Errors));
+
+                // 2) المقارنة-والتبديل الذرية: التحديث ينجح فقط إن كانت بداية السنة
                 //    ما زالت القيمة المقروءة — من يصل أولًا يفوز، والمتأخر يرى صفر
                 //    صفوف متأثرة فيفشل بأمان (لا إغلاق مزدوج).
                 string currentStr = current.ToString("yyyy-MM-dd");
@@ -183,13 +226,13 @@ namespace Sayl.Core.Services
                         $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyFiscalYearStart}, {newStr}, GETDATE())");
                 }
 
-                // 2) فحوصات الجاهزية داخل المعاملة وبالحد الفعلي للفترة المغلقة:
-                //    الفواتير المعلقة والرواتب المعلقة حتى نهاية الفترة المراد إغلاقها
-                var readiness = await GetCloseReadinessAsync(newYearStart);
-                if (!readiness.CanClose)
-                    return Result.Fail("فحوصات الجاهزية لم تكتمل:\n- " + string.Join("\n- ", readiness.Errors));
+                // 3) تفريغ المتتبع قبل أي كيان جديد: قيم Settings (وربما بيانات أخرى)
+                //    صارت متتبعة من فحوصات الجاهزية بقيمها ما قبل القلب — بلا تفريغ
+                //    يعيد FindAsync القيمة القديمة وSaveChanges قد يعيد كتابتها فوق
+                //    القيم الخام المكتوبة للتو. كل ما سبق SQL خام، فلا يُفقد شيء.
+                _dbContext.ChangeTracker.Clear();
 
-                // 3) تاريخ الإغلاق — UPSERT داخل نفس المعاملة
+                // 4) تاريخ الإغلاق — UPSERT داخل نفس المعاملة
                 string closeDateStr = DateTime.UtcNow.AddHours(3).ToString("yyyy-MM-dd");
                 int closeUpdated = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                     $"UPDATE Settings SET SettingValue = {closeDateStr}, UpdatedAt = GETDATE() WHERE SettingKey = {KeyLastCloseDate}");
