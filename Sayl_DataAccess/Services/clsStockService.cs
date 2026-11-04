@@ -285,10 +285,10 @@ namespace Sayl.Core.Services
                     await _dbContext.SaveChangesAsync(); // تثبيت السجل قبل الزيادة الذرية/الفحص
                 }
 
-                int? batchId = null;
-
                 if (request.IsIncrease)
                 {
+                    int? batchId = null;
+
                     if (!string.IsNullOrWhiteSpace(request.BatchNumber))
                     {
                         var batch = await _dbContext.Batches
@@ -390,6 +390,9 @@ namespace Sayl.Core.Services
                 }
                 else
                 {
+                    // (BatchId, Quantity) لكل دفعة خُصمت فعلًا — حركة لكل منها أدناه
+                    var deductions = new List<(int? BatchId, int Quantity)>();
+
                     // إعادة-فحص داخل المعاملة بعد قفل النطاق
                     int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                     if (available < request.Quantity)
@@ -407,7 +410,7 @@ namespace Sayl.Core.Services
                             return Result.Fail("كمية الدفعة غير كافية.");
 
                         batch.BatchQuantity -= request.Quantity;
-                        batchId = batch.BatchId;
+                        deductions.Add((batch.BatchId, request.Quantity));
                     }
                     else
                     {
@@ -431,7 +434,7 @@ namespace Sayl.Core.Services
                             int take = Math.Min(remaining, b.BatchQuantity);
                             b.BatchQuantity -= take;
                             remaining -= take;
-                            batchId = b.BatchId;
+                            deductions.Add((b.BatchId, take));
                         }
 
                         if (remaining > 0)
@@ -440,16 +443,23 @@ namespace Sayl.Core.Services
 
                     inventory.QuantityAvailable -= request.Quantity;
 
-                    _dbContext.StockMovements.Add(new StockMovement
+                    // حركة لكل دفعة خُصمت فعلًا (نفس نمط SellStockAsync): كل حركة
+                    // تحمل رقم دفعتها وكميتها الفعلية، ومجموع الحركات = النقصان
+                    // الكلي — التاريخ يعكس أي دفعة غذّت التسوية بدل حركة واحدة
+                    // تُسقَط بكمية كاملة على آخر دفعة
+                    foreach (var d in deductions)
                     {
-                        ProductId = request.ProductId,
-                        BatchId = batchId,
-                        MovementType = enStockMovementType.adjustment_out,
-                        Quantity = -request.Quantity,
-                        SourceType = "ManualAdjustment",
-                        SourceId = null,
-                        CreatedAt = DateTime.UtcNow
-                    });
+                        _dbContext.StockMovements.Add(new StockMovement
+                        {
+                            ProductId = request.ProductId,
+                            BatchId = d.BatchId,
+                            MovementType = enStockMovementType.adjustment_out,
+                            Quantity = -d.Quantity,
+                            SourceType = "ManualAdjustment",
+                            SourceId = null,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
                 }
 
                 if (!request.IsIncrease)
