@@ -180,21 +180,21 @@ namespace Sayl.Core.Services
                 {
                     if (invoice.PartyType == 'C')
                     {
-                        var customer = await _dbContext.Customers.FindAsync(invoice.PartyId.Value);
-                        if (customer != null)
-                        {
-                            customer.Balance -= request.Amount;
-                            if (customer.Balance < 0) customer.Balance = 0;
-                        }
+                        // تحديث الرصيد عبر استعلام مباشر: يقرأ القيمة الحالية ويطرح المبلغ في عملية واحدة
+                        await _dbContext.Customers
+                            .Where(c => c.PartyId == invoice.PartyId.Value)
+                            .ExecuteUpdateAsync(setter => setter
+                                .SetProperty(c => c.Balance,
+                                    c => (c.Balance ?? 0m) - request.Amount < 0m ? 0m : (c.Balance ?? 0m) - request.Amount));
                     }
                     else if (invoice.PartyType == 'S')
                     {
-                        var supplier = await _dbContext.Suppliers.FindAsync(invoice.PartyId.Value);
-                        if (supplier != null)
-                        {
-                            supplier.Balance -= request.Amount;
-                            if (supplier.Balance < 0) supplier.Balance = 0;
-                        }
+                        // تحديث الرصيد عبر استعلام مباشر: يقرأ القيمة الحالية ويطرح المبلغ في عملية واحدة
+                        await _dbContext.Suppliers
+                            .Where(s => s.PartyId == invoice.PartyId.Value)
+                            .ExecuteUpdateAsync(setter => setter
+                                .SetProperty(s => s.Balance,
+                                    s => (s.Balance ?? 0m) - request.Amount < 0m ? 0m : (s.Balance ?? 0m) - request.Amount));
                     }
                 }
 
@@ -220,8 +220,9 @@ namespace Sayl.Core.Services
             if (!request.PartyId.HasValue)
                 return Result.Fail("معرف العميل مطلوب.");
 
-            var customer = await _dbContext.Customers.FindAsync(request.PartyId.Value);
-            if (customer == null)
+            // التحقق من وجود العميل فقط — الرصيد يُقرأ داخل المعاملة من البيانات النظيفة
+            var customerExists = await _dbContext.Customers.AnyAsync(c => c.PartyId == request.PartyId.Value);
+            if (!customerExists)
                 return Result.Fail("العميل غير موجود.");
 
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع تحصيلين متوازيين يتجاوزان الرصيد
@@ -233,7 +234,16 @@ namespace Sayl.Core.Services
                 if (!sessionCheck.IsSuccess)
                     return sessionCheck;
 
-                decimal balance = customer.Balance ?? 0;
+                // قراءة الرصيد داخل المعاملة بدون تتبع مع UPDLOCK على صف العميل:
+                // العملية الثانية المتزامنة تنتظر هنا حتى تلتزم الأولى ثم تقرأ الرصيد
+                // الجديد الملتزم — لا سباق (قراءة قديمة) ولا deadlock (S→X) على الصف.
+                decimal balance = await _dbContext.Database
+                    .SqlQuery<decimal?>($@"
+                        SELECT Balance AS [Value]
+                        FROM Customers WITH (UPDLOCK)
+                        WHERE PartyId = {request.PartyId.Value}")
+                    .FirstOrDefaultAsync() ?? 0m;
+
                 if (balance < request.Amount)
                     return Result.Fail($"المبلغ أكبر من رصيد العميل المستحق ({balance:N2}).");
 
@@ -258,17 +268,21 @@ namespace Sayl.Core.Services
                 await clsPaymentAllocation.ApplyGeneralPaymentToInvoiceStatusesAsync(
                     _dbContext, 'C', request.PartyId.Value, request.Amount);
 
-                customer.Balance = balance - request.Amount;
-                if (customer.Balance < 0) customer.Balance = 0;
+                // تحديث الرصيد عبر استعلام مباشر يضمن atomicity مع القراءة النظيفة
+                await _dbContext.Customers
+                    .Where(c => c.PartyId == request.PartyId.Value)
+                    .ExecuteUpdateAsync(setter => setter
+                        .SetProperty(c => c.Balance,
+                            c => (c.Balance ?? 0m) - request.Amount < 0m ? 0m : (c.Balance ?? 0m) - request.Amount));
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return Result.Ok("تم تحصيل الدفعة من العميل بنجاح.");
             }
-            catch
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Result.Fail("فشل تحصيل الدفعة.");
+                return Result.Fail($"فشل تحصيل الدفعة. [{ex.GetType().Name}: {ex.Message}]");
             }
         }
 
@@ -283,8 +297,9 @@ namespace Sayl.Core.Services
             if (!request.PartyId.HasValue)
                 return Result.Fail("معرف المورد مطلوب.");
 
-            var supplier = await _dbContext.Suppliers.FindAsync(request.PartyId.Value);
-            if (supplier == null)
+            // التحقق من وجود المورد فقط — الرصيد يُقرأ داخل المعاملة من البيانات النظيفة
+            var supplierExists = await _dbContext.Suppliers.AnyAsync(s => s.PartyId == request.PartyId.Value);
+            if (!supplierExists)
                 return Result.Fail("المورد غير موجود.");
 
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع سدادين متوازيين يتجاوزان الرصيد
@@ -296,7 +311,16 @@ namespace Sayl.Core.Services
                 if (!sessionCheck.IsSuccess)
                     return sessionCheck;
 
-                decimal balance = supplier.Balance ?? 0;
+                // قراءة الرصيد داخل المعاملة بدون تتبع مع UPDLOCK على صف المورد:
+                // العملية الثانية المتزامنة تنتظر هنا حتى تلتزم الأولى ثم تقرأ الرصيد
+                // الجديد الملتزم — لا سباق (قراءة قديمة) ولا deadlock (S→X) على الصف.
+                decimal balance = await _dbContext.Database
+                    .SqlQuery<decimal?>($@"
+                        SELECT Balance AS [Value]
+                        FROM Suppliers WITH (UPDLOCK)
+                        WHERE PartyId = {request.PartyId.Value}")
+                    .FirstOrDefaultAsync() ?? 0m;
+
                 if (balance < request.Amount)
                     return Result.Fail($"المبلغ أكبر من رصيد المورد المستحق ({balance:N2}).");
 
@@ -319,17 +343,21 @@ namespace Sayl.Core.Services
                 await clsPaymentAllocation.ApplyGeneralPaymentToInvoiceStatusesAsync(
                     _dbContext, 'S', request.PartyId.Value, request.Amount);
 
-                supplier.Balance = balance - request.Amount;
-                if (supplier.Balance < 0) supplier.Balance = 0;
+                // تحديث الرصيد عبر استعلام مباشر يضمن atomicity مع القراءة النظيفة
+                await _dbContext.Suppliers
+                    .Where(s => s.PartyId == request.PartyId.Value)
+                    .ExecuteUpdateAsync(setter => setter
+                        .SetProperty(s => s.Balance,
+                            s => (s.Balance ?? 0m) - request.Amount < 0m ? 0m : (s.Balance ?? 0m) - request.Amount));
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return Result.Ok("تم سداد الدفعة للمورد بنجاح.");
             }
-            catch
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Result.Fail("فشل سداد الدفعة.");
+                return Result.Fail($"فشل سداد الدفعة. [{ex.GetType().Name}: {ex.Message}]");
             }
         }
     }
