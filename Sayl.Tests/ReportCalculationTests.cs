@@ -280,7 +280,8 @@ public class ReportCalculationTests
             PartyId = seed.CustomerId,
             Amount = 120m,
             PaymentDate = dayB,
-            Method = "cash"
+            Method = "cash",
+            UserId = seed.UserId // الفاعل: مستخدم مصرّح له بالتحصيل (بت شاشة العملاء)
         });
         Assert.True(pay.IsSuccess, pay.Message);
 

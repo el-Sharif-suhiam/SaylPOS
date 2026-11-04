@@ -1,6 +1,7 @@
 using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -35,6 +36,33 @@ namespace Sayl.Core.Services
         }
 
         // ─────────────────────────────────────────────────
+        // صلاحيات المرتجعات — في الخدمة لا الواجهة (الواجهة تخفي فقط):
+        //  • مرتجع البيع: عملية شاشة بيع — هوية الكاشير (شاشة POS تُفتح
+        //    بالهوية لا بالبت: راجع AppPermissions) أو صلاحية فواتير البيع
+        //    (بت 16) — نفس قاعدة إغلاق الجلسة في clsPosSessionService،
+        //    فلا يتغيّر سلوك الكاشير في نقطة البيع.
+        //  • مرتجع الشراء: عملية شاشة فواتير الشراء (بت 32) حصرًا.
+        // الفحص مستقل عن الجلسة: تمرير SessionId = null لا يتجاوزه إطلاقًا.
+        // (يرجع null = مسموح؛ Result فاشل = يُرفض الطلب.)
+        // ─────────────────────────────────────────────────
+        private async Task<Result<int>?> CheckCustomerReturnPermissionAsync(int userId)
+        {
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
+            if (actorRole < 0 || (!AppPermissions.IsCashier(actorRole)
+                && !AppPermissions.Has(actorRole, AppPermissions.SalesInvoices)))
+                return Result<int>.Fail("إنشاء مرتجع البيع يتطلب هوية الكاشير أو صلاحية شاشة فواتير البيع.");
+            return null;
+        }
+
+        private async Task<Result<int>?> CheckSupplierReturnPermissionAsync(int userId)
+        {
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.PurchaseInvoices))
+                return Result<int>.Fail("إنشاء مرتجع الشراء يتطلب صلاحية شاشة فواتير الشراء.");
+            return null;
+        }
+
+        // ─────────────────────────────────────────────────
         // مرتجع بيع من عميل: إعادة للمخزون + استرداد/تخفيض رصيد
         // ─────────────────────────────────────────────────
         public async Task<Result<int>> CreateCustomerReturnAsync(DtoReturnRequest request)
@@ -47,6 +75,10 @@ namespace Sayl.Core.Services
                 if (item.Quantity <= 0)
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
             }
+
+            var permissionCheck = await CheckCustomerReturnPermissionAsync(request.UserId);
+            if (permissionCheck != null)
+                return permissionCheck;
 
             var originalInvoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
@@ -88,6 +120,13 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // VULN-05: التحقق الجلسي داخل المعاملة — درج الفعل موجود ومفتوح
+                // ومملوك للفاعل (أو مدير) قبل أن يُقيد له أي استرداد
+                var sessionCheck = await clsPermissions.ValidateDrawerSessionAsync(
+                    _dbContext, request.SessionId, request.UserId);
+                if (!sessionCheck.IsSuccess)
+                    return Result<int>.Fail(sessionCheck.Message);
+
                 // إعادة-فحص داخل المعاملة: طلب إرجاع متوازٍ commit بين الفحص الأول وبداية المعاملة
                 // (بنفس حارس التجميع — الازدواج داخل الطلب يُفحص هنا أيضاً)
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
@@ -221,6 +260,10 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
             }
 
+            var permissionCheck = await CheckSupplierReturnPermissionAsync(request.UserId);
+            if (permissionCheck != null)
+                return permissionCheck;
+
             var originalInvoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
                     .ThenInclude(ii => ii.Batch)
@@ -254,6 +297,13 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // VULN-05: التحقق الجلسي داخل المعاملة — درج الفعل موجود ومفتوح
+                // ومملوك للفاعل (أو مدير) قبل أن يُقيد له أي استرداد
+                var sessionCheck = await clsPermissions.ValidateDrawerSessionAsync(
+                    _dbContext, request.SessionId, request.UserId);
+                if (!sessionCheck.IsSuccess)
+                    return Result<int>.Fail(sessionCheck.Message);
+
                 // إعادة-فحص داخل المعاملة بعد قفل النطاق (بنفس حارس التجميع)
                 alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
                 foreach (var g in GroupRequestItems(request.Items))

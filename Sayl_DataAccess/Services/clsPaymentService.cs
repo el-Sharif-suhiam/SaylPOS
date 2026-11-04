@@ -18,50 +18,12 @@ namespace Sayl.Core.Services
             _dbContext = dbContext;
         }
 
-        /// <summary>قيمة دور المستخدم (فحص ملكية جلسة الدرج).</summary>
-        private async Task<int> GetUserRoleValueAsync(int userId)
-        {
-            if (userId <= 0)
-                return -1;
-
-            return await _dbContext.Users
-                .Where(u => u.UserId == userId && u.IsActive && u.Role.IsActive)
-                .Select(u => (int?)u.Role.RoleValue)
-                .FirstOrDefaultAsync() ?? -1;
-        }
-
         // ─────────────────────────────────────────────────
-        // VULN-05 + التحقق الجلسي: دفعة تُوجَّه لدرج جلسة يجب أن تُقيَّم
-        // وجودًا وفتحًا وملكية قبل قيدها:
-        //   • الجلسة غير موجودة → رفض.
-        //   • الجلسة مغلقة → رفض (لا نقد يدخل أو يخرج من درج مغلق).
-        //   • جلسة مستخدم آخر → رفض إلا لمدير النظام (صلاحية إدارية صريحة).
-        // null = دفعة بلا توجيه درج (توافق/خلفية) — تمر بلا قيد جلسي.
-        // تُستدعى داخل معاملة Serializable لمنع سباق مع إغلاق الجلسة.
+        // VULN-05 + التحقق الجلسي: يُنفَّذ عبر clsPermissions.ValidateDrawerSessionAsync
+        // (مساعد موحّد تشاركه الخدمات — مرتجعات ومدفوعات بنفس القواعد حرفيًا).
         // ─────────────────────────────────────────────────
-        private async Task<Result> ValidateSessionAsync(int? sessionId, int userId)
-        {
-            if (!sessionId.HasValue)
-                return Result.Ok();
-
-            var session = await _dbContext.PosSessions.AsNoTracking()
-                .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value);
-
-            if (session == null)
-                return Result.Fail("جلسة الدرج غير موجودة.");
-
-            if (session.Status != enPosSessionStatusType.open)
-                return Result.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل تسجيل الدفعة.");
-
-            if (session.UserId != userId)
-            {
-                int actorRole = await GetUserRoleValueAsync(userId);
-                if (!AppPermissions.IsAdmin(actorRole))
-                    return Result.Fail("لا يمكنك تسجيل دفعة في جلسة درج مستخدم آخر — يتطلب ذلك صلاحية مدير النظام.");
-            }
-
-            return Result.Ok();
-        }
+        private Task<Result> ValidateSessionAsync(int? sessionId, int userId)
+            => clsPermissions.ValidateDrawerSessionAsync(_dbContext, sessionId, userId);
 
         public async Task<Result<List<PaymentVM>>> GetPaymentsListAsync(DateOnly? fromDate = null, DateOnly? toDate = null, enPaymentType? type = null, int? partyId = null)
         {
@@ -121,6 +83,19 @@ namespace Sayl.Core.Services
 
             if (invoice.PaymentStatus == enPaymentStatus.paid)
                 return Result.Fail("الفاتورة مسددة بالكامل.");
+
+            // ══ صلاحية السداد — في الخدمة لا الواجهة (الواجهة تخفي فقط) ══
+            // سداد فاتورة شراء = شاشة فواتير الشراء (بت 32)؛ سداد فاتورة بيع
+            // = شاشة فواتير البيع (بت 16). الفحص مستقل عن الجلسة: تمرير
+            // SessionId = null لا يتجاوزه إطلاقًا.
+            int invoicePayRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, request.UserId);
+            bool isPurchaseSide = invoice.Type == enInvoicesType.purchase
+                               || invoice.Type == enInvoicesType.supplier_return;
+            int requiredPayBit = isPurchaseSide ? AppPermissions.PurchaseInvoices : AppPermissions.SalesInvoices;
+            if (invoicePayRole < 0 || !AppPermissions.Has(invoicePayRole, requiredPayBit))
+                return Result.Fail(isPurchaseSide
+                    ? "سداد فاتورة الشراء يتطلب صلاحية شاشة فواتير الشراء."
+                    : "سداد فاتورة البيع يتطلب صلاحية شاشة فواتير البيع.");
 
             // Serializable + إعادة حساب المتبقي داخل المعاملة:
             // قفل نطاقي على مدفوعات الفاتورة يمنع إدراج دفعتين متوازيتين تتجاوزان المتبقي معاً
@@ -225,6 +200,12 @@ namespace Sayl.Core.Services
             if (!customerExists)
                 return Result.Fail("العميل غير موجود.");
 
+            // ══ صلاحية التحصيل — شاشة العملاء (بت 4) في الخدمة لا الواجهة ══
+            // الفحص مستقل عن الجلسة: تمرير SessionId = null لا يتجاوزه إطلاقًا.
+            int collectorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, request.UserId);
+            if (collectorRole < 0 || !AppPermissions.Has(collectorRole, AppPermissions.Customers))
+                return Result.Fail("تحصيل دفعة من عميل يتطلب صلاحية شاشة العملاء.");
+
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع تحصيلين متوازيين يتجاوزان الرصيد
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
@@ -301,6 +282,12 @@ namespace Sayl.Core.Services
             var supplierExists = await _dbContext.Suppliers.AnyAsync(s => s.PartyId == request.PartyId.Value);
             if (!supplierExists)
                 return Result.Fail("المورد غير موجود.");
+
+            // ══ صلاحية سداد المورد — شاشة الموردين (بت 8) في الخدمة لا الواجهة ══
+            // الفحص مستقل عن الجلسة: تمرير SessionId = null لا يتجاوزه إطلاقًا.
+            int payerRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, request.UserId);
+            if (payerRole < 0 || !AppPermissions.Has(payerRole, AppPermissions.Suppliers))
+                return Result.Fail("سداد دفعة للمورد يتطلب صلاحية شاشة الموردين.");
 
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع سدادين متوازيين يتجاوزان الرصيد
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
