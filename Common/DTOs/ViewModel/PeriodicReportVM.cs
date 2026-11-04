@@ -97,6 +97,8 @@ namespace Common.DTOs.ViewModel
         public decimal OpeningAmount { get; set; }
         public decimal CashSales { get; set; }
         public decimal CashReturns { get; set; }
+        /// <summary>سداد الموردين النقدي — يخرج من الدرج (ليس مرتجع عملاء).</summary>
+        public decimal CashSupplierPayments { get; set; }
         public decimal CashIn { get; set; }
         public decimal CashOut { get; set; }
         public decimal ExpectedCash { get; set; }

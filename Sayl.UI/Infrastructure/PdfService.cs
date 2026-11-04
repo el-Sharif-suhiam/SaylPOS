@@ -238,15 +238,15 @@ namespace Sayl.UI.Infrastructure
                             {
                                 table.ColumnsDefinition(c =>
                                 {
-                                    for (int i = 0; i < 10; i++)
-                                        c.RelativeColumn(i switch { 0 => 0.8f, 1 => 1.5f, 9 => 1.3f, _ => 1f });
+                                    for (int i = 0; i < 11; i++)
+                                        c.RelativeColumn(i switch { 0 => 0.8f, 1 => 1.5f, 10 => 1.3f, _ => 1f });
                                 });
                                 table.Header(h =>
                                 {
                                     foreach (var head in new[]
                                     {
                                         AppLang.T("Pdf.Session.Session"), AppLang.T("Pdf.Session.Cashier"), AppLang.T("Pdf.Session.Opening"), AppLang.T("Pdf.Session.CashSales"), AppLang.T("Pdf.Session.CashReturns"),
-                                        AppLang.T("Pdf.Session.CashIn"), AppLang.T("Pdf.Session.CashOut"), AppLang.T("Pdf.Session.Expected"), AppLang.T("Pdf.Session.NetSales"), AppLang.T("Pdf.Session.ClosedAt")
+                                        AppLang.T("Pdf.Session.CashSupplierPayments"), AppLang.T("Pdf.Session.CashIn"), AppLang.T("Pdf.Session.CashOut"), AppLang.T("Pdf.Session.Expected"), AppLang.T("Pdf.Session.NetSales"), AppLang.T("Pdf.Session.ClosedAt")
                                     })
                                         h.Cell().Element(HeaderCell).AlignCenter().Text(head).FontSize(7.6f);
                                 });
@@ -258,6 +258,7 @@ namespace Sayl.UI.Infrastructure
                                         "#" + s.SessionId,
                                         s.UserName,
                                         Money(s.OpeningAmount), Money(s.CashSales), Money(s.CashReturns),
+                                        Money(s.CashSupplierPayments),
                                         Money(s.CashIn), Money(s.CashOut), Money(s.ExpectedCash),
                                         Money(s.NetSales),
                                         s.ClosedAt?.ToString("dd/MM/yyyy HH:mm") ?? "-");

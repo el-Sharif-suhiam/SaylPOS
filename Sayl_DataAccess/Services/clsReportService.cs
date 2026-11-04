@@ -41,8 +41,12 @@ namespace Sayl.Core.Services
                 })
                 .FirstOrDefaultAsync();
 
+            // تحصيلات العملاء فقط (PartyType='C') — دفعات الطرف تحمل جهة الحركة
+            // ('C' عميل / 'S' مورد حتى للطرف المشترك 'B')، فاسترداد مورد (دخل بطرف
+            // 'S') ليس تحصيلًا من عميل — نفس تصنيف GetCashFlowReportAsync.
             decimal collected = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income
+                         && p.PartyType == 'C'
                          && p.PaymentDate == date)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
@@ -307,15 +311,18 @@ namespace Sayl.Core.Services
 
             var expensesByDate = expensesByDay.ToDictionary(x => x.ExpenseDate, x => x.Total);
 
-            // ── الدفعات (المحصل على مدى النطاق) ──
+            // ── الدفعات (تحصيلات العملاء على مدى النطاق — PartyType='C') ──
+            // استرداد المورد (دخل بطرف 'S') ليس تحصيلًا من عميل — نفس تصنيف CashFlow.
             decimal collected = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income
+                         && p.PartyType == 'C'
                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             // المحصل مجمّعاً باليوم لدعم حساب كل فترة من الذاكرة (بدل استعلام per-period)
             var collectedByDate = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income
+                         && p.PartyType == 'C'
                          && p.PaymentDate >= fromDate && p.PaymentDate <= toDate)
                 .GroupBy(p => p.PaymentDate)
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
@@ -462,14 +469,19 @@ namespace Sayl.Core.Services
                 .GroupBy(x => x.InvoiceId)
                 .ToDictionary(g => g.Key, g => g.First().SessionId);
 
-            // دفعات الجلسات (نقدي income/outcome) دفعة واحدة
+            // دفعات الجلسات دفعة واحدة — مساران بلا ازدواج (نفس منهج clsCashService):
+            //  • الجديد: دفعات موجّهة صراحة لدرج الجلسة (SessionId) ولو بلا فاتورة
+            //    (تحصيل عام/سداد مورد/استرداد) أو بفاتورة أقدم (تحصيل دَين قديم اليوم).
+            //  • المتوافق: دفعات ما قبل Upgrade_06 (SessionId=null) تُسقط على جلسة فاتورتها.
+            // كل دفعة تُحسب مرة واحدة: مفتاح التجميع SessionId أولًا ثم جلسة الفاتورة.
             var sessionPayments = await _dbContext.Payments
-                .Where(p => p.InvoiceId != null && sessionInvoiceIds.Contains(p.InvoiceId.Value))
-                .Select(p => new { p.InvoiceId, p.SessionId, p.PaymentMethod, p.Type, p.Amount })
+                .Where(p => sessionIds.Contains(p.SessionId)
+                         || (p.SessionId == null && p.InvoiceId != null
+                          && sessionInvoiceIds.Contains(p.InvoiceId.Value)))
+                .Select(p => new { p.InvoiceId, p.SessionId, p.PaymentMethod, p.Type, p.PartyType, p.Amount })
                 .ToListAsync();
 
             var payBySession = sessionPayments
-                .Where(p => p.InvoiceId.HasValue)
                 .GroupBy(p => p.SessionId ?? invoiceSessionMap[p.InvoiceId!.Value])
                 .ToDictionary(g => g.Key, g => g.ToList());
 
@@ -494,11 +506,16 @@ namespace Sayl.Core.Services
                     netSales = saleList.Sum(x => x.NetAmount);
                 }
 
-                decimal cashSales = 0m, cashReturns = 0m;
+                // تصنيف نقدي بحسب جهة الدفعة (PartyType 'C' عميل / 'S' مورد — حتى
+                // للطرف المشترك) — نفس معادلة clsCashService.GetSessionCashSummaryAsync:
+                // النقد الداخل يشمل المبيعات والتحصيلات واستردادات الموردين، وسداد
+                // المورد النقدي يخرج من الدرج (ليس مرتجع عميل).
+                decimal cashSales = 0m, cashReturns = 0m, cashSupplierPayments = 0m;
                 if (payBySession.TryGetValue(s.SessionId, out var payList))
                 {
                     cashSales = payList.Where(p => p.PaymentMethod == "cash" && p.Type == enPaymentType.income).Sum(p => p.Amount);
-                    cashReturns = payList.Where(p => p.PaymentMethod == "cash" && p.Type == enPaymentType.outcome).Sum(p => p.Amount);
+                    cashReturns = payList.Where(p => p.PaymentMethod == "cash" && p.Type == enPaymentType.outcome && p.PartyType == 'C').Sum(p => p.Amount);
+                    cashSupplierPayments = payList.Where(p => p.PaymentMethod == "cash" && p.Type == enPaymentType.outcome && p.PartyType == 'S').Sum(p => p.Amount);
                 }
 
                 decimal cashIn = 0m, cashOut = 0m;
@@ -515,9 +532,10 @@ namespace Sayl.Core.Services
                     OpeningAmount = s.OpeningAmount,
                     CashSales = cashSales,
                     CashReturns = cashReturns,
+                    CashSupplierPayments = cashSupplierPayments,
                     CashIn = cashIn,
                     CashOut = cashOut,
-                    ExpectedCash = s.OpeningAmount + cashSales - cashReturns + cashIn - cashOut,
+                    ExpectedCash = s.OpeningAmount + cashSales - cashReturns - cashSupplierPayments + cashIn - cashOut,
                     InvoiceCount = invoiceCount,
                     NetSales = netSales,
                     StartedAt = s.StartedAt ?? DateTime.MinValue,
@@ -649,8 +667,10 @@ namespace Sayl.Core.Services
                          && i.CreatedAt >= dayStart && i.CreatedAt < dayEnd)
                 .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // قيمة سالبة
 
+            // تحصيلات العملاء فقط (PartyType='C') — استرداد مورد (دخل بطرف 'S') مستثنى
             decimal todayCollected = await _dbContext.Payments
                 .Where(p => p.Type == enPaymentType.income
+                         && p.PartyType == 'C'
                          && p.PaymentDate == date)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
@@ -1176,8 +1196,12 @@ namespace Sayl.Core.Services
         ///   • الرواتب تُحسب مرة واحدة (SalariesPaid) — مصروفها المرتبط مستثنى من ExpensesPaid.</summary>
         public async Task<Result<CashFlowVM>> GetCashFlowReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            var start = fromDate.ToDateTime(TimeOnly.MinValue);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue);
+            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير: أعمدة UTC
+            // (CashMovements.CreatedAt و PayrollRecords.PaidAt) تُقارن بحدود UTC
+            // لمنتصف الليل المحلي، فلا تُسقط حركات ما بعد 9 مساءً ولا تُحمَّل
+            // حركات منتصف الليل (00:00–03:00) على اليوم الخطأ.
+            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
 
             // مبيعات وتحصيلات نقدية من العملاء — حسب الطرف (PartyType='C') لا نوع الفاتورة:
             // استرداد مورد (دخل بطرف 'S') لا يُصنَّف أبدًا تحصيلًا للعملاء

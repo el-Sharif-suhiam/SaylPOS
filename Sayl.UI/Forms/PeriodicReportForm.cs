@@ -390,6 +390,7 @@ namespace Sayl.UI.Forms
             _gridSessions.Columns.Add("cO", AppLang.T("PeriodicReport.Session.Opening"));
             _gridSessions.Columns.Add("cT", AppLang.T("PeriodicReport.Session.CashSales"));
             _gridSessions.Columns.Add("cRt", AppLang.T("PeriodicReport.Session.CashReturns"));
+            _gridSessions.Columns.Add("cSup", AppLang.T("PeriodicReport.Session.CashSupplierPayments"));
             _gridSessions.Columns.Add("cIn", AppLang.T("PeriodicReport.Session.CashIn"));
             _gridSessions.Columns.Add("cOut", AppLang.T("PeriodicReport.Session.CashOut"));
             _gridSessions.Columns.Add("cE", AppLang.T("PeriodicReport.Session.Expected"));
@@ -404,6 +405,7 @@ namespace Sayl.UI.Forms
                     UiHelpers.Money(s.OpeningAmount),
                     UiHelpers.Money(s.CashSales),
                     UiHelpers.Money(s.CashReturns),
+                    UiHelpers.Money(s.CashSupplierPayments),
                     UiHelpers.Money(s.CashIn),
                     UiHelpers.Money(s.CashOut),
                     UiHelpers.Money(s.ExpectedCash),
