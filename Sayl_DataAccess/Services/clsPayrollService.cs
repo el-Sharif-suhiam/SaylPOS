@@ -3,6 +3,7 @@ using Common.Enums;
 using Common.Results;
 using Common.Utils;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
 
@@ -95,7 +96,9 @@ namespace Sayl.Core.Services
 
         /// <summary>
         /// توليد كشوف فترة لكل الموظفين النشطين (active أو on_leave).
-        /// idempotent: الموظف الذي له كشف للفترة نفسها يُتجاوز (الفهرس الفريد يحمي أيضاً من التزامن).
+        /// idempotent: الموظف الذي له كشف متداخل مع الفترة يُتجاوز.
+        /// التزامن: معاملة Serializable + قفل تطبيقي (sp_getapplock) تُسلسلان
+        /// فحص التداخل مع الحفظ — لا فحص مسروق بين طلبين متوازيين.
         /// - monthly : Proration تلقائي حسب مدة عمل الموظف داخل الفترة (HireDate/الاستقالة).
         /// - daily   : أيام العمل صفر + الإجازات الرسمية داخل الفترة تُقترح مسبقًا.
         /// - hourly  : ساعات صفر — المحاسب يعبئها.
@@ -117,6 +120,32 @@ namespace Sayl.Core.Services
             if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(periodTo))
                 return Result<int>.Fail("الفترة تسبق بداية السنة المالية الحالية — سنة مغلقة لا تُولَّد لها كشوف.");
 
+            // ══ حماية التزامن (check-then-insert): ══
+            // فحص التداخل السابق كان قراءة عادية خارج أي معاملة — طلبان متوازيان
+            // لفترتين متداخلتين جزئيًا (1–15 و10–20) يقرآن معًا «لا تداخل» ثم
+            // يححقنان معًا: الفهرس الفريد UQ_PayrollRecords_Employee_Period
+            // يمنع التطابق التام فقط، فيمر التداخل الجزئي ويدفع نفس الأيام مرتين.
+            // العلاج (نمط StartSessionAsync نفسه): معاملة Serializable + قفل تطبيقي
+            // مسمّى sp_getapplock — يُسلسِل التوليدَين: الثاني لا يبدأ فحص التداخل
+            // إلا بعد التزام الأول (أو رفضه)، فلا «فحص مسروق» ولا deadlock.
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+            // قفل تطبيقي مسمّى بمالك المعاملة — التوليد عملية دفعية نادرة، التسلسل الكامل بين طلبين لا كلفة تُذكر
+            var lockConn = (Microsoft.Data.SqlClient.SqlConnection)_dbContext.Database.GetDbConnection();
+            int lockResult;
+            using (var cmd = lockConn.CreateCommand())
+            {
+                cmd.Transaction = (Microsoft.Data.SqlClient.SqlTransaction)_dbContext.Database.CurrentTransaction!.GetDbTransaction();
+                cmd.CommandText = "DECLARE @r int; EXEC @r = sys.sp_getapplock @Resource = N'PayrollGenerate', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r";
+                lockResult = (int)(await cmd.ExecuteScalarAsync())!;
+            }
+
+            if (lockResult < 0)
+            {
+                await transaction.RollbackAsync();
+                return Result<int>.Fail("ازدحام في توليد الرواتب — طلب آخر قيد التنفيذ، حاول بعد لحظات.");
+            }
+
             var employees = await _dbContext.Employees
                 // المستقيل قبل الفترة لا كشف له (تُرشّحه حالة to < from أدناه) —
                 // أما من استقال داخل الفترة فله استحقاق أيام عمله حتى تاريخ استقالته
@@ -124,14 +153,14 @@ namespace Sayl.Core.Services
                 .ToListAsync();
 
             if (employees.Count == 0)
+            {
+                await transaction.RollbackAsync();
                 return Result<int>.Fail("لا يوجد موظفون لتوليد كشوف.");
+            }
 
-            // C3: موجودات الفترة والعطل الرسمية تُسحب مرة واحدة لا لكل موظف —
-            // وكانت CountHolidaysInRangeAsync تقرأ كل العطل من القاعدة لكل موظف يومي.
-            // ⚠ حماية الدفع المزدوج: الفهرس الفريد UQ_PayrollRecords_Employee_Period
-            // يمنع التطابق التام فقط — فترتان متداخلتان جزئيًا (1–15 و10–20)
-            // تمرّان من الفهرس ويدفعان نفس الأيام مرتين. نرفض أي تداخل زمني
-            // مع كشف قائم للموظف (idempotent: المتداخل يُتجاوز لا يُخطأ).
+            // ⚠ حماية الدفع المزدوج: نرفض أي تداخل زمني مع كشف قائم للموظف —
+            // القراءة داخل قفل التطبيق + Serializable، فالمدى المقروء محمي من
+            // إقحام كشوف متداخلة حتى الالتزام (idempotent: المتداخل يُتجاوز لا يُخطأ).
             var employeesWithOverlap = (await _dbContext.PayrollRecords
                 .Where(r => r.PeriodFrom <= periodTo && r.PeriodTo >= periodFrom)
                 .Select(r => r.EmployeeId)
@@ -139,8 +168,7 @@ namespace Sayl.Core.Services
 
             var holidays = await _dbContext.OfficialHolidays.ToListAsync();
 
-            // الفهرس الفريد UQ_PayrollRecords_Employee_Period يمنع التكرار حتى مع طلبين متوازيين؛
-            // نفحص الموجود مسبقًا (idempotent) ونحفظ مرة واحدة بعد الحلقة (لا معاملة لكل موظف)
+            // الفحص والحفظ داخل القفل نفسه — لا فجوة بين «لا تداخل» و«حقن»
             int created = 0;
             foreach (var emp in employees)
             {
@@ -217,24 +245,32 @@ namespace Sayl.Core.Services
             }
 
             if (created == 0)
-                return Result<int>.Fail("كل الموظفين لديهم كشوف لهذه الفترة بالفعل.");
+            {
+                await transaction.RollbackAsync();
+                // رسالة الصراع تُظهر الفترة المسببة — يعرف المحاسب أي فترة تصادمت
+                return Result<int>.Fail(
+                    $"كل الموظفين لديهم كشوف تتداخل مع الفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd} بالفعل.");
+            }
 
             clsAudit.Log(_dbContext, actorUserId, "GeneratePayrolls",
                 $"توليد {created} كشف رواتب للفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd}");
             try
             {
-                // C3: حفظ واحد بعد الحلقة — كانت معاملة لكل موظف
+                // حفظ واحد بعد الحلقة داخل معاملة الفحص نفسها — التداخل لا يُحقن بين فحصين متوازيين
                 await _dbContext.SaveChangesAsync();
+                await transaction.CommitAsync();
             }
             catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_PayrollRecords_Employee_Period"))
             {
-                // تزامن متوازٍ نادر: منشئان في اللحظة نفسها لنفس الفترة —
-                // الفهرس الفريد يرفض؛ نعاملها كأن الكل موجود (idempotent)
+                // دفاعي (القفل التطبيقي يجب أن يمنع وصولنا إلى هنا): تكرار تام لفترة موظف —
+                // نعاملها كأن الكل موجود (idempotent)
+                await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
-                return Result<int>.Fail("كل الموظفين لديهم كشوف لهذه الفترة بالفعل.");
+                return Result<int>.Fail(
+                    $"كل الموظفين لديهم كشوف تتداخل مع الفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd} بالفعل.");
             }
 
-            return Result<int>.Ok(created, $"تم توليد {created} كشف رواتب.");
+            return Result<int>.Ok(created, $"تم توليد {created} كشف رواتب."); // النجاح بعد الالتزام فقط
         }
 
         /// <summary>تعديل كشف معلق: وحدات العمل + الخصومات والإضافات — يُعاد حساب الإجمالي والصافي.</summary>
