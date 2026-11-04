@@ -92,6 +92,16 @@ namespace Sayl.UI.UserControls
                         FillWeight = 8
                     };
                     Grid.Columns.Add(colPay);
+
+                    // زر مرتجع مورد لفواتير الشراء المكتملة — مرتجع الشراء
+                    // يُبنى حصرًا على فاتورة شراء مكتملة (حارس clsReturnService)
+                    var colReturn = new DataGridViewButtonColumn
+                    {
+                        Name = "colReturn",
+                        HeaderText = "",
+                        FillWeight = 8
+                    };
+                    Grid.Columns.Add(colReturn);
                 }
 
                 Grid.Rows.Clear();
@@ -103,6 +113,9 @@ namespace Sayl.UI.UserControls
                         string payAction = inv.Type == "purchase" && inv.Status == "completed" && inv.PaymentStatus != "paid"
                             ? AppLang.T("Invoices.Action.Pay")
                             : "";
+                        string returnAction = inv.Type == "purchase" && inv.Status == "completed"
+                            ? AppLang.T("Invoices.Action.Return")
+                            : "";
                         rowIndex = Grid.Rows.Add(inv.InvoiceId,
                             inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                             inv.PartyName ?? "-",
@@ -111,9 +124,12 @@ namespace Sayl.UI.UserControls
                             TranslatePayment(inv.PaymentStatus),
                             UiHelpers.Money(inv.NetAmount),
                             AppLang.T("Common.Button.Details"),
-                            payAction);
+                            payAction,
+                            returnAction);
                         if (payAction.Length > 0)
                             Grid.Rows[rowIndex].Cells["colPay"].Style.ForeColor = AppTheme.Success;
+                        if (returnAction.Length > 0)
+                            Grid.Rows[rowIndex].Cells["colReturn"].Style.ForeColor = AppTheme.Warning;
                     }
                     else
                     {
@@ -210,6 +226,42 @@ namespace Sayl.UI.UserControls
 
                     using var form = SupplierPaymentForm.ForInvoice(inv.InvoiceId, partyName, remaining);
                     if (form.ShowDialog(FindForm()) == DialogResult.OK)
+                        _ = LoadDataAsync();
+                }
+                else if (_type == enInvoicesType.purchase
+                      && args.ColumnIndex == Grid.Columns["colReturn"].Index)
+                {
+                    int idx = args.RowIndex;
+                    if (idx >= _invoices.Count) return;
+                    var inv = _invoices[idx];
+
+                    if (inv.Type != "purchase" || inv.Status != "completed")
+                    {
+                        UiHelpers.ShowInfo(this, AppLang.T("Invoices.Msg.ReturnOnlyCompleted"));
+                        return;
+                    }
+
+                    // VULN-05: نقد استرداد المورد يخرج من درج جلسة المستخدم المفتوحة —
+                    // تُحل الجلسة عند النقر (نفس نمط SupplierPaymentForm) ثم تُمرَّر
+                    // للنافذة؛ الفحص الجلسي الفعلي في clsReturnService (الواجهة تخفي فقط).
+                    int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
+                    int? activeSessionId = null;
+                    try
+                    {
+                        using var scope = Program.Services.CreateScope();
+                        var posService = scope.ServiceProvider.GetRequiredService<clsPosSessionService>();
+                        var openSession = await posService.GetOpenSessionByUserAsync(actorUserId);
+                        if (openSession.IsSuccess)
+                            activeSessionId = openSession.Data?.SessionId;
+                    }
+                    catch
+                    {
+                        // بلا جلسة محسومة: تُمرَّر null — حارس الخدمة (ValidateDrawerSessionAsync)
+                        // هو الفيصل النهائي في قبول الطلب أو رفضه
+                    }
+
+                    using var returnForm = SupplierReturnForm.CreateForInvoice(inv.InvoiceId, activeSessionId);
+                    if (returnForm.ShowDialog(FindForm()) == DialogResult.OK)
                         _ = LoadDataAsync();
                 }
             };
