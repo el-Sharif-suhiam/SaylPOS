@@ -48,6 +48,12 @@ namespace Sayl.Core.Services
 
         public const string SalaryExpenseCategory = "رواتب";
 
+        /// <summary>حد العمود DECIMAL(10,2) — سقف أي وحدة أو مبلغ يُدخل يدويًا.</summary>
+        public const decimal MaxAmount = 99_999_999m;
+
+        /// <summary>الحد الفيزيائي لساعات العمل في اليوم الواحد (سقف تحقق لا قاعدة حضور).</summary>
+        public const decimal MaxDailyHours = 24m;
+
         /// <summary>كشوف فترة محددة (كل الموظفين) أو كشوف موظف.</summary>
         public async Task<List<DtoPayrollRecord>> GetPayrollsAsync(DateOnly? periodFrom = null, DateOnly? periodTo = null, int? employeeId = null)
         {
@@ -106,6 +112,11 @@ namespace Sayl.Core.Services
             if (periodTo > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
                 return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
 
+            // حماية السنة المالية: فترة انتهت قبل بداية السنة الحالية = سنة مغلقة مؤرشفة —
+            // لا تُولَّد لها كشوف (نفس حارس التعديل/الصرف/العكس أدناه)
+            if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(periodTo))
+                return Result<int>.Fail("الفترة تسبق بداية السنة المالية الحالية — سنة مغلقة لا تُولَّد لها كشوف.");
+
             var employees = await _dbContext.Employees
                 // المستقيل قبل الفترة لا كشف له (تُرشّحه حالة to < from أدناه) —
                 // أما من استقال داخل الفترة فله استحقاق أيام عمله حتى تاريخ استقالته
@@ -117,8 +128,12 @@ namespace Sayl.Core.Services
 
             // C3: موجودات الفترة والعطل الرسمية تُسحب مرة واحدة لا لكل موظف —
             // وكانت CountHolidaysInRangeAsync تقرأ كل العطل من القاعدة لكل موظف يومي.
-            var existingForPeriod = (await _dbContext.PayrollRecords
-                .Where(r => r.PeriodFrom == periodFrom && r.PeriodTo == periodTo)
+            // ⚠ حماية الدفع المزدوج: الفهرس الفريد UQ_PayrollRecords_Employee_Period
+            // يمنع التطابق التام فقط — فترتان متداخلتان جزئيًا (1–15 و10–20)
+            // تمرّان من الفهرس ويدفعان نفس الأيام مرتين. نرفض أي تداخل زمني
+            // مع كشف قائم للموظف (idempotent: المتداخل يُتجاوز لا يُخطأ).
+            var employeesWithOverlap = (await _dbContext.PayrollRecords
+                .Where(r => r.PeriodFrom <= periodTo && r.PeriodTo >= periodFrom)
                 .Select(r => r.EmployeeId)
                 .ToListAsync()).ToHashSet();
 
@@ -139,8 +154,8 @@ namespace Sayl.Core.Services
                 if (to < from)
                     continue; // لم يُعيَّن بعد أو استقال قبل الفترة
 
-                if (existingForPeriod.Contains(emp.EmployeeId))
-                    continue; // كشف لهذه الفترة موجود (idempotent)
+                if (employeesWithOverlap.Contains(emp.EmployeeId))
+                    continue; // له كشف متداخل مع هذه الفترة — لا دفع مزدوج لنفس الأيام (idempotent)
 
                 decimal rate = emp.Salary ?? 0;
                 decimal workedUnits = 0, holidayUnits = 0, gross = 0;
@@ -158,15 +173,18 @@ namespace Sayl.Core.Services
                     }
                     case enSalaryType.daily:
                     {
-                        // الإجازات الرسمية داخل نطاق عمله تُحسب أيامًا مدفوعة
-                        holidayUnits = CountHolidaysInRange(holidays, from, to);
+                        // الإجازات الرسمية المدفوعة داخل نطاق عمله — أيام مميزة (HashSet):
+                        // تداخل إجازتين في اليوم نفسه كان يُحسب مرتين، والإجازة السنوية
+                        // الواقعة 29 فبراير كانت ترمي استثناءً في السنوات غير الكبيسة.
+                        // الإجازة الواقعة في عطلة أسبوعية (الجمعة/السبت) لا تُدفع —
+                        // قاعدة الكود الأصلي «لا تُحتسب مرتين».
+                        holidayUnits = GetPaidHolidayDays(holidays, from, to).Count;
 
                         // اقتراح أيام العمل: كل أيام النطاق عدا الجمعة والسبت (عطلة أسبوعية افتراضية)
-                        // — المحاسب يرى قيمة منطقية يعدّلها (غياب/استئذان) بدل البدء من صفر
-                        workedUnits = CountWorkdaysExcludeWeekend(from, to);
-
-                        // الإجازة الرسمية الواقعة في يوم عطلة أسبوعية لا تُحتسب مرتين
-                        workedUnits = Math.Max(0, workedUnits - holidayUnits);
+                        // — المحاسب يرى قيمة منطقية يعدّلها (غياب/استئذان) بدل البدء من صفر.
+                        // يوم الإجازة الرسمية على يوم عمل ليس يوم عمل — يُخصم من أيام العمل
+                        // (الجمع القديم طرح الإجازات الأسبوعية أيضًا فأظهر وحدات مضللة).
+                        workedUnits = Math.Max(0, CountWorkdaysExcludeWeekend(from, to) - holidayUnits);
 
                         gross = rate * (workedUnits + holidayUnits);
                         break;
@@ -241,6 +259,39 @@ namespace Sayl.Core.Services
             if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(record.PeriodFrom))
                 return Result.Fail("كشف من سنة مالية مغلقة — لا يمكن تعديله (مؤرشف).");
 
+            // ══ التحقق من سقف الوحدات حسب نوع الراتب ══
+            // (الحد فيزيائي/تقويمي لا قاعدة حضور — قيم الوحدات تُعبأ يدويًا)
+            int periodDays = record.PeriodTo.DayNumber - record.PeriodFrom.DayNumber + 1;
+            switch (record.SalaryType)
+            {
+                case enSalaryType.monthly:
+                    // WorkedUnits = أيام الوجود الفعلي داخل الفترة (Proration) — لا تتجاوز طولها
+                    if (workedUnits > periodDays)
+                        return Result.Fail($"أيام الوجود ({workedUnits:0.##}) تتجاوز طول الفترة ({periodDays} يوم).");
+                    break;
+
+                case enSalaryType.daily:
+                    // أيام العمل + الإجازات لا تتجاوز أيام الفترة — لا أجر لأيام غير موجودة
+                    if (workedUnits + holidayUnits > periodDays)
+                        return Result.Fail($"مجموع أيام العمل والإجازات ({workedUnits + holidayUnits:0.##}) يتجاوز طول الفترة ({periodDays} يوم).");
+                    break;
+
+                case enSalaryType.hourly:
+                    // سقف فيزيائي فقط: 24 ساعة كحد أقصى لكل يوم في الفترة
+                    if (workedUnits > periodDays * MaxDailyHours)
+                        return Result.Fail($"ساعات العمل ({workedUnits:0.##}) تتجاوز الحد الأقصى للفترة ({periodDays * MaxDailyHours:0.#} ساعة = 24×{periodDays} يوم).");
+                    break;
+            }
+
+            // سقف المقادير: حدود العمود DECIMAL(10,2) — لا فيض قاعدة بيانات بقيمة شاذة
+            if (workedUnits > MaxAmount || holidayUnits > MaxAmount || deductions > MaxAmount || additions > MaxAmount)
+                return Result.Fail($"القيمة تتجاوز الحد الأقصى المسموح ({MaxAmount:N0}).");
+
+            // الخصومات تُحقَّن قبل الحفظ: لا صافٍ سالب بصمت (كان يُقصَّص إلى صفر دون إخبار)
+            decimal grossAfterEdit = ComputeGross(record.SalaryType, record.Rate, workedUnits, holidayUnits, record.PeriodFrom, record.PeriodTo);
+            if (deductions > grossAfterEdit + additions)
+                return Result.Fail($"الخصومات ({deductions:0.##}) تتجاوز الإجمالي زائد الإضافات ({grossAfterEdit + additions:0.##}) — الصافي لا يكون سالباً.");
+
             record.WorkedUnits = workedUnits;
             record.HolidayUnits = holidayUnits;
             record.Deductions = deductions;
@@ -258,30 +309,38 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تحديث الكشف.");
         }
 
-        /// <summary>إعادة حساب الإجمالي والصافي حسب نوع الراتب (الشهري يحترم Proration المحفوظ في WorkedUnits).</summary>
-        private static void Recalc(PayrollRecord r)
+        /// <summary>حساب الإجمالي حسب نوع الراتب (دالّة نقية — للتحقق قبل أي تعديل للحالة).
+        /// الشهري يحترم Proration المحفوظ في WorkedUnits.</summary>
+        private static decimal ComputeGross(enSalaryType salaryType, decimal rate, decimal workedUnits,
+            decimal holidayUnits, DateOnly periodFrom, DateOnly periodTo)
         {
-            decimal gross = r.SalaryType switch
+            decimal gross = salaryType switch
             {
-                enSalaryType.daily => r.Rate * (r.WorkedUnits + r.HolidayUnits),
-                enSalaryType.hourly => r.Rate * r.WorkedUnits,
-                _ => r.Rate * r.WorkedUnits   // monthly: WorkedUnits = أيام المدة الفعلية (Proration عند التوليد)
+                enSalaryType.daily => rate * (workedUnits + holidayUnits),
+                enSalaryType.hourly => rate * workedUnits,
+                _ => rate * workedUnits   // monthly: WorkedUnits = أيام المدة الفعلية (Proration عند التوليد)
             };
 
             // إجمالي الفترة الكاملة = PeriodTo-PeriodFrom+1 — نعيد اشتقاقه من الطول الفعلي للفترة
-            if (r.SalaryType == enSalaryType.monthly)
+            if (salaryType == enSalaryType.monthly)
             {
-                int totalDays = r.PeriodTo.DayNumber - r.PeriodFrom.DayNumber + 1;
+                int totalDays = periodTo.DayNumber - periodFrom.DayNumber + 1;
                 // WorkedUnits هنا أيام الوجود الفعلي (HireDate..ResignDate داخل الفترة)
-                if (totalDays > 0 && r.WorkedUnits > 0 && r.WorkedUnits < totalDays)
-                    gross = r.Rate * r.WorkedUnits / totalDays;
-                else if (r.WorkedUnits >= totalDays)
-                    gross = r.Rate; // كامل الفترة
+                if (totalDays > 0 && workedUnits > 0 && workedUnits < totalDays)
+                    gross = rate * workedUnits / totalDays;
+                else if (totalDays > 0 && workedUnits >= totalDays)
+                    gross = rate; // كامل الفترة
             }
 
-            r.Gross = Math.Round(gross, 2);
+            return gross;
+        }
+
+        /// <summary>إعادة حساب الإجمالي والصافي حسب نوع الراتب.</summary>
+        private static void Recalc(PayrollRecord r)
+        {
+            r.Gross = Math.Round(ComputeGross(r.SalaryType, r.Rate, r.WorkedUnits, r.HolidayUnits, r.PeriodFrom, r.PeriodTo), 2);
             decimal net = r.Gross - r.Deductions + r.Additions;
-            r.Net = Math.Round(net < 0 ? 0 : net, 2); // CHECK Net >= 0
+            r.Net = Math.Round(net < 0 ? 0 : net, 2); // CHECK Net >= 0 — الخصومات تُرفض قبل الحفظ في Update
         }
 
         /// <summary>
@@ -303,6 +362,11 @@ namespace Sayl.Core.Services
 
             if (record.Net <= 0)
                 return Result.Fail("الصافي يجب أن يكون أكبر من صفر قبل الصرف (قيد المصروفات يرفض صفراً).");
+
+            // دفاعي: كشف معلق لا يحمل مصروفًا — مرجع يتيم يعني مصروفًا قائمًا بالفعل،
+            // والصرف هنا سيُنشئ مصروفًا ثانيًا لنفس الكشف (دفع مزدوج محاسبي)
+            if (record.ExpenseId != null)
+                return Result.Fail("الكشف يحمل مرجع مصروف رغم حالته المعلقة — عالج الأمر يدويًا مع المحاسب قبل الصرف.");
 
             if (await _fiscalYear.IsBeforeCurrentFiscalYearAsync(record.PeriodTo))
                 return Result.Fail("كشف من سنة مالية مغلقة — لا يمكن صرفه (مؤرشف).");
@@ -398,7 +462,15 @@ namespace Sayl.Core.Services
 
                 var expense = await _dbContext.Expenses.FindAsync(record.ExpenseId.Value);
                 if (expense != null)
+                {
+                    // العكس يحذف مصروف هذا الكشف وحده — المرجع الموجَّه يدويًا إلى
+                    // مصروف آخر (Notes لا تحمل بصمة الكشف) لا يُحذف تلقائيًا
+                    string expectedMarker = $"كشف راتب #{record.PayrollId}";
+                    if (expense.Notes == null || !expense.Notes.Contains(expectedMarker, StringComparison.Ordinal))
+                        return Result.Fail("المصروف المرتبط لا يطابق هذا الكشف — لم يُحذف شيء، راجع المحاسب.");
+
                     _dbContext.Expenses.Remove(expense);
+                }
 
                 record.Status = enPayrollStatus.pending;
                 record.PaidAt = null;
@@ -445,23 +517,45 @@ namespace Sayl.Core.Services
             return count;
         }
 
-        /// <summary>عدد أيام الإجازات الرسمية المدفوعة داخل نطاق — نسخة داخلية
-        /// بذاكرة لا بقراءة قاعدة (تستلم قائمة العطل المسحوبة مرة واحدة — C3).</summary>
-        private static decimal CountHolidaysInRange(List<OfficialHoliday> holidays, DateOnly from, DateOnly to)
+        /// <summary>
+        /// أيام الإجازات الرسمية المدفوعة داخل نطاق — قائمة أيام مميزة لا مجموع:
+        /// 1) تداخل إجازتين في اليوم نفسه يُحسب مرة واحدة (كان يُحسب مرتين).
+        /// 2) الإجازة السنوية الواقعة 29 فبراير تُثبَّت على 28 فبراير في السنوات غير
+        ///    الكبيسة (كانت DateOnly ترمي ArgumentOutOfRange فتُفشل التوليد كله).
+        /// 3) الإجازة السنوية الممتدة عبر رأس السنة (30 ديسمبر ← 2 يناير) تُفحص
+        ///    بسنةَي البدء المرشحتين حتى يُحتسب الامتداد داخل الفترة.
+        /// 4) الإجازة الواقعة على عطلة أسبوعية (الجمعة/السبت) مستبعدة — لا تُدفع مرتين.
+        /// 📖 قاعدة عمل موثقة: إجازة يوم عطلة أسبوعية لا تُضاف كأجرة — سلوك الكود الأصلي.
+        /// </summary>
+        private static List<DateOnly> GetPaidHolidayDays(List<OfficialHoliday> holidays, DateOnly from, DateOnly to)
         {
-            decimal total = 0;
+            var days = new HashSet<DateOnly>();
             foreach (var h in holidays)
             {
-                var start = h.IsAnnual ? new DateOnly(from.Year, h.HolidayDate.Month, h.HolidayDate.Day)
-                                       : h.HolidayDate;
-                for (int i = 0; i < h.DurationDays; i++)
+                if (h.DurationDays <= 0)
+                    continue;
+
+                // سنوات البدء المرشحة: السنة نفسها والسنة السابقة (امتداد رأس السنة)
+                int clampDay = h.IsAnnual && h.HolidayDate.Month == 2 && h.HolidayDate.Day == 29 ? 28 : h.HolidayDate.Day;
+                IEnumerable<int> candidateYears = h.IsAnnual
+                    ? new[] { from.Year - 1, from.Year }
+                    : new[] { h.HolidayDate.Year };
+
+                foreach (int year in candidateYears)
                 {
-                    var day = start.AddDays(i);
-                    if (day >= from && day <= to)
-                        total++;
+                    var start = new DateOnly(year, h.HolidayDate.Month, clampDay);
+                    for (int i = 0; i < h.DurationDays; i++)
+                    {
+                        var day = start.AddDays(i);
+                        if (day < from || day > to)
+                            continue;
+                        if (day.DayOfWeek == DayOfWeek.Friday || day.DayOfWeek == DayOfWeek.Saturday)
+                            continue;
+                        days.Add(day);
+                    }
                 }
             }
-            return total;
+            return days.ToList();
         }
     }
 }
