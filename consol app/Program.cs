@@ -1735,7 +1735,7 @@ namespace consol_app
             var deact = await products.DeactivateProductAsync(created.Data, admin.UserId);
             Check("product deactivate", deact.IsSuccess, deact.Message);
 
-            var act = await products.ActivateProductAsync(created.Data);
+            var act = await products.ActivateProductAsync(created.Data, admin.UserId);
             Check("product reactivate", act.IsSuccess, act.Message);
         }
 

@@ -94,7 +94,7 @@ namespace Sayl.Core.Services
                  // Upgrade_10: البريد الفريد المُرشّح — تعارض بريد فعلي (ليس NULL)
                  await transaction.RollbackAsync();
                  return Result<int>.Fail(string.IsNullOrWhiteSpace(dtoParty.Email)
-                     ? "بريد الطرف مطلوب لإكمال الإضافة." 
+                     ? "بريد الطرف مطلوب لإكمال الإضافة."
                      : $"البريد الإلكتروني «{dtoParty.Email}» مستخدم مسبقًا لطرف آخر.");
              }
              catch (Exception ex)
@@ -104,111 +104,156 @@ namespace Sayl.Core.Services
              }
          }
 
-          // تحديث طرف (القيم المرسلة فقط) — VULN-26: بوابة محاسب فأعلى
-          public async Task<Result> UpdatePartyAsync(DtoParty dtoParty, int? actorUserId = null)
-          {
-              if (dtoParty.PartyId <= 0)
-                  return Result.Fail("معرف الطرف غير صالح.");
+        /// <summary>
+        /// تحديث طرف (القيم المرسلة فقط) — VULN-26: بوابة محاسب فأعلى.
+        ///
+        /// الأطراف المشتركة ('B' عميل + مورد معًا): التحويل من 'C' أو 'S' إلى 'B'
+        /// يُنشئ السجل الناقص (سجل مورد لعميل، أو سجل عميل لمورد) بنفس PartyId —
+        /// فلا تُفقد أي سجلات ولا تاريخ معاملات (الفواتير والمدفوعات مربوطة
+        /// بـPartyId الذي لا يتغير). التحويل idempotent: لو وُجد السجل مسبقًا
+        /// لا يُكرر. النزول من 'B' إلى 'C'/'S' ممنوع — يخفي أحد السجلين من
+        /// شاشته وتاريخه المالي من منتقيه.
+        /// </summary>
+        public async Task<Result> UpdatePartyAsync(DtoParty dtoParty, int? actorUserId = null)
+        {
+            if (dtoParty.PartyId <= 0)
+                return Result.Fail("معرف الطرف غير صالح.");
 
-              Party? party = await _dbContext.Parties.FindAsync(dtoParty.PartyId);
-              if (party == null)
-                  return Result.Fail("الطرف غير موجود.");
+            Party? party = await _dbContext.Parties.FindAsync(dtoParty.PartyId);
+            if (party == null)
+                return Result.Fail("الطرف غير موجود.");
 
-              int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              int required = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-              if (!AppPermissions.Has(actorRole, required))
-                  return Result.Fail("تعديل بيانات هذا الطرف يتطلب صلاحية شاشته المخصصة.");
+            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.Name))
-                 party.Name = clsValidation.ValidateString(dtoParty.Name, "Name");
+            // ══ تحويل النوع: قواعد البوابة والسجلات ══
+            bool convertingToCombined = false;
+            if (party.PartyType == 'B')
+            {
+                if (dtoParty.PartyType != 'B')
+                    return Result.Fail("لا يمكن تحويل طرف مشترك إلى عميل أو مورد وحيد.");
+            }
+            else if (dtoParty.PartyType == 'B')
+            {
+                // التحويل من عميل ← مشترك يُنشئ سجل مورد: صلاحية الموردين مطلوبة أيضًا
+                if (party.PartyType == 'C' && !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
+                    return Result.Fail("تحويل عميل إلى طرف مشترك يتطلب صلاحية الموردين أيضًا.");
 
-             // السماح بتغيير النوع إلى 'B' فقط إذا كان حاليًا ليس 'B' (اختياري)
-             if (party.PartyType != 'B' && dtoParty.PartyType == 'B')
-                 party.PartyType = dtoParty.PartyType;
+                // التحويل من مورد ← مشترك يُنشئ سجل عميل: صلاحية العملاء مطلوبة أيضًا
+                if (party.PartyType == 'S' && !AppPermissions.Has(actorRole, AppPermissions.Customers))
+                    return Result.Fail("تحويل مورد إلى طرف مشترك يتطلب صلاحية العملاء أيضًا.");
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.Email))
-                 party.Email = clsValidation.ValidateEmail(dtoParty.Email);
+                convertingToCombined = true;
+            }
+            else
+            {
+                int required = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+                if (!AppPermissions.Has(actorRole, required))
+                    return Result.Fail("تعديل بيانات هذا الطرف يتطلب صلاحية شاشته المخصصة.");
+            }
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.Phone1))
-                 party.Phone1 = dtoParty.Phone1;
+            if (!string.IsNullOrWhiteSpace(dtoParty.Name))
+                party.Name = clsValidation.ValidateString(dtoParty.Name, "Name");
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.Phone2))
-                 party.Phone2 = dtoParty.Phone2;
+            party.PartyType = convertingToCombined ? 'B' : party.PartyType;
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.AddressLine1))
-                 party.AddressLine1 = dtoParty.AddressLine1;
+            if (!string.IsNullOrWhiteSpace(dtoParty.Email))
+                party.Email = clsValidation.ValidateEmail(dtoParty.Email);
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.AddressLine2))
-                 party.AddressLine2 = dtoParty.AddressLine2;
+            if (!string.IsNullOrWhiteSpace(dtoParty.Phone1))
+                party.Phone1 = dtoParty.Phone1;
 
-             if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
-                 party.Notes = dtoParty.Notes;
+            if (!string.IsNullOrWhiteSpace(dtoParty.Phone2))
+                party.Phone2 = dtoParty.Phone2;
 
-             party.UpdatedAt = DateTime.UtcNow;
-             await _dbContext.SaveChangesAsync();
-             return Result.Ok("تم تحديث الطرف بنجاح.");
-         }
+            if (!string.IsNullOrWhiteSpace(dtoParty.AddressLine1))
+                party.AddressLine1 = dtoParty.AddressLine1;
 
-          // تعطيل طرف (حذف ناعم)
-          // VULN-34: طرف له رصيد مستحق لا يُعطَّل — كان التعطيل يخفيه من
-          // كل القوائم والمنتقيات فيستحيل سداد رصيده المتبقي من أي شاشة
-          // (عملاء: زر التحصيل يختفي؛ موردون: «سداد رصيد» يختفي) والدَّين
-          // يبقى في التقارير للأبد. المطلوب: سدّد ثم عطّل.
-          // VULN-26: وبوابة محاسب فأعلى — التعطيل قرار إداري.
-          public async Task<Result> DeactivatePartyAsync(int id, int? actorUserId = null)
-          {
-              Party? party = await _dbContext.Parties.FindAsync(id);
-              if (party == null)
-                  return Result.Fail("الطرف غير موجود.");
+            if (!string.IsNullOrWhiteSpace(dtoParty.AddressLine2))
+                party.AddressLine2 = dtoParty.AddressLine2;
 
-              int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              int requiredDeact = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-              if (!AppPermissions.Has(actorRole, requiredDeact))
-                  return Result.Fail("تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
+            if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
+                party.Notes = dtoParty.Notes;
 
-              if (party.PartyType == 'C')
-              {
-                  var customer = await _dbContext.Customers.FindAsync(id);
-                  if (customer != null && (customer.Balance ?? 0) > 0)
-                      return Result.Fail($"لا يمكن تعطيل العميل '{party.Name}' — عليه رصيد مستحق ({customer.Balance:N2}). حصّل الرصيد أولًا.");
-              }
-              else if (party.PartyType == 'S')
-              {
-                  var supplier = await _dbContext.Suppliers.FindAsync(id);
-                  if (supplier != null && (supplier.Balance ?? 0) > 0)
-                      return Result.Fail($"لا يمكن تعطيل المورد '{party.Name}' — له رصيد مستحق ({supplier.Balance:N2}). سدّد الرصيد أولًا.");
-              }
+            party.UpdatedAt = DateTime.UtcNow;
 
-              party.IsActive = false;
-              await _dbContext.SaveChangesAsync();
-              return Result.Ok("تم تعطيل الطرف بنجاح.");
-          }
+            // ══ إنشاء السجل الناقص عند التحويل إلى 'B' ══
+            // نفس PartyId في الجدولين — السجلات المالية القائمة (فواتير، مدفوعات،
+            // أرصدة) تبقى سليمة. الفحص المسبق يمنع التكرار.
+            if (convertingToCombined)
+            {
+                bool hasSupplier = await _dbContext.Suppliers.AnyAsync(s => s.PartyId == party.PartyId);
+                if (!hasSupplier)
+                    _dbContext.Suppliers.Add(new Supplier { PartyId = party.PartyId, Balance = 0, Category = null });
 
-          // إعادة تفعيل طرف — VULN-26: بوابة محاسب فأعلى (قرار إداري معاكس)
-          public async Task<Result> ActivatePartyAsync(int id, int? actorUserId = null)
-          {
-              Party? party = await _dbContext.Parties.FindAsync(id);
-              if (party == null)
-                  return Result.Fail("الطرف غير موجود.");
+                bool hasCustomer = await _dbContext.Customers.AnyAsync(c => c.PartyId == party.PartyId);
+                if (!hasCustomer)
+                    _dbContext.Customers.Add(new Customer { PartyId = party.PartyId, Balance = 0, CreditLimit = 0 });
+            }
 
-              int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
-              int requiredAct = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
-              if (!AppPermissions.Has(actorRole, requiredAct))
-                  return Result.Fail("إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم تحديث الطرف بنجاح.");
+        }
 
-              party.IsActive = true;
-              await _dbContext.SaveChangesAsync();
-              return Result.Ok("تم إعادة تفعيل الطرف بنجاح.");
-          }
+        /// <summary>
+        /// تعطيل طرف (حذف ناعم) — VULN-34: طرف له رصيد مستحق لا يُعطَّل — كان
+        /// التعطيل يخفيه من كل القوائم والمنتقيات فيستحيل سداد رصيده المتبقي
+        /// من أي شاشة (عملاء: زر التحصيل يختفي؛ موردون: «سداد رصيد» يختفي)
+        /// والدين يبقى في التقارير للأبد. المطلوب: سدّد ثم عطّل.
+        /// الأطراف المشتركة ('B'): يُفحص رصيد العميل ورصيد المورد معًا —
+        /// أي رصيد مستحق على أي من السجلين يمنع التعطيل.
+        /// VULN-26: وبوابة محاسب فأعلى — التعطيل قرار إداري.
+        /// </summary>
+        public async Task<Result> DeactivatePartyAsync(int id, int? actorUserId = null)
+        {
+            Party? party = await _dbContext.Parties.FindAsync(id);
+            if (party == null)
+                return Result.Fail("الطرف غير موجود.");
 
-          /// <summary>قيمة دور المستخدم (VULN-26 — بوابات الأطراف الخدمية).</summary>
-          private async Task<int> GetUserRoleValueAsync(int userId)
-          {
-              if (userId <= 0)
-                  return 0;
-              var user = await _dbContext.Users.Include(u => u.Role)
-                  .FirstOrDefaultAsync(u => u.UserId == userId);
-              return user?.Role.RoleValue ?? 0;
-          }
-      }
+            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
+            int requiredDeact = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+            if (!AppPermissions.Has(actorRole, requiredDeact))
+                return Result.Fail("تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
+
+            // الفحص بالسجلات الفعلية لا بالنوع فقط: الطرف المشترك ('B') له
+            // سجلا عميل ومورد كلاهما يحمل رصيدًا مستقلًا يجب فحصه.
+            var customer = await _dbContext.Customers.FindAsync(id);
+            if (customer != null && (customer.Balance ?? 0) > 0)
+                return Result.Fail($"لا يمكن تعطيل العميل '{party.Name}' — عليه رصيد مستحق ({customer.Balance:N2}). حصّل الرصيد أولًا.");
+
+            var supplier = await _dbContext.Suppliers.FindAsync(id);
+            if (supplier != null && (supplier.Balance ?? 0) > 0)
+                return Result.Fail($"لا يمكن تعطيل المورد '{party.Name}' — له رصيد مستحق ({supplier.Balance:N2}). سدّد الرصيد أولًا.");
+
+            party.IsActive = false;
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم تعطيل الطرف بنجاح.");
+        }
+
+        /// <summary>إعادة تفعيل طرف — VULN-26: بوابة محاسب فأعلى (قرار إداري معاكس).</summary>
+        public async Task<Result> ActivatePartyAsync(int id, int? actorUserId = null)
+        {
+            Party? party = await _dbContext.Parties.FindAsync(id);
+            if (party == null)
+                return Result.Fail("الطرف غير موجود.");
+
+            int actorRole = await GetUserRoleValueAsync(actorUserId ?? 0);
+            int requiredAct = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
+            if (!AppPermissions.Has(actorRole, requiredAct))
+                return Result.Fail("إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");
+
+            party.IsActive = true;
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم إعادة تفعيل الطرف بنجاح.");
+        }
+
+        /// <summary>قيمة دور المستخدم (VULN-26 — بوابات الأطراف الخدمية).</summary>
+        private async Task<int> GetUserRoleValueAsync(int userId)
+        {
+            if (userId <= 0)
+                return 0;
+            var user = await _dbContext.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+            return user?.Role.RoleValue ?? 0;
+        }
+    }
   }

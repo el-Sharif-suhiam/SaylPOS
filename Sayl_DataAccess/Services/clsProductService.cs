@@ -328,6 +328,12 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تحديث المنتج بنجاح.");
         }
 
+        /// <summary>
+        /// تعطيل منتج. المنتجات المخزنية التي تحمل مخزونًا فعليًا (دفعات أو مخزون
+        /// متاح) لا يمكن تعطيلها لأن التعطيل يُخفيها من كل شاشات المخزون والفواتير
+        /// فتبقى الكميات عالقة بلا مسار استخراج. الكميات المحجوزة (لأقساط معلقة)
+        /// تمنع التعطيل أيضًا. المنتجات غير المخزنية ليس لها مخزون فيُسمح بالتعطيل.
+        /// </summary>
         public async Task<Result> DeactivateProductAsync(int productId, int actorUserId)
         {
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
@@ -338,9 +344,22 @@ namespace Sayl.Core.Services
             if (product == null)
                 return Result.Fail("المنتج غير موجود.");
 
+            // الكميات المحجوزة (فسخ فاتورة معلقة): تمنع التعطيل
             var inventory = await _dbContext.Inventories.FindAsync(productId);
             if (inventory != null && (inventory.QuantityReserved ?? 0) > 0)
                 return Result.Fail("لا يمكن تعطيل المنتج لوجود كميات محجوزة.");
+
+            // المنتجات المخزنية: المخزون الفعلي (دفعات) يجب أن يكون صفرًا —
+            // التعطيل يخفي المنتج من منتقيات الفواتير فيصعب تحرير المخزون يدويًا.
+            if (product.Type == "stock")
+            {
+                if (inventory != null && (inventory.QuantityAvailable ?? 0) > 0)
+                    return Result.Fail($"لا يمكن تعطيل المنتج — عليه مخزون متاح ({inventory.QuantityAvailable} وحدة). أفرغ المخزون أولًا.");
+
+                bool hasBatchStock = await _dbContext.Batches.AnyAsync(b => b.ProductId == productId && b.BatchQuantity > 0);
+                if (hasBatchStock)
+                    return Result.Fail("لا يمكن تعطيل المنتج — عليه دفعات بكمية. أفرغ الدفعات أولًا.");
+            }
 
             product.IsActive = false;
 
@@ -349,8 +368,13 @@ namespace Sayl.Core.Services
             return Result.Ok("تم تعطيل المنتج بنجاح.");
         }
 
-        public async Task<Result> ActivateProductAsync(int productId)
+        /// <summary>إعادة تفعيل منتج — يتطلب صلاحية شاشة المنتجات.</summary>
+        public async Task<Result> ActivateProductAsync(int productId, int actorUserId)
         {
+            var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
+            if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Products))
+                return Result.Fail("إعادة تفعيل المنتجات تتطلب صلاحية شاشة المنتجات.");
+
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)
                 return Result.Fail("المنتج غير موجود.");

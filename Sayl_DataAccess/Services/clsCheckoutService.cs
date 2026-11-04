@@ -92,6 +92,39 @@ END";
                     return Result<int>.Fail($"الخصم فوق {clsPermissions.MaxCashierDiscountPercent:0.#}% يتطلب صلاحية شاشة فواتير البيع. راجع المدير.");
             }
 
+            // ══ صلاحية أسعار الوحدة المُرسلة من العميل (الواجهة ليست حد الثقة) ══
+            // UnitPrice لقطة سعر السلة (VULN-14). أي انحراف لأسفل عن سعر البيع
+            // الحالي للمنتج = خصم ضمني — كاشير بلا صلاحية فواتير البيع لا يمكنه
+            // تجاوز سقف الخصم بتعديل السعر بدل حقل الخصم. الانحراف لأعلى مقبول
+            // (رفع سعر مشروع للصلاحيات العليا، والدفع محكوم بصافي الفاتورة).
+            List<Product> priceCheckProducts = await _dbContext.Products
+                .Where(p => request.Items.Select(i => i.ProductId).Contains(p.ProductId))
+                .ToListAsync();
+
+            foreach (var item in request.Items)
+            {
+                if (item.UnitPrice.HasValue)
+                {
+                    if (item.UnitPrice.Value < 0)
+                        return Result<int>.Fail("سعر الوحدة لا يمكن أن يكون سالبًا.");
+
+                    var prod = priceCheckProducts.FirstOrDefault(p => p.ProductId == item.ProductId);
+                    if (prod != null && item.UnitPrice.Value < prod.BasePrice)
+                    {
+                        decimal implicitDiscountPercent =
+                            (prod.BasePrice - item.UnitPrice.Value) / prod.BasePrice * 100m;
+                        if (implicitDiscountPercent > clsPermissions.MaxCashierDiscountPercent)
+                        {
+                            int actorRole = await GetUserRoleValueAsync(request.UserId);
+                            if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                                return Result<int>.Fail(
+                                    $"سعر الوحدة المُرسل للمنتج «{prod.Name}» يمثل خصمًا ضمنيًا بنسبة {implicitDiscountPercent:0.#}% " +
+                                    $"يتجاوز الحد المسموح ({clsPermissions.MaxCashierDiscountPercent:0.#}%) — يتطلب صلاحية شاشة فواتير البيع.");
+                        }
+                    }
+                }
+            }
+
             if (request.CustomerId.HasValue)
             {
                 bool customerExists = await _dbContext.Customers.AnyAsync(c => c.PartyId == request.CustomerId.Value);
