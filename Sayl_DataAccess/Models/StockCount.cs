@@ -32,6 +32,9 @@ namespace Sayl.Core.Models
         /// </summary>
         public int? Difference => CountedQuantity - (BookQuantityAtCount ?? BookQuantity);
 
+        /// <summary>عرض تقريبي قديم من UnitCost المخزنة (سعر آخر شراء لحظة بدء الجلسة) —
+        /// لا يُستخدم في التقييم. التقييم الرسمي بتكاليف الدفعات الفعلية تُحسبه الخدمة
+        /// (ComputeVarianceValue) وتضعه على StockCountVM.DifferenceCost — COSTING.md.</summary>
         public decimal DifferenceCost => (Difference ?? 0) * UnitCost;
 
         public bool IsPosted { get; set; }

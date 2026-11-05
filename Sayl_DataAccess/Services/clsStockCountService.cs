@@ -180,6 +180,9 @@ END";
                         ProductId = p.ProductId,
                         ProductName = p.Name,
                         BookQuantity = p.Book,
+                        // سعر آخر شراء لحظة بدء الجلسة — للعرض التاريخي فقط.
+                        // تقييم الفروق بتكاليف الدفعات الفعلية (ComputeVarianceValue)
+                        // لا بهذا العمود — انظر COSTING.md وGetOpenSessionAsync.
                         UnitCost = p.CostPrice,
                         CountedBy = userId,
                         CreatedAt = DateTime.UtcNow
@@ -202,35 +205,135 @@ END";
             }
         }
 
+        // ─────────────────────────────────────────────────
+        // تقييم الفروق بتكاليف الدفعات (COSTING.md) — لا Product.CostPrice العامة:
+        // • العجز (diff < 0): الترحيل يستهلك الدفعات FEFO عبر AdjustStockAsync
+        //   (نفس الترتيب: الأقرب انتهاءً أولًا، ثم المحجوبة، ثم الأقدم إنشاءً) —
+        //   قيمة الفرق = Σ (المأخوذ من كل دفعة × (UnitCost ?? Product.CostPrice)).
+        //   الدفعة بلا تكلفة تعود إلى Product.CostPrice (الاحتياط الموثق).
+        // • الفائض (diff > 0): الترحيل ينشئ دفعة تلقائية بلا تكلفة (ADJ-…) يرجع
+        //   استهلاكها اللاحق إلى Product.CostPrice — فقيمته = diff × Product.CostPrice
+        //   (نفس الاحتياط الموثق، لا تكلفة مُخترعة).
+        // • دفعات غير كافية (تقدير قبلي فقط — الترحيل نفسه سيفشل): المتبقي
+        //   يُقيَّم صراحةً بـProduct.CostPrice احتياطًا موثقًا.
+        // ─────────────────────────────────────────────────
+        /// <summary>صنف الدفعة للاستهلاك FEFO: كميتها الحالية وتكلفتها.</summary>
+        private sealed record FefoBatch(int Quantity, decimal? UnitCost);
+
+        /// <summary>قيمة الفرق (سالب = عجز / موجب = فائض / صفر) بتكاليف الدفعات الفعلية.
+        /// fefoBatches = دفعات المنتج بكمية > 0 بترتيب FEFO نفسه الذي يستهلكه
+        /// AdjustStockAsync (نقصان بلا رقم دفعة). productCost = Product.CostPrice
+        /// الاحتياطي الموثق للدفعات بلا تكلفة وللفائض.</summary>
+        private static decimal ComputeVarianceValue(int diff, decimal productCost, IReadOnlyList<FefoBatch> fefoBatches)
+        {
+            if (diff == 0)
+                return 0m;
+
+            if (diff > 0)
+                return diff * productCost; // الفائض: دفعة تلقائية بلا تكلفة → احتياط Product.CostPrice
+
+            decimal value = 0m;
+            int remaining = -diff; // حجم العجز
+            foreach (var b in fefoBatches)
+            {
+                if (remaining <= 0) break;
+                int take = Math.Min(remaining, b.Quantity); // استهلاك جزئي ممكن — نفس منطق الترحيل
+                value -= take * (b.UnitCost ?? productCost);
+                remaining -= take;
+            }
+
+            if (remaining > 0)
+                value -= remaining * productCost; // دفعات غير كافية: التقدير القبي فقط — الترحيل سيرفض
+
+            return value;
+        }
+
+        /// <summary>دفعات منتجات محددة بكمية > 0 بترتيب FEFO مطابق لترتيب النقصان
+        /// في AdjustStockAsync حرفيًا (صلاحية: الأقرب انتهاءً أولًا وبدون صلاحية أخيرًا،
+        /// ثم المحجوبة أولًا، ثم الأقدم إنشاءً) — الاستعلام الواحد لكل المنتجات.</summary>
+        private async Task<Dictionary<int, List<FefoBatch>>> LoadFefoBatchesAsync(ICollection<int> productIds)
+        {
+            if (productIds.Count == 0)
+                return new Dictionary<int, List<FefoBatch>>();
+
+            var batches = await _dbContext.Batches
+                .Where(b => productIds.Contains(b.ProductId) && b.BatchQuantity > 0)
+                .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
+                .ThenBy(b => b.IsQuarantined ? 0 : 1)
+                .ThenBy(b => b.CreatedAt)
+                .Select(b => new { b.ProductId, b.BatchQuantity, b.UnitCost })
+                .ToListAsync();
+
+            return batches
+                .GroupBy(b => b.ProductId)
+                .ToDictionary(g => g.Key, g => g.Select(b => new FefoBatch(b.BatchQuantity, b.UnitCost)).ToList());
+        }
+
         /// <summary>
         /// سطور جلسة الجرد الحالية (المفتوحة = غير المرحّلة).
         /// • غير المعدود: BookQuantity المعروض = اللقطة + صافي الحركات منذ بدء الجلسة (الكتيب الحي الحالي).
         /// • المعدود: BookQuantity المعروض = BookQuantityAtCount (الكمية الدفترية عند العد الفعلي).
         ///   الفرق المعروض = counted − bookAtCount — هذا هو ما سيُرحَّل بالضبط.
+        /// • DifferenceCost: تقييم الفرق بتكاليف الدفعات المتأثرة فعلًا (COSTING.md) —
+        ///   العجز عبر الدفعات FEFO بتكلفة كل دفعة (UnitCost ?? Product.CostPrice)،
+        ///   والفائض باحتياط Product.CostPrice الموثق. UnitCost المخزّن في السطر
+        ///   (سعر آخر شراء لحظة بدء الجلسة) للعرض التاريخي فقط — لا يُقيَّم به الفرق.
         /// </summary>
         public async Task<List<StockCountVM>> GetOpenSessionAsync()
         {
-            return await _dbContext.StockCounts
+            var rows = await _dbContext.StockCounts
                 .Where(sc => !sc.IsPosted)
                 .OrderBy(sc => sc.ProductName)
-                .Select(sc => new StockCountVM
+                .Select(sc => new
+                {
+                    sc.CountId,
+                    sc.CountSessionId,
+                    sc.ProductId,
+                    sc.ProductName,
+                    sc.BookQuantity,
+                    sc.BookQuantityAtCount,
+                    sc.CountedQuantity,
+                    sc.CountedAt,
+                    sc.UnitCost,
+                    ProductCost = sc.Product.CostPrice,
+                    // uncounted line: live book (snapshot + movements since session start)
+                    PostCountMovements = _dbContext.StockMovements
+                        .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
+                        .Sum(m => (int?)m.Quantity) ?? 0
+                })
+                .ToListAsync();
+
+            var fefoByProduct = await LoadFefoBatchesAsync(rows.Select(r => r.ProductId).Distinct().ToList());
+
+            var result = new List<StockCountVM>(rows.Count);
+            foreach (var sc in rows)
+            {
+                // uncounted line: الكتيب الحي؛ counted line: الكتيب لحظة العد الفعلي
+                int book = sc.CountedAt.HasValue
+                    ? sc.BookQuantityAtCount ?? 0
+                    : sc.BookQuantity + sc.PostCountMovements;
+
+                var vms = new StockCountVM
                 {
                     CountId = sc.CountId,
                     CountSessionId = sc.CountSessionId,
                     ProductId = sc.ProductId,
                     ProductName = sc.ProductName,
-                    // uncounted line: live book (snapshot + movements since session start)
-                    // counted line: book quantity at the moment of counting
-                    BookQuantity = sc.CountedAt.HasValue
-                        ? sc.BookQuantityAtCount ?? 0
-                        : sc.BookQuantity + (_dbContext.StockMovements
-                            .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
-                            .Sum(m => (int?)m.Quantity) ?? 0),
+                    BookQuantity = book,
                     CountedQuantity = sc.CountedQuantity,
                     CountedAt = sc.CountedAt,
-                    UnitCost = sc.UnitCost
-                })
-                .ToListAsync();
+                    UnitCost = sc.UnitCost,
+                    DifferenceCost = sc.CountedQuantity.HasValue
+                        ? ComputeVarianceValue(
+                            sc.CountedQuantity.Value - book,
+                            sc.ProductCost,
+                            fefoByProduct.TryGetValue(sc.ProductId, out var fb) ? fb : new List<FefoBatch>())
+                        : 0m
+                };
+                result.Add(vms);
+            }
+
+            return result;
         }
 
         /// <summary>محاولة حجز قفل الترحيل (Exclusive على مستوى الاتصال المفتوح).
@@ -325,6 +428,9 @@ END";
         /// ملخص جلسة الجرد المفتوحة: المعدود/غير المعدود/الفروق وتكلفتها.
         /// الفرق لكل سطر = المعدود − BookQuantityAtCount (الكمية الدفترية لحظة العد).
         /// أعمدة BookQuantityAtCount = null: تستخدم الفرق من الكتيب الحي (توافق خلفي).
+        /// CostOfDifferences: تقييم بتكاليف الدفعات المتأثرة فعلًا (COSTING.md) —
+        /// العجز عبر الدفعات FEFO بتكلفة كل دفعة (UnitCost ?? Product.CostPrice)،
+        /// والفائض باحتياط Product.CostPrice الموثق — لا UnitCost العامة للسطر.
         /// </summary>
         public async Task<StockCountSummaryVM> GetSummaryAsync()
         {
@@ -332,15 +438,18 @@ END";
                 .Where(sc => !sc.IsPosted && sc.CountedQuantity.HasValue)
                 .Select(sc => new
                 {
+                    sc.ProductId,
                     sc.BookQuantity,
                     sc.BookQuantityAtCount,
                     sc.CountedQuantity,
-                    sc.UnitCost,
+                    ProductCost = sc.Product.CostPrice,
                     Movements = _dbContext.StockMovements
                         .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
                         .Sum(m => (int?)m.Quantity) ?? 0
                 })
                 .ToListAsync();
+
+            var fefoByProduct = await LoadFefoBatchesAsync(lines.Select(l => l.ProductId).Distinct().ToList());
 
             var summary = new StockCountSummaryVM
             {
@@ -356,7 +465,11 @@ END";
                 int diff = l.CountedQuantity!.Value - effectiveBook;
                 summary.AbsolutDiff += Math.Abs(diff);
                 summary.NetDiff += diff;
-                summary.CostOfDifferences += diff * l.UnitCost;
+                // تقييم بتكاليف الدفعات (FEFO للعجز / احتياط Product.CostPrice للفائض)
+                summary.CostOfDifferences += ComputeVarianceValue(
+                    diff,
+                    l.ProductCost,
+                    fefoByProduct.TryGetValue(l.ProductId, out var fb) ? fb : new List<FefoBatch>());
                 if (diff > 0) summary.SurplusLines++;
                 else if (diff < 0) summary.ShortageLines++;
                 else summary.MatchedLines++;
@@ -519,7 +632,12 @@ END";
             }
         }
 
-        /// <summary>آخر جلسة جرد مرحّلة (سطورها للعرض التاريخي).</summary>
+        /// <summary>آخر جلسة جرد مرحّلة (سطورها للعرض التاريخي).
+        /// DifferenceCost للسطر المرحّل = التكلفة الفعلية لحركاته (idempotency key:
+        /// SourceType = ManualAdjustment + SourceId = CountId) — حركة لكل دفعة
+        /// خُصمت FEFO بتكلفتها (UnitCost ?? Product.CostPrice)، وحركة الفائض
+        /// بكميتها (الدفعة التلقائية بلا تكلفة → احتياط Product.CostPrice).
+        /// القيمة تطابق حركات المخزون حرفيًا — لا تقدير ولا Product.CostPrice العامة للسطر.</summary>
         public async Task<List<StockCountVM>> GetLastPostedSessionAsync()
         {
             int? lastSession = await _dbContext.StockCounts
@@ -531,10 +649,45 @@ END";
             if (lastSession == null)
                 return new List<StockCountVM>();
 
-            return await _dbContext.StockCounts
+            var rows = await _dbContext.StockCounts
                 .Where(sc => sc.CountSessionId == lastSession)
                 .OrderBy(sc => sc.ProductName)
-                .Select(sc => new StockCountVM
+                .Select(sc => new
+                {
+                    sc.CountId,
+                    sc.CountSessionId,
+                    sc.ProductId,
+                    sc.ProductName,
+                    sc.BookQuantity,
+                    sc.CountedQuantity,
+                    sc.CountedAt,
+                    sc.UnitCost,
+                    sc.IsPosted,
+                    ProductCost = sc.Product.CostPrice
+                })
+                .ToListAsync();
+
+            // حركات التسوية الفعلية لكل سطر — تكلفتها من الدفعة المستهلكة فعليًا
+            var countIds = rows.Select(r => r.CountId).ToList();
+            var movements = await _dbContext.StockMovements
+                .Where(m => m.SourceType == "ManualAdjustment" && m.SourceId != null && countIds.Contains(m.SourceId.Value))
+                .Select(m => new
+                {
+                    m.SourceId,
+                    m.MovementType,
+                    m.Quantity,
+                    BatchUnitCost = m.Batch != null ? m.Batch.UnitCost : null
+                })
+                .ToListAsync();
+
+            var movementsByLine = movements
+                .GroupBy(m => m.SourceId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var result = new List<StockCountVM>(rows.Count);
+            foreach (var sc in rows)
+            {
+                var vms = new StockCountVM
                 {
                     CountId = sc.CountId,
                     CountSessionId = sc.CountSessionId,
@@ -545,8 +698,19 @@ END";
                     CountedAt = sc.CountedAt,
                     UnitCost = sc.UnitCost,
                     IsPosted = sc.IsPosted
-                })
-                .ToListAsync();
+                };
+
+                if (movementsByLine.TryGetValue(sc.CountId, out var lineMovements))
+                {
+                    // كل حركة بتكلفة دفعتها الفعلية — مجموعها يطابق حركات المخزون حرفيًا
+                    vms.DifferenceCost = lineMovements.Sum(m =>
+                        m.Quantity * (m.BatchUnitCost ?? sc.ProductCost));
+                }
+
+                result.Add(vms);
+            }
+
+            return result;
         }
     }
 }

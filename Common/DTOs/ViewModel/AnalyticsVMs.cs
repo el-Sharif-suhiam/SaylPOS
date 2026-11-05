@@ -82,7 +82,10 @@ namespace Common.DTOs.ViewModel
         public bool IsPosted { get; set; }
         /// <summary>الفرق = المعدود − BookQuantity (المطابق لما سيُرحَّل بالضبط).</summary>
         public int? Difference => CountedQuantity - BookQuantity;
-        public decimal DifferenceCost => (Difference ?? 0) * UnitCost;
+        /// <summary>التكلفة المالية للفرق — تحسبها الخدمة بتكاليف الدفعات المتأثرة فعلًا
+        /// (COSTING.md): العجز عبر الدفعات FEFO بتكلفة كل دفعة، والفائض بتكلفة الاحتياط
+        /// الموثقة Product.CostPrice. لا تُشتق من UnitCost العامة للسطر.</summary>
+        public decimal DifferenceCost { get; set; }
     }
 
     /// <summary>ملخص جلسة الجرد المفتوحة.</summary>
