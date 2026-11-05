@@ -14,8 +14,19 @@ public sealed class TestSeed
 
     public static async Task<TestSeed> SeedAsync(SaylDbContext db, string marker)
     {
-        var role = new Role { Name = $"test-admin-{marker}", RoleValue = Common.Utils.AppPermissions.AdminRoleValue, IsActive = true };
-        db.Roles.Add(role);
+        // Roles.RoleId عمود TINYINT IDENTITY (حد 255 صفًا): بذر دور لكل اختبار
+        // يفيض الهوية في الرَن الكامل (Arithmetic overflow). يُعاد استخدام دور
+        // مدير نشط موجود — نفس RoleValue فلا فرق دلالي — ويُنشأ فقط في أول بذر.
+        // (النمط نفسه الموثق في StockCountVarianceValuationTests.)
+        var role = await db.Roles
+            .Where(r => r.IsActive && r.RoleValue == Common.Utils.AppPermissions.AdminRoleValue)
+            .FirstOrDefaultAsync();
+
+        if (role == null)
+        {
+            role = new Role { Name = $"test-admin-{marker}", RoleValue = Common.Utils.AppPermissions.AdminRoleValue, IsActive = true };
+            db.Roles.Add(role);
+        }
 
         var user = new User
         {

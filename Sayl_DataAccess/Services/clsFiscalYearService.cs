@@ -104,6 +104,13 @@ namespace Sayl.Core.Services
                 vm.Errors.Add("توجد جلسة جرد مفتوحة — أكملها وترحّلها (الجرد ركن الإغلاق السنوي).");
 
             // 5) ديون شرائح عميقة (90+ يومًا) — تحذير فقط: تبقى للسنة الجديدة للمطالبة
+            //    ══ التسوية الحتمية ══ «المتبقي» لكل فاتورة يُحسب عبر clsPaymentAllocation
+            //    — نفس المعادلة التي يحكم بها سداد الفواتير (PayInvoiceAsync) وخطط
+            //    الاسترداد (BuildRefundPlanAsync): الصافي بعد المرتجعات − الدفعات
+            //    المرتبطة − نصيب الدفعات العامة (تخصيص الأقدم أولًا).
+            //    كان الحساب يعتبر الدفعات المرتبطة مباشرة وحدها، ففاتورة سُددت عبر
+            //    تحصيل عام (بلا فاتورة) أو سُددت بالمرتجع ظهرت «دينًا قديمًا» وهميًا —
+            //    وتحذير مغلوط عند الإغلاق يعني قرار محاسبي مبني على أرقام خاطئة.
             var oldDebtInvoices = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
@@ -111,24 +118,25 @@ namespace Sayl.Core.Services
                           && i.CreatedAt < fysUtc)
                 .Select(i => new { i.InvoiceId, i.NetAmount, i.CreatedAt })
                 .ToListAsync();
-            var paidByInv = await _dbContext.Payments
-                .Where(p => p.InvoiceId != null)
-                .GroupBy(p => p.InvoiceId!.Value)
-                .Select(g => new { Inv = g.Key, Paid = g.Sum(p => p.Amount) })
-                .ToDictionaryAsync(x => x.Inv, x => x.Paid);
+            var oldOutstanding = await clsPaymentAllocation.GetOutstandingForInvoicesAsync(
+                _dbContext, oldDebtInvoices.Select(i => i.InvoiceId));
 
             decimal oldDebt = 0;
             foreach (var inv in oldDebtInvoices)
             {
-                decimal paid = paidByInv.TryGetValue(inv.InvoiceId, out var p) ? p : 0;
-                if (inv.NetAmount - paid > 0.01m)
-                    oldDebt += inv.NetAmount - paid;
+                decimal outstanding = oldOutstanding.TryGetValue(inv.InvoiceId, out var o)
+                    ? o : inv.NetAmount;
+                if (outstanding > 0.01m)
+                    oldDebt += outstanding;
             }
             vm.OldDebtCarried = Math.Round(oldDebt, 2);
             if (vm.OldDebtCarried > 0)
                 vm.Warnings.Add($"ديون قديمة (قبل السنة الحالية) بمبلغ {vm.OldDebtCarried:N2} ستبقى للسنة الجديدة للمطالبة — تأكد أنك على علم بها.");
 
             // 6) فواتير السنة الجزئية (آجل بلا أي دفعة) — تحذير (استعلام قابل للترجمة)
+            //    ══ التسوية الحتمية ══ نفس معادلة الفقرة 5: المتبقي عبر
+            //    clsPaymentAllocation يشمل الدفعات العامة المخصَّصة والمرتجعات —
+            //    فلا تُعد فاتورة سُددت بتحصيل عام أو غطاها مرتجع «آجلة» زائفة.
             var yearInvoices = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
@@ -138,15 +146,12 @@ namespace Sayl.Core.Services
                 .Select(i => new { i.InvoiceId, i.NetAmount })
                 .ToListAsync();
 
-            var paidTotals = await _dbContext.Payments
-                .Where(p => p.InvoiceId != null)
-                .GroupBy(p => p.InvoiceId!.Value)
-                .Select(g => new { Inv = g.Key, Total = g.Sum(p => p.Amount) })
-                .ToListAsync();
-            var paidMap = paidTotals.ToDictionary(x => x.Inv, x => x.Total);
+            var yearOutstanding = await clsPaymentAllocation.GetOutstandingForInvoicesAsync(
+                _dbContext, yearInvoices.Select(i => i.InvoiceId));
 
             vm.UnpaidThisYear = yearInvoices
-                .Count(i => (i.NetAmount - (paidMap.TryGetValue(i.InvoiceId, out var paid) ? paid : 0m)) > 0.01m);
+                .Count(i => (yearOutstanding.TryGetValue(i.InvoiceId, out var outstanding)
+                                ? outstanding : i.NetAmount) > 0.01m);
             if (vm.UnpaidThisYear > 0)
                 vm.Warnings.Add($"{vm.UnpaidThisYear} فاتورة آجلة/جزئية في السنة الحالية — ستبقى ديونًا مفتوحة بعد الإغلاق.");
 

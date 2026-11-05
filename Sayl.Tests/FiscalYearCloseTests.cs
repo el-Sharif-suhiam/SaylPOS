@@ -115,6 +115,94 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
         return invoice.InvoiceId;
     }
 
+    /// <summary>
+    /// Seed a completed credit sale with an explicit net amount and CreatedAt —
+    /// for allocation-aware readiness scenarios (independently computed expected values).
+    /// </summary>
+    private static async Task<int> SeedSaleAsync(SaylDbContext db, TestSeed seed, decimal netAmount, DateTime createdAtUtc)
+    {
+        var invoice = new Invoice
+        {
+            Type = enInvoicesType.sale,
+            Status = enInvoicesStatus.completed,
+            PaymentStatus = enPaymentStatus.unpaid,
+            PartyId = seed.CustomerId,
+            PartyType = 'C',
+            UserId = seed.UserId,
+            TotalAmount = netAmount,
+            DiscountAmount = 0m,
+            TaxAmount = 0m,
+            NetAmount = netAmount,
+            CreatedAt = createdAtUtc
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        return invoice.InvoiceId;
+    }
+
+    /// <summary>Seed a payment linked directly to an invoice (Income على فاتورة بيع).</summary>
+    private static async Task SeedLinkedPaymentAsync(SaylDbContext db, TestSeed seed, int invoiceId, decimal amount, DateOnly paymentDate)
+    {
+        db.Payments.Add(new Payment
+        {
+            Type = enPaymentType.income,
+            InvoiceId = invoiceId,
+            PartyType = 'C',
+            PartyId = seed.CustomerId,
+            Amount = amount,
+            PaymentDate = paymentDate,
+            PaymentMethod = "cash",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Seed a general (unallocated) payment from the customer — InvoiceId = null.
+    /// هذا هو الشكل الذي تخصّصه clsPaymentAllocation على الفواتير الأقدم أولًا.</summary>
+    private static async Task SeedGeneralPaymentAsync(SaylDbContext db, TestSeed seed, decimal amount, DateOnly paymentDate)
+    {
+        db.Payments.Add(new Payment
+        {
+            Type = enPaymentType.income,
+            InvoiceId = null,
+            PartyType = 'C',
+            PartyId = seed.CustomerId,
+            Amount = amount,
+            PaymentDate = paymentDate,
+            PaymentMethod = "cash",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Seed a completed customer-return invoice (negative NetAmount) linked to an original
+    /// invoice — محاكاة حالة تاريخية موجودة فعلًا (مرتجع مُقيَّد سلفًا) لقياس أثره على
+    /// المتبقي دون المرور بحارسات السنة المعلّقة/الجلسة في خدمة المرتجعات.
+    /// </summary>
+    private static async Task<int> SeedReturnInvoiceAsync(SaylDbContext db, TestSeed seed,
+        int originalInvoiceId, decimal returnedValue, DateTime createdAtUtc)
+    {
+        var returnInvoice = new Invoice
+        {
+            Type = enInvoicesType.customer_return,
+            Status = enInvoicesStatus.completed,
+            PaymentStatus = enPaymentStatus.paid,
+            PartyId = seed.CustomerId,
+            PartyType = 'C',
+            UserId = seed.UserId,
+            OriginalInvoiceId = originalInvoiceId,
+            TotalAmount = -returnedValue,
+            DiscountAmount = 0m,
+            TaxAmount = 0m,
+            NetAmount = -returnedValue,
+            CreatedAt = createdAtUtc
+        };
+        db.Invoices.Add(returnInvoice);
+        await db.SaveChangesAsync();
+        return returnInvoice.InvoiceId;
+    }
+
     // ─────────────────────────────────────────────────
     // 1) جاهزية الإغلاق: الفواتير المعلقة داخل الفترة المغلقة فعليًا
     // ─────────────────────────────────────────────────
@@ -970,6 +1058,598 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
 
             Assert.False(r0.IsSuccess);
             Assert.False(rMissing.IsSuccess);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 11) التسوية الحتمية في فحوصات الجاهزية (clsPaymentAllocation)
+    // ─────────────────────────────────────────────────
+    // «المتبقي» في الفقرتين 5 و6 يُحسب بنفس معادلة سداد الفواتير:
+    //   الصافي بعد المرتجعات − الدفعات المرتبطة − نصيب الدفعات العامة.
+    // القيم المتوقعة محسوبة يدويًا من تلك المعادلة، والقياس بالفارق
+    // (قراءة قبل البذر / بعده) لعزل بيانات الاختبارات المشتركة الأخرى.
+
+    /// <summary>فاتورة مسددة بالكامل بدفعة مرتبطة — لا تُعد آجلة (انحدار: السداد المرتبط ما زال محسوبًا).</summary>
+    [Fact]
+    public async Task CloseReadiness_FullyPaidLinkedInvoice_NotCountedAsUnpaid()
+    {
+        string marker = $"fy11a-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة 100 داخل الفترة مسددة كاملًا بدفعة مرتبطة 100
+            DateTime insidePeriodUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, insidePeriodUtc);
+            await SeedLinkedPaymentAsync(db, seed, saleId, 100m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = 100 − 100 = 0 → لا يُعد آجلة
+            Assert.Equal(baseline.UnpaidThisYear, vm.UnpaidThisYear);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فاتورة مسددة جزئيًا بدفعة مرتبطة — تُعد آجلة والدين المحمول يزيد بالمتبقي فقط.</summary>
+    [Fact]
+    public async Task CloseReadiness_PartiallyPaidInvoice_CountedWithExactRemainder()
+    {
+        string marker = $"fy11b-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة 100 قبل السنة المالية مسددة 40 — المتبقي 60
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedLinkedPaymentAsync(db, seed, saleId, 40m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): دين قديم محمول = القيمة الأساسية + 60
+            Assert.Equal(baseline.OldDebtCarried + 60m, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فاتورة سُددت بتحصيل عام (بلا فاتورة) — لا تظهر دينًا وهميًا (الإصلاح الجوهري:
+    /// الحساب القديم كان يرى الدفعات المرتبطة وحدها فيُطلق تحذير ديون بمبلغ لا وجود له).</summary>
+    [Fact]
+    public async Task CloseReadiness_GeneralPaymentCoveringInvoice_NotCountedAsDebt()
+    {
+        string marker = $"fy11c-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة 100 قبل السنة المالية + تحصيل عام 100 (InvoiceId = null)
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedGeneralPaymentAsync(db, seed, 100m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): التخصيص يغطي الفاتورة كاملة → متبقي 0 → لا زيادة
+            Assert.Equal(baseline.OldDebtCarried, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>تحصيل عام يوزَّع على فاتورتين بالأقدم أولًا: 120 على 100 و50
+    /// → الأقدم تُسدد كاملة، والتالية يخصها 20 فيتبقى 30. الفائض غير المخصص
+    /// (لو زاد) لا يُحتسب دينًا على أي فاتورة (لا عد مزدوج).</summary>
+    [Fact]
+    public async Task CloseReadiness_GeneralPaymentAcrossInvoices_OldestFirstAllocation()
+    {
+        string marker = $"fy11d-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورتان قديمتان: 100 (أقدم) ثم 50، وتحصيل عام 120
+            DateTime olderUtc = start.AddDays(-6).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            DateTime newerUtc = start.AddDays(-4).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, olderUtc);
+            await SeedSaleAsync(db, seed, 50m, newerUtc);
+            await SeedGeneralPaymentAsync(db, seed, 120m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): 100 → الأقدم كاملة؛ 20 → الثانية؛ متبقي 30
+            Assert.Equal(baseline.OldDebtCarried + 30m, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>تحصيل عام يتجاوز مجموع المستحق (200 على 100 و50): الفاتورتان تسددان
+    /// كاملتين والفائض 50 رصيد غير مخصَّص — لا يُحسب دينًا ولا يُعاد توزيعه (لا عد مزدوج).</summary>
+    [Fact]
+    public async Task CloseReadiness_GeneralPaymentSurplus_UnallocatedCreditNotCountedAsDebt()
+    {
+        string marker = $"fy11e-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedSaleAsync(db, seed, 50m, oldUtc.AddHours(1));
+            await SeedGeneralPaymentAsync(db, seed, 200m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): 150 مستحق مسدد من 200 → متبقي 0 على الفاتورتين؛
+            // الفائض 50 unapplied credit لا يُحسب دينًا
+            Assert.Equal(baseline.OldDebtCarried, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>مرتجع داخل نفس الفترة يغطي الفاتورة كاملة — لا تُعد آجلة (الحساب القديم
+    /// كان يرى صافي الفاتورة بلا مرتجعاتها فيُطلق تحذير «آجل» زائفًا).</summary>
+    [Fact]
+    public async Task CloseReadiness_SamePeriodReturnCoveringInvoice_NotCountedAsUnpaid()
+    {
+        string marker = $"fy11f-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة 100 داخل الفترة + مرتجع كامل −100 (مقيّد سلفًا داخل الفترة)
+            DateTime insidePeriodUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, insidePeriodUtc);
+            await SeedReturnInvoiceAsync(db, seed, saleId, 100m, insidePeriodUtc.AddHours(1));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = 100 + (−100) = 0 → لا تُعد آجلة
+            Assert.Equal(baseline.UnpaidThisYear, vm.UnpaidThisYear);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>مرتجع جزئي داخل الفترة: فاتورة 100 بلا دفعة ومرتجع −40
+    /// → متبقي 60 → تُعد آجلة (التحذير يعكس المتبقي الفعلي لا الصافي الخام).</summary>
+    [Fact]
+    public async Task CloseReadiness_PartialReturnInPeriod_CountedWithRemainder()
+    {
+        string marker = $"fy11g-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            DateTime insidePeriodUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, insidePeriodUtc);
+            await SeedReturnInvoiceAsync(db, seed, saleId, 40m, insidePeriodUtc.AddHours(1));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = 100 − 40 = 60 → تُعد آجلة
+            Assert.Equal(baseline.UnpaidThisYear + 1, vm.UnpaidThisYear);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>مرتجع من فترة مغلقة سلفًا على فاتورة الفترة نفسها (سجلات تاريخية
+    /// مقيَّدة سلفًا قبل بداية السنة الحالية): الدين المحمول يرى المتبقي بعد المرتجع —
+    /// فاتورة 100 مُرجع منها 100 سلفًا لا تعود دينًا محمولًا.</summary>
+    [Fact]
+    public async Task CloseReadiness_PreviousEraReturn_ReducesOldDebt()
+    {
+        string marker = $"fy11h-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة قديمة 100 ومرتجع قديم −100 (كلاهما مقيَّد قبل بداية السنة المغلقة)
+            DateTime eraUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, eraUtc);
+            await SeedReturnInvoiceAsync(db, seed, saleId, 100m, eraUtc.AddHours(2));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = 100 − 100 = 0 → لا زيادة على الدين المحمول
+            Assert.Equal(baseline.OldDebtCarried, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فاتورة مسددة كاملة ثم مرتجع −40 بخطة استرداد نقدي (الدفع/الاسترداد على
+    /// فواتير منفصلة كما في الإنتاج): المتبقي 100−100−40 = −40 → لا دين وهمي،
+    /// ودفعات الاسترداد المرتبطة بفاتورة المرتجع لا تُعد مزدوجة على الفاتورة الأصلية.</summary>
+    [Fact]
+    public async Task CloseReadiness_RefundOnFullyPaidInvoice_NoPhantomDebt()
+    {
+        string marker = $"fy11i-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة قديمة 100 مسددة كاملة 100، ثم مرتجع −40 واسترداد نقدي 40
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedLinkedPaymentAsync(db, seed, saleId, 100m, Today);
+            int returnId = await SeedReturnInvoiceAsync(db, seed, saleId, 40m, oldUtc.AddHours(2));
+
+            // استرداد نقدي مرتبط بفاتورة المرتجع (كما تسجله ProcessCustomerRefundAsync)
+            db.Payments.Add(new Payment
+            {
+                Type = enPaymentType.outcome,
+                InvoiceId = returnId,
+                PartyType = 'C',
+                PartyId = seed.CustomerId,
+                Amount = 40m,
+                PaymentDate = Today,
+                PaymentMethod = "cash",
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = (100 − 40) − 100 = −40 → لا يُعد دينًا
+            Assert.Equal(baseline.OldDebtCarried, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>تخصيص الاسترداد (الدَّين أولًا): فاتورة 100 مسددة 50 ثم مرتجع −80.
+    /// خطة الاسترداد تخفض الدين 50 (إلى صفر) وترد نقدًا 30 — والفاتورة بعدها:
+    /// متبقي = (100 − 80) − 50 = −30 → لا دين وهمي في الجاهزية.</summary>
+    [Fact]
+    public async Task CloseReadiness_RefundAllocation_DebtFirstThenCash()
+    {
+        string marker = $"fy11j-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // فاتورة قديمة 100 مسددة 50، ثم مرتجع −80
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedLinkedPaymentAsync(db, seed, saleId, 50m, Today);
+            await SeedReturnInvoiceAsync(db, seed, saleId, 80m, oldUtc.AddHours(2));
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): متبقي = (100 − 80) − 50 = −30 → لا يُعد دينًا
+            Assert.Equal(baseline.OldDebtCarried, vm.OldDebtCarried);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فحوص الجاهزية المتكررة متماثلة (idempotent): لا قراءة تُغيّر شيئًا —
+    /// نفس المدخلات تعطي نفس النتيجة في كل استدعاء.</summary>
+    [Fact]
+    public async Task CloseReadiness_RepeatedChecks_Idempotent()
+    {
+        string marker = $"fy11k-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // خليط: دين قديم بدفعة عامة جزئية + مرتجع داخل الفترة
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            DateTime insideUtc = start.AddDays(3).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, oldUtc);
+            await SeedGeneralPaymentAsync(db, seed, 40m, Today); // يخص الفاتورة الأقدم: متبقي 60
+            int yearSale = await SeedSaleAsync(db, seed, 80m, insideUtc);
+            await SeedReturnInvoiceAsync(db, seed, yearSale, 30m, insideUtc.AddHours(1));
+
+            var vm1 = await fiscal.GetCloseReadinessAsync(newYearStart);
+            var vm2 = await fiscal.GetCloseReadinessAsync(newYearStart);
+            var vm3 = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // نفس القيم في كل استدعاء — لا قراءة تُغيّر شيئًا
+            Assert.Equal(vm1.OldDebtCarried, vm2.OldDebtCarried);
+            Assert.Equal(vm2.OldDebtCarried, vm3.OldDebtCarried);
+            Assert.Equal(vm1.UnpaidThisYear, vm2.UnpaidThisYear);
+            Assert.Equal(vm2.UnpaidThisYear, vm3.UnpaidThisYear);
+            Assert.Equal(vm1.CanClose, vm2.CanClose);
+            Assert.Equal(vm1.OldSuspendedInvoices, vm2.OldSuspendedInvoices);
+            Assert.Equal(vm1.PendingPayrolls, vm2.PendingPayrolls);
+            Assert.Equal(vm1.OpenStockCount, vm2.OpenStockCount);
+
+            // والقيم نفسها تطابق الحساب اليدوي (بالفارق عن القيمة قبل البذر):
+            // دين قديم محمول +60 (فاتورة 100 − تخصيص عام 40)، وفاتورة السنة 80 − 30 = 50 → آجلة
+            Assert.Equal(baseline.OldDebtCarried + 60m, vm3.OldDebtCarried);
+            Assert.Equal(baseline.UnpaidThisYear + 1, vm3.UnpaidThisYear);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فترة نظيفة بلا أي مانع أو تحذير من بيانات هذا الاختبار — جاهزة للإغلاق.
+    /// (التحذيرات العامة لبيانات الاختبارات المشتركة لا تُحتسب هنا؛ المهم لا أخطاء.)</summary>
+    [Fact]
+    public async Task CloseReadiness_CleanPeriod_NoErrors_CanClose()
+    {
+        string marker = $"fy11l-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            // فاتورة داخل الفترة مسددة كاملة بدفعة مرتبطة — لا دين ولا معلق
+            DateTime insideUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, insideUtc);
+            await SeedLinkedPaymentAsync(db, seed, saleId, 100m, Today);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            Assert.True(vm.CanClose);
+            Assert.Empty(vm.Errors);
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فترة بديون محمولة وآجل جزئي فقط — تحذيرات بلا أخطاء: الإغلاق مسموح
+    /// (الديون المفتوحة سياسة: تبقى للسنة الجديدة للمطالبة) والقرار مبني على أرقام صحيحة.</summary>
+    [Fact]
+    public async Task CloseReadiness_DebtsOnly_ProducesWarningsNotErrors()
+    {
+        string marker = $"fy11m-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+            await ClearCloseBlockersAsync(db);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // دين قديم 100 (بلا سداد) + فاتورة السنة مسددة جزئيًا (100/40)
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, oldUtc);
+            DateTime insideUtc = start.AddDays(3).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int yearSale = await SeedSaleAsync(db, seed, 100m, insideUtc);
+            await SeedLinkedPaymentAsync(db, seed, yearSale, 40m, Today);
+
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            // متوقع (يدويًا): دين قديم +100 (دين محمول)، وفاتورة السنة آجلة واحدة
+            Assert.Equal(baseline.OldDebtCarried + 100m, vm.OldDebtCarried);
+            Assert.Equal(baseline.UnpaidThisYear + 1, vm.UnpaidThisYear);
+
+            // التصنيف: ديون = تحذيرات لا أخطاء — الإغلاق يبقى مسموحًا
+            Assert.True(vm.CanClose);
+            Assert.Empty(vm.Errors);
+            Assert.Contains(vm.Warnings, w => w.Contains("ديون قديمة"));
+            Assert.Contains(vm.Warnings, w => w.Contains("آجلة/جزئية"));
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فترة عليها مانع (فاتورة معلقة) — تُصد: CanClose = false مع خطأ مانع،
+    /// حتى لو وُجدت تحذيرات ديون (الأخطاء تتفوق على التحذيرات).</summary>
+    [Fact]
+    public async Task CloseReadiness_BlockedPeriod_ErrorsPreventCloseDespiteWarnings()
+    {
+        string marker = $"fy11n-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+
+            // فاتورة معلقة داخل الفترة (مانع) + دين قديم (تحذير)
+            DateTime insideUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSuspendedInvoiceAsync(db, seed, insideUtc);
+            DateTime oldUtc = start.AddDays(-5).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            await SeedSaleAsync(db, seed, 100m, oldUtc);
+
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var vm = await fiscal.GetCloseReadinessAsync(newYearStart);
+
+            Assert.False(vm.CanClose);
+            Assert.Equal(1, vm.OldSuspendedInvoices);
+            Assert.Contains(vm.Errors, e => e.Contains("معلقة"));
+            Assert.Contains(vm.Warnings, w => w.Contains("ديون قديمة"));
+        }
+        finally
+        {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>اتساق الجاهزية مع سداد الفواتير الفعلي: فاتورة تغطيها دفعة عامة تُصبح
+    /// «مسددة» عند محاولة السداد المباشر — نفس المعادلة التي تحكم بها الجاهزية.</summary>
+    [Fact]
+    public async Task ReadinessAgreesWithPaymentService_GeneralPaymentCoveredInvoice_CannotBePaidTwice()
+    {
+        string marker = $"fy11o-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = Today.AddDays(-10);
+        DateOnly newYearStart = Today;
+        try
+        {
+            await SetFiscalYearStartAsync(db, start);
+
+            // فاتورة داخل الفترة 100 + تحصيل عام 100 (يخصّص لها بالتسوية)
+            DateTime insideUtc = start.AddDays(2).ToDateTime(new TimeOnly(12, 0)).AddHours(-3);
+            int saleId = await SeedSaleAsync(db, seed, 100m, insideUtc);
+            await SeedGeneralPaymentAsync(db, seed, 100m, Today);
+
+            // الجاهزية: لا تُعد آجلة
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db));
+            var baseline = await fiscal.GetCloseReadinessAsync(newYearStart);
+            Assert.Equal(baseline.UnpaidThisYear, (await fiscal.GetCloseReadinessAsync(newYearStart)).UnpaidThisYear);
+
+            // وسداد الفاتورة مباشرة يُرفض: «مسددة بالكامل» — الجاهزية وسداد الفواتير
+            // يقرأان نفس معادلة clsPaymentAllocation (لا عد مزدوج للتحصيل العام)
+            var payments = new clsPaymentService(db);
+            var r = await payments.PayInvoiceAsync(new DtoPaymentRequest
+            {
+                InvoiceId = saleId,
+                PartyId = seed.CustomerId,
+                Amount = 100m,
+                PaymentDate = Today,
+                Method = "cash",
+                UserId = seed.UserId
+            });
+            Assert.False(r.IsSuccess);
+            Assert.Contains("مسددة", r.Message);
         }
         finally
         {
