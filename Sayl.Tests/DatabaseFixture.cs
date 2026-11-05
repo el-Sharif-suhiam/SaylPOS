@@ -34,6 +34,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade11Script());
             // مسار الإقلاع الفعلي: أعمدة الجرد الجديدة (CountedAt / BookQuantityAtCount)
             ExecuteBatches(LoadUpgrade12Script());
+            // مسار الإقلاع الفعلي: عمود idempotency (PostedMovementId) + فهرس الحركات المرتبطة
+            ExecuteBatches(LoadUpgrade13Script());
             return Task.CompletedTask;
         }
         catch (Exception ex)
@@ -45,8 +47,37 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     public Task DisposeAsync()
     {
+        // إغلاق أي جلسة جرد مفتوحة تركها اختبار فاشل — يمنع تسرب الجلسة إلى الاختبارات التالية.
+        try { CloseOpenSessionIfAny(); } catch { /* ignore cleanup errors */ }
         DropDatabase();
         return Task.CompletedTask;
+    }
+
+    private void CloseOpenSessionIfAny()
+    {
+        // Minimal close: count all unposted lines at their current book quantities, post, ignore errors.
+        try
+        {
+            using var db = CreateContext();
+            if (!db.StockCounts.Any(sc => !sc.IsPosted)) return;
+            // find a test user
+            int? uid = db.Users.AsNoTracking().Where(u => u.IsActive).Select(u => (int?)u.UserId).FirstOrDefault();
+            if (!uid.HasValue) return;
+            var svc = new Sayl.Core.Services.clsStockCountService(db);
+            foreach (var l in db.StockCounts.Where(sc => !sc.IsPosted).ToList())
+            {
+                if (!l.CountedQuantity.HasValue)
+                {
+                    var inv = db.Inventories.Find(l.ProductId);
+                    l.CountedQuantity = inv?.QuantityAvailable ?? 0;
+                    l.BookQuantityAtCount = inv?.QuantityAvailable ?? 0;
+                    l.CountedAt = DateTime.UtcNow;
+                }
+            }
+            db.SaveChanges();
+            svc.PostSessionAsync(uid.Value).GetAwaiter().GetResult();
+        }
+        catch { /* best-effort cleanup */ }
     }
 
     public SaylDbContext CreateContext()
@@ -77,6 +108,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade12Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_12_StockCountCountedAt.sql"));
+
+    private static string LoadUpgrade13Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_13_StockCountPostedMovementId.sql"));
 
     private static void DropDatabase()
     {

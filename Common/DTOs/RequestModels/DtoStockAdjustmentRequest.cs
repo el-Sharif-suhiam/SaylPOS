@@ -13,5 +13,12 @@ namespace Common.DTOs.RequestModels
         public string? BatchNumber { get; set; }
         public DateOnly? ExpiryDate { get; set; }
         public int UserId { get; set; }
+
+        /// <summary>
+        /// STOCK COUNT IDEMPOTENCY: معرّف السطر المرتبط (CountId) يُنشأ StockMovement
+        /// بهذا SourceId (SourceType = "ManualAdjustment") — يسمح بتحديد الحركة المُنشأة
+        /// بالضبط عند الترحيل. اختياري (null للتسوية اليدوية المباشرة).
+        /// </summary>
+        public int? SourceId { get; set; }
     }
 }

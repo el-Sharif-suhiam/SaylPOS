@@ -49,6 +49,15 @@ namespace Sayl.Core.Models
         /// </summary>
         public int? BookQuantityAtCount { get; set; }
 
+        /// <summary>
+        /// STOCK COUNT IDEMPOTENCY: معرّف حركة التسوية (StockMovement) المرتبطة بهذا السطر.
+        /// يُضبط فور نجاح AdjustStockAsync وقبل SaveChangesAsync — دليل دائم على أن
+        /// تسوية هذا السطر كُتبت فعليًا. عند إعادة الترحيل بعد فشل جزئي: السطر ذو
+        /// PostedMovementId = حركة قائمة يُتخطى (لا تسوية مزدوجة أبدًا).
+        /// null مع IsPosted=true = سطر بفرق صفري (لا حركة تُنشأ له).
+        /// </summary>
+        public int? PostedMovementId { get; set; }
+
         public virtual Product Product { get; set; } = null!;
     }
 }

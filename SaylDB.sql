@@ -379,6 +379,13 @@ CREATE TABLE StockMovements
 );
 GO
 
+-- فهرس فحص idempotency لترحيل الجرد: الحركات المرتبطة بسطور الجرد
+-- (SourceType = 'ManualAdjustment' مع SourceId = CountId) — Upgrade_13
+CREATE NONCLUSTERED INDEX IX_StockMovements_ManualAdjustmentSource
+    ON StockMovements(SourceId)
+    WHERE SourceType = 'ManualAdjustment' AND SourceId IS NOT NULL;
+GO
+
 -----------------------------------------------------------
 -- 16) Create Expenses
 --     Operational costs (rent, utilities, etc.)
@@ -572,6 +579,7 @@ CREATE TABLE StockCounts
     CreatedAt DATETIME2 DEFAULT (GETDATE()),
     CountedAt DATETIME2 NULL,                -- moment this specific line was physically counted
     BookQuantityAtCount INT NULL,            -- system quantity at the moment of counting (snapshot)
+    PostedMovementId INT NULL,               -- idempotency: StockMovement created by posting this line
 
     CONSTRAINT FK_StockCounts_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
 );

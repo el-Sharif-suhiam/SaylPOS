@@ -384,7 +384,7 @@ namespace Sayl.Core.Services
                         MovementType = enStockMovementType.adjustment_in,
                         Quantity = request.Quantity,
                         SourceType = "ManualAdjustment",
-                        SourceId = null,
+                        SourceId = request.SourceId, // StockCount idempotency: يربط الحركة بسطر الجرد
                         CreatedAt = DateTime.UtcNow
                     });
                 }
@@ -456,7 +456,7 @@ namespace Sayl.Core.Services
                             MovementType = enStockMovementType.adjustment_out,
                             Quantity = -d.Quantity,
                             SourceType = "ManualAdjustment",
-                            SourceId = null,
+                            SourceId = request.SourceId, // StockCount idempotency: يربط الحركة بسطر الجرد
                             CreatedAt = DateTime.UtcNow
                         });
                     }

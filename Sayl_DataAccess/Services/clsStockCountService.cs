@@ -64,6 +64,16 @@ BEGIN
         ALTER TABLE dbo.StockCounts ADD BookQuantityAtCount INT NULL;
     END;
 
+    -- عمود PostedMovementId (IDEMPOTENCY FIX): يربط السطر بحركة التسوية المقابلة.
+    -- يضمن عدم تطبيق التسوية ذاتها أكثر من مرة عند إعادة الترحيل بعد فشل جزئي.
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.StockCounts') AND name = N'PostedMovementId'
+    )
+    BEGIN
+        ALTER TABLE dbo.StockCounts ADD PostedMovementId INT NULL;
+    END;
+
     -- الفهرس الفريد للجلسة المفتوحة
     IF NOT EXISTS (
         SELECT 1 FROM sys.indexes
@@ -330,11 +340,17 @@ END";
         /// BookQuantityAtCount = null → يحسب effectiveBook = bookSnapshot + movementsSinceSessionStart
         /// (السلوك القديم، أقل دقة لكنه لا يكسر بيانات قديمة).
         ///
-        /// FIX (تزامن): قفل تطبيقي على مستوى الاتصال (بلا ترانزاكشن خارجية —
-        /// AdjustStockAsync لها ترانزاكشنها الداخلية) يمنع ترحيلًا مزدوجًا من طلبين
-        /// متزامنين. والمصالحة عبر سجل الحركات تجعل إعادة الترحيل بعد فشل جزئي محصورة:
-        /// السطر المُرحَّل فعلًا يظهر فرقه صفرًا فيتخطى. السطور غير المعدودة تُقفل
-        /// مرحّلة بلا ترحيل.
+        /// FIX (IDEMPOTENCY — STOCK COUNT PARTIAL FAILURE FIX):
+        /// PostedMovementId on each line = دليل دائم على أن تسوية هذا السطر كُتبت.
+        /// عند الترحيل: PostedMovementId يُضبط فور نجاح AdjustStockAsync وقبل SaveChangesAsync.
+        /// عند إعادة الترحيل بعد فشل جزئي: PostedMovementId.HasValue = true → الخط يتجاوز.
+        /// لا reliance on in-memory flags; no double-application possible.
+        ///
+        /// FIX (ATOMIC SAVE): PostedMovementId و IsPosted لجميع السطور تُحفظ معًا في
+        /// SaveChangesAsync واحد. إذا فشل أي ترحيل بعد أول سطرين، PostedMovementId للسطر
+        /// الأول محفوظ في الذاكرة ⇒ الخط يُتجاوز عند إعادة المحاولة ⇒ لا حركة مزدوجة.
+        ///
+        /// FIX (تزامن): قفل تطبيقي على مستوى الاتصال يمنع ترحيلًا مزدوجًا من طلبين متزامنين.
         /// </summary>
         public async Task<Result> PostSessionAsync(int userId)
         {
@@ -371,6 +387,23 @@ END";
 
                 foreach (var line in lines)
                 {
+                    // IDEMPOTENCY (durable, DB-backed): حركة تسوية مرتبطة بهذا السطر
+                    // (SourceType = ManualAdjustment + SourceId = CountId) موجودة بالفعل
+                    // ⇒ نجحت في محاولة سابقة فشلت قبل حفظ IsPosted — اتخطاه وأصلح السجل الدائم.
+                    // الفحص من القاعدة لا من الذاكرة ⇒ محصّن بعد إعادة تشغيل التطبيق أيضًا.
+                    var existing = await _dbContext.StockMovements
+                        .AsNoTracking()
+                        .Where(m => m.SourceType == "ManualAdjustment" && m.SourceId == line.CountId)
+                        .OrderByDescending(m => m.MovementId)
+                        .FirstOrDefaultAsync();
+
+                    if (existing != null)
+                    {
+                        line.PostedMovementId = existing.MovementId;
+                        line.IsPosted = true;
+                        continue;
+                    }
+
                     // BookQuantityAtCount = snapshot لحظة العد الفعلي — الدفتري الصحيح للمقارنة
                     // null = توافق خلفي: استخدم الكتيب الحي عند بدء الجلسة
                     int effectiveBook;
@@ -387,9 +420,14 @@ END";
 
                     int diff = line.CountedQuantity!.Value - effectiveBook;
                     if (diff == 0)
+                    {
+                        // فرق صفري: لا حركة تسوية — لكن الخط يُقفل كمرحّل
+                        line.IsPosted = true;
                         continue;
+                    }
 
-                    // ترحيل عبر الخدمة القائمة — الترانزاكشن وصلاحيات المحاسب تعمل مجانًا
+                    // ترحيل عبر الخدمة القائمة — الترانزاكشن وصلاحيات المحاسب تعمل مجانًا.
+                    // SourceId = CountId يربط الحركة الناتجة بهذا السطر (idempotency key).
                     var r = await stockService.AdjustStockAsync(new Common.DTOs.RequestModels.DtoStockAdjustmentRequest
                     {
                         ProductId = line.ProductId,
@@ -398,24 +436,33 @@ END";
                         Reason = $"ترحيل فرق جرد #{sessionId}: {(diff > 0 ? "فائض" : "عجز")} {Math.Abs(diff)}",
                         BatchNumber = null,
                         ExpiryDate = null,
-                        UserId = userId
+                        UserId = userId,
+                        SourceId = line.CountId
                     });
 
                     if (!r.IsSuccess)
-                        return Result.Fail($"فشل ترحيل فرق '{line.ProductName}': {r.Message} — توقف عند هذا المنتج (ما قبله رُحّل، وإعادته آمنة: الفرق يُحسب من جديد).");
+                        return Result.Fail($"فشل ترحيل فرق '{line.ProductName}': {r.Message} — توقف عند هذا المنتج.");
 
+                    // IDEMPOTENCY: اربط السطر بحركة التسوية المُنشأة واحفظ PostedMovementId
+                    // قبل أي حفظ. إذا فشل SaveChangesAsync لاحقًا، الحركة محفوظة في القاعدة
+                    // والفحص المسبق في أعلى الحلقة يتخطى السطر ⇒ لا حركة مزدوجة أبدًا.
+                    var movement = await _dbContext.StockMovements
+                        .AsNoTracking()
+                        .Where(m => m.SourceType == "ManualAdjustment" && m.SourceId == line.CountId)
+                        .OrderByDescending(m => m.MovementId)
+                        .FirstOrDefaultAsync();
+
+                    line.PostedMovementId = movement?.MovementId;
                     line.IsPosted = true;
                     adjustments++;
                 }
 
-                // كل السطور (المطابقة بلا فرق أيضًا) تُقفل كمرحّلة
-                foreach (var line in lines)
-                    line.IsPosted = true;
-
+                // ATOMIC SAVE: جميع PostedMovementId و IsPosted تُحفظ معًا في طلب واحد.
+                // PostedMovementId لكل خط مُرحَّل مضبوط مسبقًا ⇒ لا حركة مزدوجة عند إعادة المحاولة.
                 await _dbContext.SaveChangesAsync();
 
                 clsAudit.Log(_dbContext, userId, "PostStockCount",
-                    $"ترحيل جلسة جرد #{sessionId} — {adjustments} تسوية من {lines.Count} منتجًا (مصالحة حركات ما بعد العد)");
+                    $"ترحيل جلسة جرد #{sessionId} — {adjustments} تسوية من {lines.Count} منتجًا");
                 await _dbContext.SaveChangesAsync();
 
                 return Result.Ok($"تم ترحيل الجرد: {adjustments} تسوية على {lines.Count} منتجًا.");
