@@ -24,8 +24,10 @@ namespace Sayl.UI.Infrastructure
     {
         /// <summary>إزاحة العرض عن UTC (ساعات). +3 = توقيت السعودية.
         /// قيمة ثابتة بقصد — قرار «ساعة البرنامج» الموثق أعلاه.
-        /// لو احتجت قابلية ضبط مستقبلًا: انقلها لإعداد Settings وقراءتها هنا.</summary>
-        public const int UtcOffsetHours = 3;
+        /// المصدر الموحّد: ProgramClock.UtcOffsetHours (Common) — نفس الإزاحة
+        /// التي تستخدمها طبقة الخدمات لليوم البرمجي، فلا يتفرق الرقمان أبدًا.
+        /// لو احتجت قابلية ضبط مستقبلًا: انقلها لإعداد Settings وقراءتها من ProgramClock.</summary>
+        public const int UtcOffsetHours = Common.Utils.ProgramClock.UtcOffsetHours;
 
         /// <summary>الساعة الحية المعروضة على الشاشات — توقيت البرنامج.</summary>
         public static DateTime NowLocal => DateTime.UtcNow.AddHours(UtcOffsetHours);

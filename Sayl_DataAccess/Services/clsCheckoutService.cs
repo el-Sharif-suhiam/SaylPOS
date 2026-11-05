@@ -43,7 +43,8 @@ BEGIN
 
     /* ترحيل الحجوزات القائمة: كل (فاتورة معلقة، منتج مخزني) يصبح مالك حجزه */
     INSERT INTO dbo.StockReservations (InvoiceId, ProductId, Quantity, CreatedAt)
-    SELECT ii.InvoiceId, ii.ProductId, SUM(ii.Quantity), GETDATE()
+    /* GETUTCDATE لا GETDATE: EF يكتب StockReservations.CreatedAt بـDateTime.UtcNow — منطقة زمنية واحدة */
+    SELECT ii.InvoiceId, ii.ProductId, SUM(ii.Quantity), GETUTCDATE()
     FROM dbo.InvoiceItems ii
     JOIN dbo.Invoices i ON i.InvoiceId = ii.InvoiceId
     JOIN dbo.Products p ON p.ProductId = ii.ProductId
@@ -53,7 +54,7 @@ BEGIN
     /* إعادة بناء المجموع ليطابق صفوف الملكية بعد الترحيل */
     UPDATE inv
     SET inv.QuantityReserved = ISNULL(r.TotalReserved, 0),
-        inv.UpdatedAt = GETDATE()
+        inv.UpdatedAt = GETUTCDATE() /* GETUTCDATE لا GETDATE: كل كتابة Inventory.UpdatedAt UTC */
     FROM dbo.Inventory inv
     LEFT JOIN (
         SELECT sr.ProductId, SUM(sr.Quantity) AS TotalReserved
@@ -257,7 +258,7 @@ END";
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
             return date < new DateOnly(today.Year, 1, 1);
         }
 
@@ -633,7 +634,7 @@ END";
                     // سياسة التكلفة: FIFO بالتكلفة الفعلية للدفعة المستهلكة (Batches.UnitCost)
                     // — FEFO يرتب الاستهلاك زمنيًا، أما التكلفة فتُقرأ من كل دفعة
                     // اقتُنيت بها فعلًا، لا من Product.CostPrice (سعر آخر شراء).
-                    DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+                    DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج لا التاريخ UTC الخام */
                     var batches = await _dbContext.Batches
                         .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
                                  && !b.IsQuarantined

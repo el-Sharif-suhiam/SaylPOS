@@ -144,7 +144,7 @@ namespace Sayl.Core.Services
 
                 // زيادة ذرية للمخزون — محصّنة من فاتورة شراء/استلام متوازٍ
                 await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETDATE() WHERE ProductId = {request.ProductId}");
+                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETUTCDATE() WHERE ProductId = {request.ProductId}");
 
                 _dbContext.StockMovements.Add(new StockMovement
                 {
@@ -208,7 +208,9 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المخزون المتاح غير كافٍ للمنتج {product.Name}.");
 
                 // FEFO — مع استبعاد الدفعات المنتهية الصلاحية والمحجوبة (حجر)
-                DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+                // VULN-45: اليوم بتوقيت البرنامج (UTC+3) لا التاريخ UTC الخام —
+                // وإلا بقيت دفعة منتهية أمس قابلة للبيع حتى 03:00 فجرًا.
+                DateOnly today = ProgramClock.Today;
                 var batches = await _dbContext.Batches
                     .Where(b => b.ProductId == productId && b.BatchQuantity > 0
                              && !b.IsQuarantined
@@ -385,7 +387,7 @@ namespace Sayl.Core.Services
 
                     // زيادة ذرية للمخزون
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETDATE(), LastCountedAt = GETDATE() WHERE ProductId = {request.ProductId}");
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = GETUTCDATE(), LastCountedAt = GETUTCDATE() WHERE ProductId = {request.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -429,7 +431,7 @@ namespace Sayl.Core.Services
                         // فيخلق مخزونًا شبحًا على الورق بلا دفعة يحمله (المطلوب:
                         // كل زيادة/نقصان تحرك الدفعة والمخزون معًا). نقص أولاً من
                         // الأقرب انتهاءً ثم المحجوبة — عجز الكل = رفض.
-                        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+                        DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج لا التاريخ UTC الخام */
                         var batches = await _dbContext.Batches
                             .Where(b => b.ProductId == request.ProductId && b.BatchQuantity > 0)
                             .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)

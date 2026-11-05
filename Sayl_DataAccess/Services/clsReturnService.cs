@@ -424,7 +424,7 @@ namespace Sayl.Core.Services
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 — مصدر موحّد */
             return date < new DateOnly(today.Year, 1, 1);
         }
 
@@ -553,7 +553,9 @@ namespace Sayl.Core.Services
 
             // B5 + التوازن: كل زيادة مخزون تمر عبر دفعة تحملها — لا مخزون قابل
             // للبيع بلا مصدر دفعة صالح.
-            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            // VULN-45: اليوم بتوقيت البرنامج (UTC+3) لا التاريخ UTC الخام —
+            // وإلا بقيت دفعة منتهية أمس قابلة للبيع حتى 03:00 فجرًا.
+            DateOnly today = ProgramClock.Today;
             Batch? batch = null;
 
             if (batchId.HasValue)
@@ -663,7 +665,7 @@ namespace Sayl.Core.Services
         /// «مجموع الدفعات = المخزون الكلي» قائمة.</summary>
         private async Task DeductAcrossBatchesAsync(int productId, int quantity, Invoice returnInvoice)
         {
-            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج لا التاريخ UTC الخام */
             var batches = await _dbContext.Batches
                 .Where(b => b.ProductId == productId && b.BatchQuantity > 0)
                 .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
@@ -712,7 +714,11 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = refund.Amount,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                    // VULN-45 + سجل الز: PaymentDate = يوم البرنامج (UTC+3) لا
+                    // التاريخ UTC الخام — استرداد بعد منتصف الليل المحلي (00:00–03:00)
+                    // كان يُختَم بتاريخ الأمس فيختفي من تقرير Z لليوم الفعلي
+                    // (clsReportService يصفّي Payments على PaymentDate = يوم البرنامج).
+                    PaymentDate = ProgramClock.Today,
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد عن الفاتورة {originalInvoice.InvoiceId}",
                     CreatedAt = DateTime.UtcNow
@@ -746,7 +752,8 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = refund.Amount,
-                    PaymentDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                    // VULN-45: نفس توجيه استرداد العميل — يوم البرنامج (UTC+3) لا التاريخ UTC الخام.
+                    PaymentDate = ProgramClock.Today,
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
                     CreatedAt = DateTime.UtcNow

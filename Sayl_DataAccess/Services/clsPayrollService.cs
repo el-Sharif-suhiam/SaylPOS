@@ -112,7 +112,7 @@ namespace Sayl.Core.Services
             if (periodTo < periodFrom)
                 return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
 
-            if (periodTo > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
+            if (periodTo > ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
                 return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
 
             // حماية السنة المالية: فترة انتهت قبل بداية السنة الحالية = سنة مغلقة مؤرشفة —

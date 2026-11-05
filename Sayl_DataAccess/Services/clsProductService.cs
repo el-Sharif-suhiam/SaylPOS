@@ -170,7 +170,7 @@ namespace Sayl.Core.Services
         /// المنتج غير المخزّن = غير محدود (بلا دفعات ولا مخزون = 0).</summary>
         public async Task<int> GetNetAvailableQuantityAsync(int productId)
         {
-            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج — FEFO والصلاحية */
 
             int reserved = await _dbContext.Inventories
                 .Where(i => i.ProductId == productId)
@@ -194,7 +194,7 @@ namespace Sayl.Core.Services
         /// استعلامان اثنان مهما كان عدد المنتجات (لا استعلام لكل منتج).</summary>
         public async Task<Dictionary<int, int>> GetNetAvailableQuantitiesAsync(IEnumerable<int>? productIds = null)
         {
-            DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج — FEFO والصلاحية */
 
             var sellableQuery = _dbContext.Batches
                 .Where(b => b.BatchQuantity > 0

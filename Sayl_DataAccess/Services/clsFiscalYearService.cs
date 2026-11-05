@@ -35,7 +35,7 @@ namespace Sayl.Core.Services
                 return d;
 
             // الافتراضي: بداية السنة الميلادية الجارية عند أول تشغيل
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
             return new DateOnly(today.Year, 1, 1);
         }
 
@@ -62,7 +62,7 @@ namespace Sayl.Core.Services
                 FiscalYearStart = await GetFiscalYearStartAsync()
             };
 
-            DateOnly periodEnd = closingTo ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+            DateOnly periodEnd = closingTo ?? ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
             DateTime periodEndUtc = periodEnd.ToDateTime(TimeOnly.MinValue);
 
             // 1) جلسات POS مفتوحة — خطأ مانع
@@ -194,7 +194,7 @@ namespace Sayl.Core.Services
             if (newYearStart <= current)
                 return Result.Fail($"تاريخ السنة الجديدة يجب أن يكون بعد {current:yyyy-MM-dd} (بداية السنة الحالية).");
 
-            if (newYearStart > DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
+            if (newYearStart > ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
                 return Result.Fail("لا يمكن بدء سنة مالية في المستقبل.");
 
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -215,8 +215,10 @@ namespace Sayl.Core.Services
                 //    صفوف متأثرة فيفشل بأمان (لا إغلاق مزدوج).
                 string currentStr = current.ToString("yyyy-MM-dd");
                 string newStr = newYearStart.ToString("yyyy-MM-dd");
+                // GETUTCDATE لا GETDATE: Settings.UpdatedAt منطقة زمنية واحدة (UTC) —
+                // clsSettingsService يكتبها DateTime.UtcNow (VULN-45).
                 int swapped = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Settings SET SettingValue = {newStr}, UpdatedAt = GETDATE() WHERE SettingKey = {KeyFiscalYearStart} AND SettingValue = {currentStr}");
+                    $"UPDATE Settings SET SettingValue = {newStr}, UpdatedAt = GETUTCDATE() WHERE SettingKey = {KeyFiscalYearStart} AND SettingValue = {currentStr}");
 
                 bool startRowExists = await _dbContext.Settings
                     .AnyAsync(s => s.SettingKey == KeyFiscalYearStart);
@@ -228,7 +230,7 @@ namespace Sayl.Core.Services
 
                     // أول إغلاق على الإطلاق: صف البداية غير موجود — يُدرج من الصفر
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyFiscalYearStart}, {newStr}, GETDATE())");
+                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyFiscalYearStart}, {newStr}, GETUTCDATE())");
                 }
 
                 // 3) تفريغ المتتبع قبل أي كيان جديد: قيم Settings (وربما بيانات أخرى)
@@ -238,12 +240,12 @@ namespace Sayl.Core.Services
                 _dbContext.ChangeTracker.Clear();
 
                 // 4) تاريخ الإغلاق — UPSERT داخل نفس المعاملة
-                string closeDateStr = DateTime.UtcNow.AddHours(3).ToString("yyyy-MM-dd");
+                string closeDateStr = ProgramClock.Today.ToString("yyyy-MM-dd"); /* VULN-45: يوم البرنامج */
                 int closeUpdated = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Settings SET SettingValue = {closeDateStr}, UpdatedAt = GETDATE() WHERE SettingKey = {KeyLastCloseDate}");
+                    $"UPDATE Settings SET SettingValue = {closeDateStr}, UpdatedAt = GETUTCDATE() WHERE SettingKey = {KeyLastCloseDate}");
                 if (closeUpdated == 0)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyLastCloseDate}, {closeDateStr}, GETDATE())");
+                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyLastCloseDate}, {closeDateStr}, GETUTCDATE())");
 
                 clsAudit.Log(_dbContext, userId, "CloseFiscalYear",
                     $"إغلاق السنة المالية: من {current:yyyy-MM-dd} إلى {newYearStart:yyyy-MM-dd} — ديون محمولة: {readiness.OldDebtCarried:N2}");

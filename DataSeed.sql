@@ -355,7 +355,7 @@ SET IDENTITY_INSERT SystemLogs OFF;
 UPDATE Inventory
 SET QuantityAvailable = ISNULL((SELECT SUM(Quantity) FROM StockMovements WHERE ProductId = Inventory.ProductId), 0),
     QuantityReserved = 0,
-    UpdatedAt = GETDATE();
+    UpdatedAt = GETUTCDATE(); -- UTC لا GETDATE: نفس منطقة EF (DateTime.UtcNow) — VULN-45
 
 -- Also update Batches quantities to reflect sales/returns (optional, but for realism we can adjust)
 UPDATE Batches SET BatchQuantity = BatchQuantity - 2 WHERE BatchId = 1; -- sold 2, then 1 returned

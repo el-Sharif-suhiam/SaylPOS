@@ -2,6 +2,7 @@ using Common.DTOs;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 
@@ -604,7 +605,7 @@ namespace Sayl.Core.Services
         }
 
         private static DateOnly ProgramDay(DateTime startUtc)
-            => DateOnly.FromDateTime(startUtc.AddHours(3));
+            => ProgramClock.FromUtc(startUtc); /* VULN-45: مصدر موحّد لليوم البرمجي */
 
         /// <summary>يقسّم النطاق الزمني إلى بدايات فترات متساوية حسب النوع (شهر / ربع / نصف / سنة).</summary>
         private static List<DateOnly> BuildPeriodStarts(DateOnly fromDate, DateOnly toDate, enPeriodReportType reportType)

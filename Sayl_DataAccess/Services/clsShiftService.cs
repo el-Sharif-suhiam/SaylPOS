@@ -1,6 +1,7 @@
 using Common.DTOs;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
@@ -191,7 +192,7 @@ namespace Sayl.Core.Services
             if (assignment.EffectiveTo != null)
                 return Result.Fail("التعيين منتهٍ بالفعل.");
 
-            assignment.EffectiveTo = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+            assignment.EffectiveTo = ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم إنهاء تعيين الشفت.");
         }

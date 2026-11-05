@@ -214,8 +214,9 @@ WHERE BatchId = {batch.BatchId}");
                     }
 
                     // زيادة ذرية للمخزون — محصّنة من فاتورة/استلام متوازٍ
+                    // GETUTCDATE لا GETDATE: كل كتابة Inventory.UpdatedAt بمنطقة زمنية واحدة (UTC)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = GETDATE() WHERE ProductId = {item.ProductId}");
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = GETUTCDATE() WHERE ProductId = {item.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {

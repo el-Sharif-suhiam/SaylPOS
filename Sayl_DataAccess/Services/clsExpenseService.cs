@@ -232,7 +232,7 @@ namespace Sayl.Core.Services
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
             return date < new DateOnly(today.Year, 1, 1);
         }
     }

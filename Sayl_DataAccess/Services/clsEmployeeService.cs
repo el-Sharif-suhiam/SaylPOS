@@ -201,7 +201,7 @@ namespace Sayl.Core.Services
                 if (newStatus == "resigned")
                 {
                     employee.Status = newStatus;
-                    employee.ResignDate ??= dtoEmployee.ResignDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+                    employee.ResignDate ??= dtoEmployee.ResignDate ?? ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
                 }
                 else
                 {
