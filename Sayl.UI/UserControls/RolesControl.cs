@@ -25,6 +25,17 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+            Grid.Columns.Add("colName", AppLang.T("Roles.Label.RoleName"));
+            Grid.Columns.Add("colDesc", AppLang.T("Roles.Label.Perms"));
+            Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+            Grid.Columns["colId"].FillWeight = 10;
+            Grid.Columns["colName"].FillWeight = 28;
+            Grid.Columns["colDesc"].FillWeight = 46;
+            Grid.Columns["colStatus"].FillWeight = 16;
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -36,16 +47,6 @@ namespace Sayl.UI.UserControls
                 if (!ApplyPaged(paged))
                     return;
                 _roles = paged.Items;
-
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
-                Grid.Columns.Add("colName", AppLang.T("Roles.Label.RoleName"));
-                Grid.Columns.Add("colDesc", AppLang.T("Roles.Label.Perms"));
-                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns["colId"].FillWeight = 10;
-                Grid.Columns["colName"].FillWeight = 28;
-                Grid.Columns["colDesc"].FillWeight = 46;
-                Grid.Columns["colStatus"].FillWeight = 16;
 
                 Grid.Rows.Clear();
                 foreach (var r in _roles)

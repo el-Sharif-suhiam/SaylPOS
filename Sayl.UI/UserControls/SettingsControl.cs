@@ -88,14 +88,12 @@ namespace Sayl.UI.UserControls
             body.Controls.Add(lblBackup);
             body.Controls.Add(_txtBackupFolder);
 
-            // ── قائمة الطابعات: تعبّأ من نظام ويندوز عند البناء ──
-            // DropDownStyle=DropDownList: قائمة اختيار فقط — لا كتابة يدوية.
+            // ── قائمة الطابعات: تُملأ من LoadSettingsAsync (بعد أول رسمة) —
+            // EnumPrinters استدعاء نظام متزامن كان يُؤخّر فتح القسم من المنشئ.
             // GetInstalledPrinters قد ترجع فارغة (خدمة الطباعة متوقفة) —
             // القائمة تبقى فارغة بلا انفجار.
             var lblPrinter = new Label { Text = AppLang.T("Settings.Label.ReceiptPrinter"), Bounds = new Rectangle(40, y + 92, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
             _cmbPrinter = new ComboBox { Bounds = new Rectangle(320, y + 90, 420, 34), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
-            foreach (var p in ReceiptPrinter.GetInstalledPrinters())
-                _cmbPrinter.Items.Add(p);
             body.Controls.Add(lblPrinter);
             body.Controls.Add(_cmbPrinter);
 
@@ -188,6 +186,12 @@ namespace Sayl.UI.UserControls
                 _txtBackupFolder.Text = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
                     clsBackupService.DefaultBackupFolder);
                 _chkAutoPrint.Checked = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
+
+                // تعداد طابعات النظام هنا (بعد أول رسمة للقسم) لا في المنشئ —
+                // كان يستدعى متزامنًا وقت البناء ويؤخر ظهور القسم
+                foreach (var p in ReceiptPrinter.GetInstalledPrinters())
+                    _cmbPrinter.Items.Add(p);
+
                 string printer = await settings.GetAsync(clsSettingsService.KeyReceiptPrinter);
                 int idx = _cmbPrinter.Items.IndexOf(printer);
                 _cmbPrinter.SelectedIndex = idx >= 0 ? idx : -1;

@@ -45,6 +45,47 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+            Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
+            Grid.Columns.Add("colParty", AppLang.T("Invoices.Label.Party"));
+            Grid.Columns.Add("colUser", AppLang.T("Invoices.Label.User"));
+            Grid.Columns.Add("colStatus", AppLang.T("Invoices.Label.Status"));
+            Grid.Columns.Add("colPayStatus", AppLang.T("Invoices.Label.PayStatus"));
+            Grid.Columns.Add("colNet", AppLang.T("Common.Label.Net"));
+            Grid.Columns.Add("colView", "");
+            Grid.Columns["colId"].FillWeight = 8;
+            Grid.Columns["colDate"].FillWeight = 17;
+            Grid.Columns["colParty"].FillWeight = 20;
+            Grid.Columns["colUser"].FillWeight = 13;
+            Grid.Columns["colStatus"].FillWeight = 11;
+            Grid.Columns["colPayStatus"].FillWeight = 12;
+            Grid.Columns["colNet"].FillWeight = 11;
+            Grid.Columns["colView"].FillWeight = 8;
+
+            // زر سداد لفواتير الشراء غير المدفوعة/الجزئية
+            if (_type == enInvoicesType.purchase)
+            {
+                var colPay = new DataGridViewButtonColumn
+                {
+                    Name = "colPay",
+                    HeaderText = "",
+                    FillWeight = 8
+                };
+                Grid.Columns.Add(colPay);
+
+                // زر مرتجع مورد لفواتير الشراء المكتملة — مرتجع الشراء
+                // يُبنى حصرًا على فاتورة شراء مكتملة (حارس clsReturnService)
+                var colReturn = new DataGridViewButtonColumn
+                {
+                    Name = "colReturn",
+                    HeaderText = "",
+                    FillWeight = 8
+                };
+                Grid.Columns.Add(colReturn);
+            }
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -64,45 +105,6 @@ namespace Sayl.UI.UserControls
                     return;
 
                 _invoices = result.Data.Items;
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
-                Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
-                Grid.Columns.Add("colParty", AppLang.T("Invoices.Label.Party"));
-                Grid.Columns.Add("colUser", AppLang.T("Invoices.Label.User"));
-                Grid.Columns.Add("colStatus", AppLang.T("Invoices.Label.Status"));
-                Grid.Columns.Add("colPayStatus", AppLang.T("Invoices.Label.PayStatus"));
-                Grid.Columns.Add("colNet", AppLang.T("Common.Label.Net"));
-                Grid.Columns.Add("colView", "");
-                Grid.Columns["colId"].FillWeight = 8;
-                Grid.Columns["colDate"].FillWeight = 17;
-                Grid.Columns["colParty"].FillWeight = 20;
-                Grid.Columns["colUser"].FillWeight = 13;
-                Grid.Columns["colStatus"].FillWeight = 11;
-                Grid.Columns["colPayStatus"].FillWeight = 12;
-                Grid.Columns["colNet"].FillWeight = 11;
-                Grid.Columns["colView"].FillWeight = 8;
-
-                // زر سداد لفواتير الشراء غير المدفوعة/الجزئية
-                if (_type == enInvoicesType.purchase)
-                {
-                    var colPay = new DataGridViewButtonColumn
-                    {
-                        Name = "colPay",
-                        HeaderText = "",
-                        FillWeight = 8
-                    };
-                    Grid.Columns.Add(colPay);
-
-                    // زر مرتجع مورد لفواتير الشراء المكتملة — مرتجع الشراء
-                    // يُبنى حصرًا على فاتورة شراء مكتملة (حارس clsReturnService)
-                    var colReturn = new DataGridViewButtonColumn
-                    {
-                        Name = "colReturn",
-                        HeaderText = "",
-                        FillWeight = 8
-                    };
-                    Grid.Columns.Add(colReturn);
-                }
 
                 Grid.Rows.Clear();
                 foreach (var inv in _invoices)

@@ -20,6 +20,32 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+            Grid.Columns.Add("colPhone", AppLang.T("Common.Label.Phone"));
+            Grid.Columns.Add("colCategory", AppLang.T("Suppliers.Label.Category"));
+            Grid.Columns.Add("colBalance", AppLang.T("Suppliers.Label.Balance"));
+            Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+            Grid.Columns["colName"].FillWeight = 30;
+            Grid.Columns["colPhone"].FillWeight = 20;
+            Grid.Columns["colCategory"].FillWeight = 15;
+            Grid.Columns["colBalance"].FillWeight = 15;
+            Grid.Columns["colStatus"].FillWeight = 12;
+
+            var colDetails = new DataGridViewButtonColumn
+            {
+                Name = "colDetails",
+                HeaderText = "",
+                Text = AppLang.T("Common.Button.Details"),
+                UseColumnTextForButtonValue = true,
+                FlatStyle = FlatStyle.Flat,
+                FillWeight = 8
+            };
+            colDetails.DefaultCellStyle.ForeColor = AppTheme.Primary;
+            colDetails.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            Grid.Columns.Add(colDetails);
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -30,31 +56,6 @@ namespace Sayl.UI.UserControls
                 if (!ApplyPaged(paged))
                     return;
                 _suppliers = paged.Items;
-
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
-                Grid.Columns.Add("colPhone", AppLang.T("Common.Label.Phone"));
-                Grid.Columns.Add("colCategory", AppLang.T("Suppliers.Label.Category"));
-                Grid.Columns.Add("colBalance", AppLang.T("Suppliers.Label.Balance"));
-                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns["colName"].FillWeight = 30;
-                Grid.Columns["colPhone"].FillWeight = 20;
-                Grid.Columns["colCategory"].FillWeight = 15;
-                Grid.Columns["colBalance"].FillWeight = 15;
-                Grid.Columns["colStatus"].FillWeight = 12;
-
-                var colDetails = new DataGridViewButtonColumn
-                {
-                    Name = "colDetails",
-                    HeaderText = "",
-                    Text = AppLang.T("Common.Button.Details"),
-                    UseColumnTextForButtonValue = true,
-                    FlatStyle = FlatStyle.Flat,
-                    FillWeight = 8
-                };
-                colDetails.DefaultCellStyle.ForeColor = AppTheme.Primary;
-                colDetails.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
-                Grid.Columns.Add(colDetails);
 
                 Grid.Rows.Clear();
                 foreach (var s in _suppliers.Where(s => s.Party != null))

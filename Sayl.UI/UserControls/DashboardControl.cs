@@ -19,7 +19,8 @@ namespace Sayl.UI.UserControls
 
         private FlowLayoutPanel _cardsPanel = null!;
         private ComboBox _cmbPeriod = null!;
-        private CartesianChart _chart = null!;
+        private Panel _chartHost = null!;
+        private CartesianChart? _chart;
         private ListBox _lstTopProducts = null!;
         private DataGridView _gridLowStock = null!;
         private Label _lblLowStockHeader = null!;
@@ -29,7 +30,28 @@ namespace Sayl.UI.UserControls
             Dock = DockStyle.Fill;
             BackColor = AppTheme.Bg;
             BuildUi();
-            Load += async (_, _) => await RefreshDataAsync();
+            Load += async (_, _) =>
+            {
+                // إنشاء المخطط يُؤجَّل لما بعد أول رسمة (BeginInvoke): بناء
+                // CartesianChart يهيّئ محرك LiveCharts/SkiaSharp وهو ثقيل أول مرة —
+                // بلا التأجيل يتجمد فتح القسم قبل أن ترى العين أي شيء.
+                BeginInvoke(new Action(() => { if (!IsDisposed) CreateChart(); }));
+                await RefreshDataAsync();
+            };
+        }
+
+        /// <summary>إنشاء المخطط مرة واحدة (idempotent) — يُستدعى مؤجَّلًا من Load
+        /// وقبل أي حقن بيانات في RefreshTrendAsync.</summary>
+        private void CreateChart()
+        {
+            if (_chart != null)
+                return;
+            _chart = new CartesianChart
+            {
+                Dock = DockStyle.Fill,
+                BackColor = AppTheme.CardBg
+            };
+            _chartHost.Controls.Add(_chart);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -77,6 +99,9 @@ namespace Sayl.UI.UserControls
                 BackColor = AppTheme.Bg,
                 Padding = new Padding(0)
             };
+            // بطاقات KPI مقصوصة بـ Region تُعاد تعبئتها مع كل تحميل — الرسم
+            // المزدوج يمنع وميض اللوحة أثناء الاستبدال
+            UiHelpers.EnableDoubleBuffering(_cardsPanel);
 
             // شريط الفترة: تسمية يمين + قائمة يسارها (Dock=Right داخل RTL —
             // أول Add أقصى اليمين). تغيير الفترة يعيد المخطط فقط (لا الكل).
@@ -109,18 +134,14 @@ namespace Sayl.UI.UserControls
             periodBar.Controls.Add(_cmbPeriod);
             periodBar.Controls.Add(lblPeriod);
 
-            // المخطط: عنصر LiveCharts بذات قواعد أي عنصر — Dock=Fill
-            // داخل الصف المرن. BackColor فقط هنا؛ السلاسل والألوان
-            // والنصوص تُضبط في RefreshTrendAsync.
-            _chart = new CartesianChart
-            {
-                Dock = DockStyle.Fill,
-                BackColor = AppTheme.CardBg
-            };
+            // المخطط: يُبنى مؤجَّلًا بعد أول رسمة (CreateChart من Load) —
+            // هنا فقط مستضيف بلون البطاقة كي لا تقفز التخطيط عند وصوله.
+            // السلاسل والألوان والنصوص تُضبط في RefreshTrendAsync.
+            _chartHost = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg };
 
             left.Controls.Add(_cardsPanel);
             left.Controls.Add(periodBar);
-            left.Controls.Add(_chart);
+            left.Controls.Add(_chartHost);
 
             // ── العمود الأيسر: بطاقتا قوائم (42% / 58%) ──
             // كل بطاقة: Panel CardBg بعنوان Dock=Top ومحتوى Dock=Fill —
@@ -204,14 +225,31 @@ namespace Sayl.UI.UserControls
                 }
 
                 DashboardSummaryVM s = result.Data;
-                _cardsPanel.Controls.Clear();
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayNet"), UiHelpers.Money(s.TodayNetSales), AppTheme.Primary));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayCollected"), UiHelpers.Money(s.TodayCollected), AppTheme.Success));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayInvoices"), s.TodayInvoiceCount.ToString(), AppTheme.SidebarBg));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthNet"), UiHelpers.Money(s.MonthNetSales), AppTheme.Primary));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthProfit"), UiHelpers.Money(s.MonthNetProfit), s.MonthNetProfit >= 0 ? AppTheme.Success : AppTheme.Danger));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.StockValue"), UiHelpers.Money(s.TotalStockValue), AppTheme.SidebarBg));
-                _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.LowStockCount"), s.LowStockCount.ToString(), s.LowStockCount > 0 ? AppTheme.Warning : AppTheme.Success));
+
+                // تعليق التخطيط + تلف البطاقات القديمة قبل التعبئة:
+                // 1) FlowLayoutPanel.Controls.Clear() يزيل بلا تلف — كانت
+                //    البطاقات ومناطقها المقصوصة (مقابض GDI) تتراكم مع كل
+                //    تحميل. Dispose يحررها ويزيلها من اللوحة.
+                // 2) تعليق التخطيط يجعل إضافة البطاقات السبع دفعة تخطيط واحدة
+                //    بدل سبع (وميض أقل عند أول فتح).
+                _cardsPanel.SuspendLayout();
+                try
+                {
+                    while (_cardsPanel.Controls.Count > 0)
+                        _cardsPanel.Controls[0].Dispose();
+
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayNet"), UiHelpers.Money(s.TodayNetSales), AppTheme.Primary));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayCollected"), UiHelpers.Money(s.TodayCollected), AppTheme.Success));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.TodayInvoices"), s.TodayInvoiceCount.ToString(), AppTheme.SidebarBg));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthNet"), UiHelpers.Money(s.MonthNetSales), AppTheme.Primary));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.MonthProfit"), UiHelpers.Money(s.MonthNetProfit), s.MonthNetProfit >= 0 ? AppTheme.Success : AppTheme.Danger));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.StockValue"), UiHelpers.Money(s.TotalStockValue), AppTheme.SidebarBg));
+                    _cardsPanel.Controls.Add(MakeCard(AppLang.T("Dashboard.Card.LowStockCount"), s.LowStockCount.ToString(), s.LowStockCount > 0 ? AppTheme.Warning : AppTheme.Success));
+                }
+                finally
+                {
+                    _cardsPanel.ResumeLayout(true);
+                }
 
                 _lstTopProducts.Items.Clear();
                 if (s.TopProducts.Count == 0)
@@ -235,6 +273,8 @@ namespace Sayl.UI.UserControls
 
         private async Task RefreshTrendAsync()
         {
+            CreateChart(); // Idempotent — يضمن وجود المخطط قبل حقن البيانات
+
             TrendPeriod period = _cmbPeriod.SelectedIndex switch
             {
                 0 => TrendPeriod.Week,
@@ -275,6 +315,7 @@ namespace Sayl.UI.UserControls
         // LegendPosition.Bottom: مفتاح الألوان أسفل المخطط (لا يزاحم الرسم).
         private void RenderChart(List<SalesTrendPointVM> points)
         {
+            var chart = _chart!; // مضمون: CreateChart استُدعي في مقدمة RefreshTrendAsync
             var labels = points.Select(p =>
                 p.PeriodStart == p.PeriodEnd
                     ? p.PeriodStart.ToString("MM-dd")
@@ -284,7 +325,7 @@ namespace Sayl.UI.UserControls
             var netValues = points.Select(p => p.NetSales).ToArray();
             var countValues = points.Select(p => (decimal)p.InvoiceCount).ToArray();
 
-            _chart.Series = new ISeries[]
+            chart.Series = new ISeries[]
             {
                 new ColumnSeries<decimal>
                 {
@@ -306,17 +347,17 @@ namespace Sayl.UI.UserControls
                 }
             };
 
-            _chart.XAxes = new Axis[]
+            chart.XAxes = new Axis[]
             {
                 new Axis { Labels = labels, LabelsPaint = new SolidColorPaint(new SKColor(107, 114, 128)) }
             };
-            _chart.YAxes = new Axis[]
+            chart.YAxes = new Axis[]
             {
                 new Axis { LabelsPaint = new SolidColorPaint(new SKColor(107, 114, 128)) }
             };
 
-            _chart.LegendPosition = LiveChartsCore.Measure.LegendPosition.Bottom;
-            _chart.LegendTextPaint = new SolidColorPaint(new SKColor(107, 114, 128));
+            chart.LegendPosition = LiveChartsCore.Measure.LegendPosition.Bottom;
+            chart.LegendTextPaint = new SolidColorPaint(new SKColor(107, 114, 128));
         }
 
         // 📖 MakeCard: بطاقة KPI (205×130) — تُبنى برمجيًا وقت تحميل البيانات

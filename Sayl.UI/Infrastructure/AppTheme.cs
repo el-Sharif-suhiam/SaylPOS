@@ -62,7 +62,10 @@ namespace Sayl.UI.Infrastructure
             return path;
         }
 
-        /// <summary>تدوير زوايا أي عنصر تحكم مع التحديث التلقائي عند تغيّر المقاس.</summary>
+        /// <summary>تدوير زوايا أي عنصر تحكم مع التحديث التلقائي عند تغيّر المقاس.
+        /// ⚠️ المنطقة (Region) مقبض GDI — لا تُتلف تلقائيًا مع تلف العنصر،
+        /// لذا نربط تلفها بتلف العنصر. بلا هذا السطر كل تبديل قسم يحوي
+        /// بطاقات مقصوصة (لوحة التحكم) يسرّب مقابض GDI تتراكم مع الجلسة.</summary>
         public static void ApplyRoundedRegion(Control control, int radius = Radius)
         {
             void Update()
@@ -73,6 +76,7 @@ namespace Sayl.UI.Infrastructure
                 old?.Dispose();
             }
 
+            control.Disposed += (_, _) => control.Region?.Dispose();
             control.Resize += (_, _) => Update();
             Update();
         }

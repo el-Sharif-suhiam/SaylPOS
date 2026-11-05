@@ -59,10 +59,21 @@ namespace Sayl.UI.UserControls
             base.OnLoad(e);
             if (Controls.Count == 0)
             {
-                BuildUi();
-                BuildToolbar();
-                if (SupportsShowDeleted)
-                    BuildShowDeletedToggle();
+                // OnLoad يُستدعى والقسم مرئي بالفعل (لحظة الإرساء في المستضيف) —
+                // بناء الشريط والجدول بلا تعليق تخطيط يعني تخطيطًا ورسامة وسيطة
+                // مع كل عنصر يُضاف (وميض أول فتح). علّق التخطيط ثم نفّذ دفعة واحدة.
+                SuspendLayout();
+                try
+                {
+                    BuildUi();
+                    BuildToolbar();
+                    if (SupportsShowDeleted)
+                        BuildShowDeletedToggle();
+                }
+                finally
+                {
+                    ResumeLayout(true);
+                }
             }
             _ = LoadDataAsync();
         }

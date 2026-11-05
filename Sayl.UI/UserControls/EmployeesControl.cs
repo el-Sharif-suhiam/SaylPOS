@@ -26,6 +26,23 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+            Grid.Columns.Add("colPosition", AppLang.T("Employees.Label.Position"));
+            Grid.Columns.Add("colDept", AppLang.T("Employees.Label.Department"));
+            Grid.Columns.Add("colType", AppLang.T("Employees.Label.SalaryType"));
+            Grid.Columns.Add("colSalary", AppLang.T("Employees.Label.Rate"));
+            Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+            Grid.Columns.Add("colAccount", AppLang.T("Employees.Label.LinkedAccount"));
+            Grid.Columns["colName"].FillWeight = 20;
+            Grid.Columns["colPosition"].FillWeight = 14;
+            Grid.Columns["colDept"].FillWeight = 12;
+            Grid.Columns["colType"].FillWeight = 11;
+            Grid.Columns["colSalary"].FillWeight = 11;
+            Grid.Columns["colStatus"].FillWeight = 11;
+            Grid.Columns["colAccount"].FillWeight = 13;
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -50,22 +67,6 @@ namespace Sayl.UI.UserControls
                     foreach (var l in links)
                         _linkedUsers[l.EmployeeId!.Value] = (l.Username, l.RoleValue);
                 }
-
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
-                Grid.Columns.Add("colPosition", AppLang.T("Employees.Label.Position"));
-                Grid.Columns.Add("colDept", AppLang.T("Employees.Label.Department"));
-                Grid.Columns.Add("colType", AppLang.T("Employees.Label.SalaryType"));
-                Grid.Columns.Add("colSalary", AppLang.T("Employees.Label.Rate"));
-                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns.Add("colAccount", AppLang.T("Employees.Label.LinkedAccount"));
-                Grid.Columns["colName"].FillWeight = 20;
-                Grid.Columns["colPosition"].FillWeight = 14;
-                Grid.Columns["colDept"].FillWeight = 12;
-                Grid.Columns["colType"].FillWeight = 11;
-                Grid.Columns["colSalary"].FillWeight = 11;
-                Grid.Columns["colStatus"].FillWeight = 11;
-                Grid.Columns["colAccount"].FillWeight = 13;
 
                 Grid.Rows.Clear();
                 foreach (var e in _employees)

@@ -17,6 +17,21 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+            Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
+            Grid.Columns.Add("colDesc", AppLang.T("Expenses.Label.Description"));
+            Grid.Columns.Add("colCategory", AppLang.T("Expenses.Label.Category"));
+            Grid.Columns.Add("colAmount", AppLang.T("Expenses.Label.Amount"));
+            Grid.Columns.Add("colNotes", AppLang.T("Common.Label.Notes"));
+            Grid.Columns["colId"].FillWeight = 8;
+            Grid.Columns["colDate"].FillWeight = 14;
+            Grid.Columns["colDesc"].FillWeight = 30;
+            Grid.Columns["colCategory"].FillWeight = 14;
+            Grid.Columns["colAmount"].FillWeight = 14;
+            Grid.Columns["colNotes"].FillWeight = 20;
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -27,20 +42,6 @@ namespace Sayl.UI.UserControls
                 if (!ApplyPaged(paged))
                     return;
                 _expenses = paged.Items;
-
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
-                Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
-                Grid.Columns.Add("colDesc", AppLang.T("Expenses.Label.Description"));
-                Grid.Columns.Add("colCategory", AppLang.T("Expenses.Label.Category"));
-                Grid.Columns.Add("colAmount", AppLang.T("Expenses.Label.Amount"));
-                Grid.Columns.Add("colNotes", AppLang.T("Common.Label.Notes"));
-                Grid.Columns["colId"].FillWeight = 8;
-                Grid.Columns["colDate"].FillWeight = 14;
-                Grid.Columns["colDesc"].FillWeight = 30;
-                Grid.Columns["colCategory"].FillWeight = 14;
-                Grid.Columns["colAmount"].FillWeight = 14;
-                Grid.Columns["colNotes"].FillWeight = 20;
 
                 Grid.Rows.Clear();
                 foreach (var e in _expenses)

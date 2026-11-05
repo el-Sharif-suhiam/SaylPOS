@@ -20,6 +20,26 @@ namespace Sayl.UI.UserControls
 
         protected override async Task LoadDataAsync()
         {
+            // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
+            // بدل شبكة فارغة حتى تصل السجلات
+            Grid.Columns.Clear();
+            Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
+            Grid.Columns.Add("colBarcode", AppLang.T("Common.Label.Barcode"));
+            Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
+            Grid.Columns.Add("colType", AppLang.T("Common.Label.Type"));
+            Grid.Columns.Add("colPrice", AppLang.T("Products.Label.SellPrice"));
+            Grid.Columns.Add("colCost", AppLang.T("Common.Label.Cost"));
+            Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
+            Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
+            Grid.Columns["colName"].FillWeight = 28;
+            Grid.Columns["colBarcode"].FillWeight = 18;
+            Grid.Columns["colUnit"].FillWeight = 9;
+            Grid.Columns["colType"].FillWeight = 9;
+            Grid.Columns["colPrice"].FillWeight = 12;
+            Grid.Columns["colCost"].FillWeight = 12;
+            Grid.Columns["colReorder"].FillWeight = 8;
+            Grid.Columns["colStatus"].FillWeight = 8;
+
             try
             {
                 using var scope = Program.Services.CreateScope();
@@ -30,24 +50,6 @@ namespace Sayl.UI.UserControls
                 if (!ApplyPaged(paged))
                     return;
                 _products = paged.Items;
-
-                Grid.Columns.Clear();
-                Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
-                Grid.Columns.Add("colBarcode", AppLang.T("Common.Label.Barcode"));
-                Grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
-                Grid.Columns.Add("colType", AppLang.T("Common.Label.Type"));
-                Grid.Columns.Add("colPrice", AppLang.T("Products.Label.SellPrice"));
-                Grid.Columns.Add("colCost", AppLang.T("Common.Label.Cost"));
-                Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
-                Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-                Grid.Columns["colName"].FillWeight = 28;
-                Grid.Columns["colBarcode"].FillWeight = 18;
-                Grid.Columns["colUnit"].FillWeight = 9;
-                Grid.Columns["colType"].FillWeight = 9;
-                Grid.Columns["colPrice"].FillWeight = 12;
-                Grid.Columns["colCost"].FillWeight = 12;
-                Grid.Columns["colReorder"].FillWeight = 8;
-                Grid.Columns["colStatus"].FillWeight = 8;
 
                 Grid.Rows.Clear();
                 foreach (var p in _products)

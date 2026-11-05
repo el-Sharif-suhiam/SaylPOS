@@ -1,3 +1,4 @@
+using System.Reflection;
 using Common.Results;
 using Microsoft.Extensions.DependencyInjection;
 using Sayl.Core.Services;
@@ -9,6 +10,18 @@ namespace Sayl.UI.Infrastructure
     {
         public static string Money(decimal value) => value.ToString("N2");
 
+        /// <summary>
+        /// تفعيل الرسم المزدوج لأي عنصر تحكم. الخاصية DoubleBuffered محمية في
+        /// Control — نصل إليها بالانعكاس (حيلة معيارية). تُستخدم للجداول
+        /// ولوحات التدفّق التي تومض أو تُرسم ناقصة عند أول فتح.
+        /// </summary>
+        public static void EnableDoubleBuffering(Control control)
+        {
+            typeof(Control)
+                .GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.SetValue(control, true);
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // 📖 StyleGrid: التنسيق الموحّد لكل جداول النظام — جولة سطرًا بسطر.
         // تُستدعى بعد إنشاء أي DataGridView وقبل إضافة الأعمدة.
@@ -17,6 +30,10 @@ namespace Sayl.UI.Infrastructure
         // ═══════════════════════════════════════════════════════════════
         public static void StyleGrid(DataGridView grid)
         {
+            // الرسم المزدوج: الجدول يُرسم في بافر واحد — لا وميض ولا تقطيع
+            // عند أول فتح للقسم أو عند تعبئة الصفوف (DoubleBuffered محمية — انظر Helper أعلاه)
+            EnableDoubleBuffering(grid);
+
             // ── الهيكل العام ──
             grid.Dock = DockStyle.Fill;                       // يملأ الحاوية كاملة
             grid.AllowUserToAddRows = false;                   // إخفاء صف «الإضافة» الأخير الفارغ

@@ -432,6 +432,8 @@ namespace Sayl.UI.Forms
                 BackColor = AppTheme.Bg,
                 Padding = new Padding(20)
             };
+            // الرسم المزدوج للمستضيف: يقلل الوميض لحظة استبدال القسم القديم بالجديد
+            UiHelpers.EnableDoubleBuffering(_hostPanel);
 
             contentArea.Controls.Add(_hostPanel);
             contentArea.Controls.Add(header);
@@ -469,10 +471,21 @@ namespace Sayl.UI.Forms
 
             _lblPageTitle.Text = name;
 
-            _currentControl?.Dispose();
-            _currentControl = _sections[name]();
-            _hostPanel.Controls.Add(_currentControl);
-            _currentControl.BringToFront();
+            // تعليق التخطيط حول التبديل كاملًا: تلف القسم القديم ثم إضافة الجديد
+            // كلاهما يطلقان تخطيطًا متزامنًا على اللوحة المرئية — بلا التعليق
+            // يمر المستخدم بتخطيطين ورسومات وسيطة (وميض/شاشة ناقصة أول فتح).
+            _hostPanel.SuspendLayout();
+            try
+            {
+                _currentControl?.Dispose();
+                _currentControl = _sections[name]();
+                _hostPanel.Controls.Add(_currentControl);
+                _currentControl.BringToFront();
+            }
+            finally
+            {
+                _hostPanel.ResumeLayout(true);
+            }
         }
 
         // ─────────────────────────────────────────────────
