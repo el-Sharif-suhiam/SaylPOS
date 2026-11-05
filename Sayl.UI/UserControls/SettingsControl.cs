@@ -291,7 +291,10 @@ namespace Sayl.UI.UserControls
                 using (var scope = Program.Services.CreateScope())
                 {
                     var backupService = scope.ServiceProvider.GetRequiredService<clsBackupService>();
-                    result = await backupService.RestoreAsync(dlg.FileName);
+                    // VULN-27: تمرير هوية المنفّذ — البوابة الفعلية داخل الخدمة
+                    // (إخفاء الزر تجميل فقط)، والهوية تُدقَّق مع الدور هناك.
+                    result = await backupService.RestoreAsync(dlg.FileName,
+                        SessionState.CurrentUser?.UserId ?? 0);
                 }
 
                 if (!result.IsSuccess)

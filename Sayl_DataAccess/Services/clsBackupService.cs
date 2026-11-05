@@ -1,5 +1,6 @@
 using Common.Results;
 using Common.Enums;
+using Common.Utils;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
@@ -111,11 +112,29 @@ namespace Sayl.Core.Services
         // في حوار التأكيد فقط؛ أي استعادة فاشلة كانت تترك المحل بلا قاعدة
         // وبلا رجوع. الآن: نسخة وقائية تُنشأ وتنجح قبل لمس القاعدة، وإلا
         // ترفض العملية (النسخة تُميَّز بلاحقة pre-restore لعدم عبور cleanup).
+        // VULN-27: بوابة تصريح داخل الخدمة — الاستعادة تُلغي كل ما سُجّل
+        // بعد النسخة (مبيعات/فواتير/رواتب)، ولا يجوز أن تُنفَّذ بحجب زر
+        // الواجهة وحده أو باستدعاء مباشر للخدمة. النمط المعتمد في بقية
+        // الخدمات: هوية موثقة + دور نشط + صلاحية شاشة الإعدادات
+        // (AppPermissions.Settings) — نفس الشاشة التي يظهر منها الزر،
+        // فالمحاسب (508) والكاشير (0) مرفوضان بنيويًا.
         // ─────────────────────────────────────────────────
-        public async Task<Result<string>> RestoreAsync(string backupFilePath)
+        public async Task<Result<string>> RestoreAsync(string backupFilePath, int actorUserId)
         {
             try
             {
+                // ── بوابة التصريح (VULN-27): قبل أي فحص آخر وأي أمر SQL —
+                // -1 = هوية مفقودة أو مستخدم/دور غير موجود أو غير مفعّل.
+                if (actorUserId <= 0)
+                    return Result<string>.Fail("هوية منفّذ الاستعادة غير محددة — العملية مرفوضة.");
+
+                int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId);
+                if (actorRole < 0)
+                    return Result<string>.Fail("منفّذ الاستعادة غير موجود أو غير مفعّل — العملية مرفوضة.");
+
+                if (!AppPermissions.Has(actorRole, AppPermissions.Settings))
+                    return Result<string>.Fail("استعادة النسخة الاحتياطية تتطلب صلاحية شاشة الإعدادات — العملية مرفوضة.");
+
                 if (string.IsNullOrWhiteSpace(backupFilePath) || !File.Exists(backupFilePath))
                     return Result<string>.Fail("ملف النسخة الاحتياطية غير موجود.");
 
@@ -123,6 +142,13 @@ namespace Sayl.Core.Services
                     .AnyAsync(s => s.Status == enPosSessionStatusType.open);
                 if (hasOpenSessions)
                     return Result<string>.Fail("توجد جلسات بيع مفتوحة. أغلق جميع الجلسات ثم حاول الاستعادة.");
+
+                // تدقيق: من بدأ الاستعادة ومتى (VULN-27). يُكتب قبل النسخة الوقائية
+                // ليدخل ضمنها — الاستعادة نفسها تمحو سجل القاعدة الحية، ونسخة
+                // pre-restore هي الأثر الدائم لمن بدأ العملية.
+                clsAudit.Log(_dbContext, actorUserId, "RestoreDatabase",
+                    $"بدء استعادة قاعدة البيانات من '{Path.GetFileName(backupFilePath)}'");
+                await _dbContext.SaveChangesAsync();
 
                 // VULN-23: نسخة إلزامية قبل أي استعادة — بلاها كانت الاستعادة
                 // الفاشلة كارثة غير قابلة للتراجع.
@@ -180,6 +206,20 @@ namespace Sayl.Core.Services
                         cmd.Parameters.AddWithValue("@path", backupFilePath);
                         await cmd.ExecuteNonQueryAsync();
                     }
+
+                    // تدقيق الإكمال (VULN-27): القاعدة المستعارة حديثًا فقدت سجل
+                    // البدء — يُكتب أثر الإكمال فيها إن وُجد المستخدم نفسه بها
+                    // (قيد FK على SystemLogs.UserId)، بلا إفشال نجاح الاستعادة.
+                    try
+                    {
+                        if (await _dbContext.Users.AnyAsync(u => u.UserId == actorUserId))
+                        {
+                            clsAudit.Log(_dbContext, actorUserId, "RestoreDatabaseCompleted",
+                                $"اكتملت استعادة قاعدة البيانات من '{Path.GetFileName(backupFilePath)}'");
+                            await _dbContext.SaveChangesAsync();
+                        }
+                    }
+                    catch { /* أفضل جهد — لا يُفشل نجاح الاستعادة */ }
 
                     return Result<string>.Ok(backupFilePath, "تمت استعادة النسخة الاحتياطية بنجاح.");
                 }
