@@ -40,6 +40,9 @@ namespace Sayl.Core.Services
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
 
+            if (request.UnitCost is < 0)
+                return Result.Fail("سعر التكلفة يجب أن يكون صفرا أو أكثر.");
+
             if (string.IsNullOrWhiteSpace(request.BatchNumber))
                 return Result.Fail("رقم الدفعة مطلوب.");
 
@@ -92,13 +95,17 @@ namespace Sayl.Core.Services
                         // زيادة ذرية — محصّنة من استلام متوازٍ
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                             $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                        // دفعة أنشأها طلب متوازٍ: نفس قاعدة الدمج — متوسط مرجح بالوزن
+                        // إن كان لها تكلفة مختلفة، لا تطميس ولا تكلفة مُخترعة
+                        if (request.UnitCost.HasValue)
+                            await MergeReceiveCostAsync(batch.BatchId, request.UnitCost.Value, request.Quantity);
                     }
                 }
                 else
                 {
                     // دفعة قائمة: تاريخ صلاحية الدفعة القائمة لا يُمس أبدًا —
                     // توريد نفس رقم الدفعة بصلاحية مختلفة يُرفض (يتوافق مع TransferBatchAsync).
-                    // يسمح فقط بالملء الأولي لتكلفة قديمة أو بزيادة الكمية بلا تحديد صلاحية.
+                    // الدمج المتوافق يزيد الكمية ويوسّط التكلفة بالوزن (أدناه).
                     if (request.ExpiryDate.HasValue && request.ExpiryDate.Value != batch.ExpiryDate)
                     {
                         await transaction.RollbackAsync();
@@ -112,9 +119,12 @@ namespace Sayl.Core.Services
                     // زيادة ذرية — محصّنة من استلام متوازٍ
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                         $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
-                    // دفعة قائمة بلا تكلفة مخزنة (استلام قديم) — أول تكلفة صريحة تملؤها
-                    if (batch.UnitCost is null && request.UnitCost.HasValue)
-                        batch.UnitCost = request.UnitCost.Value;
+                    // دمج في دفعة قائمة: التكلفة تتوسط بالوزن بالكمية (نفس معادلة
+                    // دمج الشراء ودمج النقل — COSTING.md) فيظل إجمالي تكلفة الدفعة
+                    // مطابقًا لما اقتُني فعليًا عبر عمر الدفعة. الاستلام اليدوي بلا
+                    // تكلفة لا يُطمس تكلفة القائمة ولا يخترع بديلًا.
+                    if (request.UnitCost.HasValue)
+                        await MergeReceiveCostAsync(batch.BatchId, request.UnitCost.Value, request.Quantity);
                 }
 
                 await _dbContext.SaveChangesAsync();
@@ -629,6 +639,27 @@ namespace Sayl.Core.Services
                 await transaction.RollbackAsync();
                 return Result.Fail("فشلت عملية نقل الكمية بين الدفعات.");
             }
+        }
+
+        /// <summary>دمج تكلفة الكمية المستلامة يدويًا في الدفعة — متوسط مرجح بالكمية،
+        /// نفس معادلة دمج الشراء في clsPurchaseService ودمج النقل في
+        /// MergeTransferCostAsync (COSTING.md: «إجمالي الدفعة يظل مطابقًا لما دُفع
+        /// فعليًا»). يُستدعى بعد زيادة BatchQuantity بالكمية المستلمة، فالقسمة على
+        /// BatchQuantity الحالي تعيد القسمة القديمة. UPDATE خام بعد الزيادة،
+        /// والخصائص المتتبعة لا تُمس حتى لا يكتبها SaveChanges فوقها.
+        /// قواعد null (لا تُخترع تكلفة بديل ولا Product.CostPrice):
+        /// - تكلفة الاستلام null: لا يُستدعى أصلًا — تكلفة الدفعة القائمة تبقى كما هي.
+        /// - تكلفة الدفعة null: تُملأ بتكلفة الاستلام — أول تكلفة صريحة تملؤها.
+        /// - دفعة قائمة فارغة (كمية 0 قبل الزيادة): كل وحداتها من الاستلام → تكلفة الاستلام.</summary>
+        private async Task MergeReceiveCostAsync(int batchId, decimal incomingUnitCost, int incomingQuantity)
+        {
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE Batches
+SET UnitCost = CASE
+                   WHEN UnitCost IS NULL OR BatchQuantity <= {incomingQuantity} THEN {incomingUnitCost}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {incomingQuantity}) + {incomingUnitCost} * {incomingQuantity}) / BatchQuantity, 2)
+               END
+WHERE BatchId = {batchId}");
         }
 
         /// <summary>دمج تكلفة الكمية المنقولة في الدفعة الهدف — متوسط مرجح بالكمية،
