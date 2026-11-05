@@ -297,7 +297,7 @@ namespace Sayl.UI.Forms
                 using var scope = Program.Services.CreateScope();
                 var countService = scope.ServiceProvider.GetRequiredService<clsStockCountService>();
                 bool wasCounted = line.CountedQuantity.HasValue;
-                var r = await countService.SetCountedAsync(line.CountId, counted);
+                var r = await countService.SetCountedAsync(line.CountId, counted, SessionState.CurrentUser?.UserId ?? 0);
                 if (!r.IsSuccess)
                 {
                     UiHelpers.ShowError(this, r.Message);

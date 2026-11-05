@@ -1,6 +1,7 @@
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Sayl.Core.Data;
@@ -24,6 +25,15 @@ namespace Sayl.Core.Services
     /// sp_getapplock — يمنع جلستين مفتوحتين متوازيتين، وتكرار رقم الجلسة،
     /// وترحيلًا مزدوجًا لنفس السطر من طلبين متزامنين. وفهرس فريد مُرشَّح
     /// (IsPosted=0 لكل منتج) حاجز قاعدي أخير.
+    ///
+    /// FIX (صلاحيات — في الخدمة لا الواجهة): كل عملية تُنشئ أو تُعدّل أو تُرحّل
+    /// حالة الجرد (StartSessionAsync / SetCountedAsync / PostSessionAsync)
+    /// تتطلب صلاحية شاشة المخزون (بت Inventory) — نفس سياسة AdjustStockAsync
+    /// في clsStockService الذي يستدعيه الترحيل (سياسة موحّدة للنداء المباشر
+    /// وغير المباشر). الفحص مستقل عن الواجهة: إخفاء الأزرار تجميل، والبوابة
+    /// هنا — لا يتجاوزها نداء مباشر ولا فرق صفري ولا غياب هوية الفاعل.
+    /// GetUserRoleValueAsync يرفض: معرف ≤ 0 / مستخدم غير موجود / مستخدم غير
+    /// نشط / دور غير نشط.
     /// </summary>
     public class clsStockCountService
     {
@@ -32,6 +42,19 @@ namespace Sayl.Core.Services
         public clsStockCountService(SaylDbContext dbContext)
         {
             _dbContext = dbContext;
+        }
+
+        // ─────────────────────────────────────────────────
+        // بوابة صلاحيات الجرد (نمط clsReturnService وclsStockService):
+        // عمليات الجرد عمليات شاشة المخزون — بت AppPermissions.Inventory حصرًا.
+        // (يرجع null = مسموح؛ Result فاشل = يُرفض الطلب قبل أي كتابة.)
+        // ─────────────────────────────────────────────────
+        private async Task<Result<int>?> CheckInventoryPermissionAsync(int actorUserId)
+        {
+            int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
+                return Result<int>.Fail("عمليات الجرد تتطلب صلاحية شاشة المخزون.");
+            return null;
         }
 
         /// <summary>هل توجد جلسة جرد مفتوحة (سطور غير مرحّلة)؟ — يمنع جردتين متزامنتين.</summary>
@@ -102,6 +125,11 @@ END";
         /// </summary>
         public async Task<Result<int>> StartSessionAsync(int userId)
         {
+            // بوابة الصلاحية قبل أي كتابة — النداء المباشر للخدمة لا يتجاوز الواجهة
+            var permissionCheck = await CheckInventoryPermissionAsync(userId);
+            if (permissionCheck != null)
+                return permissionCheck;
+
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
@@ -237,9 +265,17 @@ END";
         ///
         /// تحت قفل الترحيل — لا تعديل لسطر بينما يُرحَّل من مستخدم آخر.
         /// إذا كان السطر معدودًا سابقًا وأُعيد عدّه، تؤخذ لقطة جديدة بلحظة العد الجديد.
+        ///
+        /// صلاحية: يتطلب actorUserId صاحب صلاحية شاشة المخزون (بوابة في الخدمة —
+        /// غياب الهوية أو معرف 0 يُرفض، ولا يُعدَّل السطر أبدًا بلا تصريح).
         /// </summary>
-        public async Task<Result> SetCountedAsync(int countId, int? counted)
+        public async Task<Result> SetCountedAsync(int countId, int? counted, int actorUserId)
         {
+            // بوابة الصلاحية قبل أي قراءة/قفل/كتابة
+            var permissionCheck = await CheckInventoryPermissionAsync(actorUserId);
+            if (permissionCheck != null)
+                return Result.Fail(permissionCheck.Message);
+
             var (locked, conn) = await TryAcquirePostLockAsync();
             if (!locked)
                 return Result.Fail("الجلسة قيد الترحيل — انتظر انتهاء الترحيل.");
@@ -351,9 +387,19 @@ END";
         /// الأول محفوظ في الذاكرة ⇒ الخط يُتجاوز عند إعادة المحاولة ⇒ لا حركة مزدوجة.
         ///
         /// FIX (تزامن): قفل تطبيقي على مستوى الاتصال يمنع ترحيلًا مزدوجًا من طلبين متزامنين.
+        ///
+        /// صلاحية: يتطلب userId صاحب صلاحية شاشة المخزون — قبل القفل وقبل فحص
+        /// السطور، فلا يمرّ ترحيل بلا تصريح حتى لو كانت كل الفروق صفرة (الجلسة
+        /// تُقفل بنفسها: تعديل حالة يظل تعديلًا). نفس بت المخزون الذي يفحصه
+        /// AdjustStockAsync داخليًا — سياسة موحّدة للترحيل المباشر وغير المباشر.
         /// </summary>
         public async Task<Result> PostSessionAsync(int userId)
         {
+            // بوابة الصلاحية قبل أي قفل/كتابة — لا تجاوز بنداء مباشر ولا بفرق صفري
+            var permissionCheck = await CheckInventoryPermissionAsync(userId);
+            if (permissionCheck != null)
+                return permissionCheck;
+
             var (locked, conn) = await TryAcquirePostLockAsync();
             if (!locked)
                 return Result.Fail("الجلسة قيد الترحيل من مستخدم آخر — حاول بعد لحظات.");

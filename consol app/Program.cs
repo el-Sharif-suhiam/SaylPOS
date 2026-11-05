@@ -1861,7 +1861,7 @@ namespace consol_app
                         : await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
-                    var r = await cnt.SetCountedAsync(l.CountId, counted);
+                    var r = await cnt.SetCountedAsync(l.CountId, counted, adminId);
                     if (!r.IsSuccess) Check($"count {l.ProductName}", false, r.Message);
                 }
             }
@@ -1921,7 +1921,7 @@ namespace consol_app
                         : await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
-                    await cnt.SetCountedAsync(l.CountId, counted);
+                    await cnt.SetCountedAsync(l.CountId, counted, adminId);
                 }
             }
 
@@ -1981,7 +1981,7 @@ namespace consol_app
                         int counted = await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
-                        await cnt.SetCountedAsync(l.CountId, counted);
+                        await cnt.SetCountedAsync(l.CountId, counted, adminId);
                     }
                     var post = await cnt.PostSessionAsync(adminId);
                     Check("cleanup post of winner session", post.IsSuccess, post.Message);

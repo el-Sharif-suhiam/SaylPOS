@@ -60,8 +60,11 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
         {
             using var db = CreateContext();
             if (!db.StockCounts.Any(sc => !sc.IsPosted)) return;
-            // find a test user
-            int? uid = db.Users.AsNoTracking().Where(u => u.IsActive).Select(u => (int?)u.UserId).FirstOrDefault();
+            // find a test user with the Inventory permission (posting is gated in the service)
+            int? uid = db.Users.AsNoTracking()
+                .Where(u => u.IsActive && (u.Role.RoleValue & Common.Utils.AppPermissions.Inventory) != 0)
+                .OrderByDescending(u => u.Role.RoleValue)
+                .Select(u => (int?)u.UserId).FirstOrDefault();
             if (!uid.HasValue) return;
             var svc = new Sayl.Core.Services.clsStockCountService(db);
             foreach (var l in db.StockCounts.Where(sc => !sc.IsPosted).ToList())

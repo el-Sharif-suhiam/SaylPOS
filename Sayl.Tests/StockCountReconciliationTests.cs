@@ -130,7 +130,7 @@ public class StockCountReconciliationTests
         foreach (var line in await svc.GetOpenSessionAsync())
         {
             int counted = countedByProduct.TryGetValue(line.ProductId, out int v) ? v : line.BookQuantity;
-            var r = await svc.SetCountedAsync(line.CountId, counted);
+            var r = await svc.SetCountedAsync(line.CountId, counted, userId);
             Assert.True(r.IsSuccess, r.Message);
         }
     }
@@ -144,10 +144,10 @@ public class StockCountReconciliationTests
         return (await svc.GetOpenSessionAsync(), start.Data);
     }
 
-    private async Task SetCountedAsync(int countId, int? counted)
+    private async Task SetCountedAsync(int countId, int? counted, int actorUserId)
     {
         await using var db = _fx.CreateContext();
-        var r = await new clsStockCountService(db).SetCountedAsync(countId, counted);
+        var r = await new clsStockCountService(db).SetCountedAsync(countId, counted, actorUserId);
         Assert.True(r.IsSuccess, r.Message);
     }
 
@@ -258,7 +258,7 @@ public class StockCountReconciliationTests
         int l2 = lines.Single(l => l.ProductId == p2).CountId;
 
         // عدّ P1 = 10 عند T1 (دفتري لحظتها 10)
-        await SetCountedAsync(l1, 10);
+        await SetCountedAsync(l1, 10, seed.UserId);
         DateTime t1 = (await LineAsync(l1))!.CountedAt!.Value;
 
         // حركتان بعد عدّ P1 وقبل عدّ P2: بيع P1 −2، استلام P2 +5
@@ -266,7 +266,7 @@ public class StockCountReconciliationTests
         await ReceiveAsync(seed, p2, 5, $"B3-{m}");  // رصيد P2 الآن 25
 
         // عدّ P2 = 24 عند T2 (دفتري لحظتها 25 — بعد الاستلام)
-        await SetCountedAsync(l2, 24);
+        await SetCountedAsync(l2, 24, seed.UserId);
         DateTime t2 = (await LineAsync(l2))!.CountedAt!.Value;
         Assert.True(t2 > t1, "لحظة عدّ P2 يجب أن تكون بعد لحظة عدّ P1");
         Assert.Equal(25, (await LineAsync(l2))!.BookQuantityAtCount);
@@ -277,7 +277,7 @@ public class StockCountReconciliationTests
             var svc = new clsStockCountService(db);
             foreach (var line in await svc.GetOpenSessionAsync())
                 if (line.ProductId != p1 && line.ProductId != p2)
-                    Assert.True((await svc.SetCountedAsync(line.CountId, line.BookQuantity)).IsSuccess);
+                    Assert.True((await svc.SetCountedAsync(line.CountId, line.BookQuantity, seed.UserId)).IsSuccess);
         }
 
         await PostAsync(seed.UserId);
@@ -301,13 +301,13 @@ public class StockCountReconciliationTests
         int lineId = lines.Single(l => l.ProductId == pid).CountId;
 
         // عدّ أول: 9 عند T1
-        await SetCountedAsync(lineId, 9);
+        await SetCountedAsync(lineId, 9, seed.UserId);
         var first = (await LineAsync(lineId))!;
         Assert.Equal(10, first.BookQuantityAtCount);
 
         // بيع −2 ثم إعادة عدّ: 12 عند T2 (الرصيد الآن 8)
         await SaleAsync(seed, pid, 2);
-        await SetCountedAsync(lineId, 12);
+        await SetCountedAsync(lineId, 12, seed.UserId);
         var recounted = (await LineAsync(lineId))!;
         Assert.True(recounted.CountedAt!.Value > first.CountedAt!.Value, "لحظة إعادة العد يجب أن تُحدَّث");
         Assert.Equal(8, recounted.BookQuantityAtCount!.Value); // لقطة جديدة عند إعادة العد
@@ -327,7 +327,7 @@ public class StockCountReconciliationTests
         var svc = new clsStockCountService(db);
         foreach (var line in await svc.GetOpenSessionAsync())
             if (line.CountId != exceptLineId)
-                Assert.True((await svc.SetCountedAsync(line.CountId, line.BookQuantity)).IsSuccess);
+                Assert.True((await svc.SetCountedAsync(line.CountId, line.BookQuantity, userId)).IsSuccess);
     }
 
     // ══ 8) حركات متعددة بعد العد — كلها تُحفظ ══
@@ -400,7 +400,7 @@ public class StockCountReconciliationTests
         await using var db = _fx.CreateContext();
         int postedLine = await db.StockCounts.AsNoTracking()
             .Where(c => c.ProductId == pid && c.IsPosted).Select(c => c.CountId).SingleAsync();
-        var editPosted = await new clsStockCountService(db).SetCountedAsync(postedLine, 50);
+        var editPosted = await new clsStockCountService(db).SetCountedAsync(postedLine, 50, seed.UserId);
         Assert.False(editPosted.IsSuccess);
         Assert.Equal(9, await AvailableAsync(pid));
     }
@@ -417,14 +417,14 @@ public class StockCountReconciliationTests
         var (lines, _) = await StartSessionAsync(seed.UserId);
         int lineId = lines.Single(l => l.ProductId == pid).CountId;
 
-        await SetCountedAsync(lineId, 7);
+        await SetCountedAsync(lineId, 7, seed.UserId);
         var line = (await LineAsync(lineId))!;
         Assert.NotNull(line.CountedAt);
         Assert.Equal(10, line.BookQuantityAtCount);
         Assert.True(line.CountedAt!.Value >= line.CreatedAt.AddMilliseconds(-1), "لحظة العد بعد بدء الجلسة");
 
         // إلغاء العد يصفّر الحالة
-        await SetCountedAsync(lineId, null);
+        await SetCountedAsync(lineId, null, seed.UserId);
         line = (await LineAsync(lineId))!;
         Assert.Null(line.CountedQuantity);
         Assert.Null(line.CountedAt);
@@ -442,7 +442,7 @@ public class StockCountReconciliationTests
         if (!await svc.HasOpenSessionAsync())
             return;
         foreach (var l in await svc.GetOpenSessionAsync())
-            Assert.True((await svc.SetCountedAsync(l.CountId, l.BookQuantity)).IsSuccess);
+            Assert.True((await svc.SetCountedAsync(l.CountId, l.BookQuantity, userId)).IsSuccess);
         await PostAsync(userId);
     }
 }

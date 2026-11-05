@@ -127,7 +127,7 @@ public class StockCountIdempotencyTests
         foreach (var line in await svc.GetOpenSessionAsync())
         {
             int counted = countedByProduct.TryGetValue(line.ProductId, out int v) ? v : line.BookQuantity;
-            var r = await svc.SetCountedAsync(line.CountId, counted);
+            var r = await svc.SetCountedAsync(line.CountId, counted, userId);
             Assert.True(r.IsSuccess, r.Message);
             map[line.ProductId] = line.CountId;
         }
