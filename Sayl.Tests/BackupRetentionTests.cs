@@ -246,4 +246,79 @@ public class BackupRetentionTests
         }
         finally { Directory.Delete(folder, recursive: true); }
     }
+
+    // ══ 9) مطابقة الامتداد حرفيًا: .backup ليست نسخة .bak — لا تُمحى ولا تُحسب ══
+    // سبب الإصلاح: Directory.GetFiles(folder, "*.bak") على ويندوز يُطابق
+    // امتدادات أطول (سلوك أسماء 8.3 القصيرة) فلو حُذفت ملفات .backup
+    // الحقيقية كانت خسارة بيانات. الفحص الصريح للامتداد يجعل السلوك حتميًا.
+    [Theory]
+    [InlineData("backup.bak", true)]        // صالحة
+    [InlineData("backup.BAK", true)]        // صالحة — غير حساسة لحالة الأحرف
+    [InlineData("backup.Bak", true)]        // صالحة — حالة مختلطة
+    [InlineData("backup.backup", false)]    // ليست .bak — لا تُمحى ولا تُحسب
+    [InlineData("backup.bak.tmp", false)]   // ليست .bak — لا تُمحى ولا تُحسب
+    [InlineData("backup.bak2", false)]      // ليست .bak
+    public async Task Cleanup_ExactBakExtension_MatchingIsExplicit(string fileName, bool isBak)
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            // الملف محل الفحص هو الأحدث — لو عوملت كنسخة عادية مع keepLast=0 حُذفت
+            string target = CreateFakeBackup(folder, fileName, baseTime);
+            // نسخة عادية أقدم لتنشيط التنظيف فعليًا
+            string ord = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-1)), baseTime.AddMinutes(-1));
+
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: 0);
+
+            Assert.Equal(isBak, !File.Exists(target));
+            // النسخة العادية الأقدم مع keepLast=0 تُمحى في كل الأحوال — إثبات أن
+            // التنظيف اشتغل فعلًا في كل حالة من حالات الـTheory (وليس رَنًا صامتًا).
+            Assert.False(File.Exists(ord));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    // ══ 10) مجلد واقعي: .backup و.bak.tmp باقيان بعد التنظيف ولا يُحسبان في keepLast ══
+    [Fact]
+    public async Task Cleanup_NonBakExtensionFiles_AreNeverDeletedAndNeverCountTowardKeepLast()
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            // ملفات غير .bak — أحدث من كل النسخ العادية؛ لو حُسبت في keepLast = 1
+            // لُزحت النسخة العادية الوحيدة من مكانها وحُذفت (سلوك wildcard الخاطئ).
+            string dotBackup = CreateFakeBackup(folder, "SaylDB_20261106_120000.backup", baseTime);
+            string bakTmp = CreateFakeBackup(folder, "SaylDB_20261106_120000.bak.tmp", baseTime);
+            // نسخة عادية وحيدة — يجب أن تبقى (keepLast = 1)
+            string ord = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-1)), baseTime.AddMinutes(-1));
+
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: 1);
+
+            Assert.True(File.Exists(dotBackup), "ملف .backup لا يجوز حذفه بواسطة تنظيف .bak");
+            Assert.True(File.Exists(bakTmp), "ملف .bak.tmp لا يجوز حذفه بواسطة تنظيف .bak");
+            Assert.True(File.Exists(ord), "النسخة العادية داخل keepLast تبقى");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    // ══ 11) .BAK بحروف كبيرة: تُعامل كنسخة عادية كاملة — تُحسب في keepLast وتُمحى بعده ══
+    [Fact]
+    public async Task Cleanup_CaseInsensitiveBak_CountsTowardKeepLastAndIsDeletedBeyondIt()
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            string bakUpper = CreateFakeBackup(folder, "SaylDB_20261106_120000.BAK", baseTime);
+            string bakLower = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-1)), baseTime.AddMinutes(-1));
+
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: 1);
+
+            Assert.True(File.Exists(bakUpper), "الأحدث داخل keepLast");
+            Assert.False(File.Exists(bakLower), "نسخة .bak بحروف كبيرة تُحسب كنسخة عادية — الأقدم محياة");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
 }

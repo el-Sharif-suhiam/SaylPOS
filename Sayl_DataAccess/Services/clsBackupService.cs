@@ -312,6 +312,13 @@ namespace Sayl.Core.Services
                 try
                 {
                     var files = Directory.GetFiles(backupFolder, "*.bak")
+                        // نمط الـwildcard على ويندوز يُطابق امتدادات أطول مثل
+                        // .backup ("8.3 short-name" behavior) — فحص الامتداد
+                        // صراحةً يجعل السلوك حتميًا على أي runtime: النسخة
+                        // العادية هي .bak فقط (بأي حالة أحرف)، وما سواه
+                        // (.backup / .bak.tmp) ليس نسخة ولا يُمحى ولا يُحسب.
+                        .Where(f => string.Equals(
+                            Path.GetExtension(f), ".bak", StringComparison.OrdinalIgnoreCase))
                         .Select(f => new FileInfo(f))
                         .OrderByDescending(f => f.CreationTime)
                         .ToList();
