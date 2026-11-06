@@ -177,10 +177,10 @@ namespace Sayl.Core.Services
                 await transaction.CommitAsync();
                 return Result.Ok("تم تسجيل الدفعة بنجاح.");
             }
-            catch
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Result.Fail("فشل تسجيل الدفعة.");
+                return Result.Fail($"فشل تسجيل الدفعة. [{ex.GetType().Name}: {ex.Message}]");
             }
         }
 
