@@ -321,7 +321,12 @@ namespace Sayl.Core.Services
                     // القائمة قبل تطبيق الحد حتى لا تُزاح النسخ العادية ولا تُمحى هي.
                     var ordinary = files.Where(f => !IsPreRestoreBackupFile(f.Name)).ToList();
 
-                    for (int i = keepLast; i < ordinary.Count; i++)
+                    // keepLast سالب أو صفر: لا تُبقى نسخة عادية — نقيّد الحد
+                    // صراحةً بـ 0 بدل الاعتماد على ابتلاع استثناء فهرس سالب
+                    // في try/catch المخصص للملفات المقفولة.
+                    int effectiveKeep = Math.Max(0, keepLast);
+
+                    for (int i = effectiveKeep; i < ordinary.Count; i++)
                     {
                         try { ordinary[i].Delete(); } catch { /* ملف مقفول — نتجاهل */ }
                     }

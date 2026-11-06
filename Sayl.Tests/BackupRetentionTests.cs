@@ -168,4 +168,82 @@ public class BackupRetentionTests
         }
         finally { Directory.Delete(folder, recursive: true); }
     }
+
+    // ══ 6) keepLast = 0: كل النسخ العادية تُمحى وكل نسخ ما قبل الاستعادة تبقى ══
+    [Fact]
+    public async Task Cleanup_KeepLastZero_DeletesAllOrdinary_KeepsPreRestore()
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            string preModern = CreateFakeBackup(folder, RealPreRestoreName(baseTime), baseTime);
+            string preLegacy = CreateFakeBackup(folder, $"SaylDB_{baseTime:yyyyMMdd_HHmmss}_pre_restore.bak", baseTime.AddMinutes(-1));
+            string ord1 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-2)), baseTime.AddMinutes(-2));
+            string ord2 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-3)), baseTime.AddMinutes(-3));
+            string ord3 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-4)), baseTime.AddMinutes(-4));
+
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: 0);
+
+            // صفر نسخ عادية محتفظ بها — لكن الوقائية (بالنمطين الحديث والقديم) باقية
+            Assert.True(File.Exists(preModern), "نسخة pre-restore يجب أن تبقى حتى مع keepLast = 0");
+            Assert.True(File.Exists(preLegacy), "نسخة pre-restore بالنمط القديم محمية كذلك");
+            Assert.False(File.Exists(ord1));
+            Assert.False(File.Exists(ord2));
+            Assert.False(File.Exists(ord3));
+            Assert.Equal(2, Directory.GetFiles(folder, "*.bak").Length);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    // ══ 7) keepLast سالب عبر الاستدعاء المباشر: بلا انهيار، يُعامل كصفر، الوقائية باقية ══
+    [Fact]
+    public async Task Cleanup_NegativeKeepLast_DoesNotCrash_TreatsAsZero()
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            string pre = CreateFakeBackup(folder, RealPreRestoreName(baseTime), baseTime);
+            string ord1 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-1)), baseTime.AddMinutes(-1));
+            string ord2 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-2)), baseTime.AddMinutes(-2));
+
+            // قيمة سالبة لا تصل عبر الواجهة (الإعداد الافتراضي 30 ولا يُقرأ من إعدادات)،
+            // لكن الاستدعاء المباشر للخدمة ممكن — يجب ألا يرمي استثناء فهرس سالب.
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: -5);
+
+            Assert.True(File.Exists(pre), "نسخة pre-restore باقية حتى مع keepLast سالب");
+            Assert.False(File.Exists(ord1));
+            Assert.False(File.Exists(ord2));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    // ══ 8) نطاق التنظيف: لا يمس ملفات خارج المجلد المحدد ولا غير .bak ══
+    [Fact]
+    public async Task Cleanup_DoesNotTouchSubfoldersOrNonBakFiles()
+    {
+        string folder = CreateTempBackupFolder();
+        try
+        {
+            DateTime baseTime = new(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc);
+            string ord1 = CreateFakeBackup(folder, RealName(baseTime), baseTime);
+            string ord2 = CreateFakeBackup(folder, RealName(baseTime.AddMinutes(-1)), baseTime.AddMinutes(-1));
+
+            // ملف .bak داخل مجلد فرعي + ملف غير نسخة في نفس المجلد
+            string sub = Path.Combine(folder, "sub");
+            Directory.CreateDirectory(sub);
+            string subBak = CreateFakeBackup(sub, RealName(baseTime.AddMinutes(-2)), baseTime.AddMinutes(-2));
+            string txt = Path.Combine(folder, "notes.txt");
+            File.WriteAllText(txt, "not a backup");
+
+            await clsBackupService.CleanupOldBackupsAsync(folder, keepLast: 1);
+
+            Assert.True(File.Exists(ord1));
+            Assert.False(File.Exists(ord2));
+            Assert.True(File.Exists(subBak), "التنظيف غير تكراري — ملفات المجلد الفرعي خارج نطاقه");
+            Assert.True(File.Exists(txt), "التنظيف يمس ملفات .bak فقط");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
 }
