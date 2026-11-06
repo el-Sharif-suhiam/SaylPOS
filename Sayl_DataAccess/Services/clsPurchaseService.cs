@@ -75,8 +75,6 @@ namespace Sayl.Core.Services
                     throw new InvalidOperationException("مبلغ خصم الشراء لا يمكن أن يتجاوز إجمالي الفاتورة أو يكون سالبًا.");
                 if (request.TaxPercent < 0 || request.TaxPercent > 100)
                     throw new InvalidOperationException("نسبة ضريبة الشراء يجب أن تكون بين 0 و 100.");
-                if (request.Payment is { } pay && (pay.Amount < 0 || pay.Amount > total))
-                    throw new InvalidOperationException("مبلغ دفع الشراء يجب أن يكون بين صفر وإجمالي الفاتورة (لا دفع زائد).");
 
                 decimal discount = Math.Round(request.DiscountAmount, 2, MidpointRounding.AwayFromZero);
                 decimal afterDiscount = total - discount;
@@ -85,6 +83,13 @@ namespace Sayl.Core.Services
 
                 if (net < 0)
                     throw new InvalidOperationException("صافي فاتورة الشراء لا يمكن أن يكون سالبًا.");
+
+                // الدفع يُقاس على الصافي النهائي (بعد الخصم والضريبة) — لا على
+                // الإجمالي الخام: قياسه على الإجمالي يرفض دفعة صحيحة عند وجود
+                // ضريبة (دين وهمي) ويقبل دفعة زائدة عند وجود خصم (رصيد مورد فاسد).
+                // نفس حساب net أعلاه دون تقريب إضافي — دفعة مساوية للصافي تُقبل.
+                if (request.Payment is { } pay && (pay.Amount < 0 || pay.Amount > net))
+                    throw new InvalidOperationException("مبلغ دفع الشراء يجب أن يكون بين صفر وصافي الفاتورة (لا دفع زائد).");
 
                 // ══ تخصيص خصم الشراء على البنود (أكبر البواقي — قرش قرشًا) ══
                 // سياسة التكلفة: تكلفة الاقتناء التاريخية تُحفظ على الدفعة (Batches.UnitCost)
