@@ -13,6 +13,32 @@ namespace Sayl.Core.Services
     /// </summary>
     public class clsBackupService
     {
+        /// <summary>لاحقة اسم ملف نسخة ما قبل الاستعادة — المصدر الوحيد للنمط،
+        /// يُستخدم عند توليد الاسم وعند فلتر الحماية في التنظيف معًا حتى لا
+        /// يتطابقا أبدًا (كان التطابق مكسورًا: فلتر `_pre_restore_` مقابل
+        /// اسم مُولَّد `_pre-restore.` فتُمحى نسخة التراجع الوحيدة).</summary>
+        public const string PreRestoreSuffix = "pre-restore";
+
+        /// <summary>هل هذا الملف نسخة ما قبل الاستعادة (VULN-23) المحمية من
+        /// التنظيف التلقائي؟ يُطابق النمط المُولَّد فعليًا
+        /// ({db}_{yyyyMMdd_HHmmss}_pre-restore.bak) ويقبل تحفّظيًا النمط
+        /// القديم الموثّق بشرطات سفلية — حماية زائدة لا ضير منها.
+        /// المطابقة على نهاية الاسم (قبل الامتداد) بعد توحيد الشرطة/الشرطة
+        /// السفلية، فلا خطأ في الإيجاب يحمي ملفًا عاديًا ولا خطأ في السلب
+        /// يفقدها.</summary>
+        public static bool IsPreRestoreBackupFile(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return false;
+
+            string name = Path.GetFileName(fileName);
+            if (name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+                name = name[..^4];
+
+            string normalized = name.Replace('-', '_');
+            return normalized.EndsWith("_pre_restore", StringComparison.OrdinalIgnoreCase);
+        }
+
         private readonly SaylDbContext _dbContext;
 
         public clsBackupService(SaylDbContext dbContext)
@@ -154,7 +180,7 @@ namespace Sayl.Core.Services
                 // الفاشلة كارثة غير قابلة للتراجع.
                 string preRestoreFolder = Path.GetDirectoryName(backupFilePath)
                                           ?? DefaultBackupFolder;
-                var preBackup = await BackupToFolderAsync(preRestoreFolder, fileNameSuffix: "pre-restore");
+                var preBackup = await BackupToFolderAsync(preRestoreFolder, fileNameSuffix: PreRestoreSuffix);
                 if (!preBackup.IsSuccess || string.IsNullOrWhiteSpace(preBackup.Data))
                     return Result<string>.Fail($"يجب نجاح نسخة احتياطية قبل الاستعادة (فشلت: {preBackup.Message}). لم تُلمس قاعدة البيانات.");
 
@@ -279,7 +305,7 @@ namespace Sayl.Core.Services
             }
         }
 
-        private static Task CleanupOldBackupsAsync(string backupFolder, int keepLast)
+        internal static Task CleanupOldBackupsAsync(string backupFolder, int keepLast)
         {
             return Task.Run(() =>
             {
@@ -290,11 +316,14 @@ namespace Sayl.Core.Services
                         .OrderByDescending(f => f.CreationTime)
                         .ToList();
 
-                    for (int i = keepLast; i < files.Count; i++)
+                    // نسخ ما قبل الاستعادة (VULN-23): محمية دائمًا من التنظيف
+                    // بغض النظر عن العمر، ولا تُحسب في keepLast — تُستبعد من
+                    // القائمة قبل تطبيق الحد حتى لا تُزاح النسخ العادية ولا تُمحى هي.
+                    var ordinary = files.Where(f => !IsPreRestoreBackupFile(f.Name)).ToList();
+
+                    for (int i = keepLast; i < ordinary.Count; i++)
                     {
-                        if (files[i].Name.Contains("_pre_restore_", StringComparison.OrdinalIgnoreCase))
-                            continue; // نسخة ما قبل الاستعادة محمية دائمًا (VULN-23)
-                        try { files[i].Delete(); } catch { /* ملف مقفول — نتجاهل */ }
+                        try { ordinary[i].Delete(); } catch { /* ملف مقفول — نتجاهل */ }
                     }
                 }
                 catch

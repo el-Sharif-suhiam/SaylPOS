@@ -220,7 +220,8 @@ public class BackupRestoreAuthorizationTests
     // ══ 7) مسار الفشل الآمن: مصرّح + ملف تالف → RESTORE يفشل والقاعدة سليمة ══
     // تُنفَّذ نسخة pre-restore حقيقية (BACKUP آمن لقاعدة الاختبار المعزولة)،
     // ثم يفشل RESTORE على الملف التالف — يُثبت أن القاعدة بقيت intact
-    // ولم تُعلق في وضع SINGLE_USER (استعلام لاحق ناجح).
+    // ولم تُعلق في وضع SINGLE_USER (استعلام لاحق ناجح)، وأن نسخة ما قبل
+    // الاستعادة أُنشئت فعلًا قبل أي محاولة استعادة (VULN-23).
     [Fact]
     public async Task Restore_FailurePath_DatabaseUntouchedAndAccessible()
     {
@@ -232,6 +233,7 @@ public class BackupRestoreAuthorizationTests
 
         string marker = $"br-fail-{Guid.NewGuid():N}"[..12];
         string file = CreateGarbageBackupFile();
+        DateTime testStart = DateTime.UtcNow.AddMinutes(-1);
         try
         {
             int userId;
@@ -245,6 +247,16 @@ public class BackupRestoreAuthorizationTests
             var r = await svc.RestoreAsync(file, userId);
             Assert.False(r.IsSuccess); // فشل (نسخة وقائية أو RESTORE نفسه) — لا نجاح أبدًا
 
+            // نسخة ما قبل الاستعادة أُنشئت فعلًا في نفس مجلد الملف قبل فشل
+            // RESTORE — بنفس النمط المُولَّد (شرطة): {db}_{ts}_pre-restore.bak
+            string? preRestoreFile = Directory.GetFiles(Path.GetTempPath(), "*_pre-restore.bak")
+                .Select(f => new FileInfo(f))
+                .Where(f => f.CreationTimeUtc >= testStart)
+                .OrderByDescending(f => f.CreationTimeUtc)
+                .Select(f => f.FullName)
+                .FirstOrDefault();
+            Assert.False(string.IsNullOrEmpty(preRestoreFile), "يجب إنشاء نسخة pre-restore قبل أي محاولة استعادة");
+
             // القاعدة intact: العلامة باقية، والاتصال يعمل (لم تُعلق SINGLE_USER)
             Assert.True(await MarkerExistsAsync(marker));
             await using (var after = _fx.CreateContext())
@@ -253,7 +265,20 @@ public class BackupRestoreAuthorizationTests
                 Assert.True(productCount > 0);
             }
         }
-        finally { File.Delete(file); }
+        finally
+        {
+            File.Delete(file);
+            // تنظيف نسخة pre-restore التي أنشأها الاختبار
+            try
+            {
+                foreach (string f in Directory.GetFiles(Path.GetTempPath(), "*_pre-restore.bak"))
+                {
+                    var fi = new FileInfo(f);
+                    if (fi.CreationTimeUtc >= testStart) fi.Delete();
+                }
+            }
+            catch { /* أفضل جهد */ }
+        }
     }
 
     // ══ 8) تدقيق بدء الاستعادة: من بدأ ومتى — يُسجَّل بعد التصريح وفحص الملف ══

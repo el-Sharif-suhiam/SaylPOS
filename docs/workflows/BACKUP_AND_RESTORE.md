@@ -43,10 +43,9 @@ Details:
 - If the service account cannot be read, nothing is granted (fail-closed): the
   resulting BACKUP failure is clearer than silently writable backups.
 - Retention cleanup deletes the oldest `.bak` files beyond `keepLast`. Pre-restore
-  copies are *intended* to be preserved by cleanup, but the cleanup filter matches
-  `_pre_restore_` while the generated file name uses `_pre-restore.`, so the
-  exemption does not currently trigger — do not rely on cleanup to preserve them
-  (see Known gaps below).
+  copies (names ending `_pre-restore.bak`) are exempt: cleanup never deletes them,
+  regardless of age, and they do not count toward `keepLast` (which applies to
+  ordinary backups only).
 
 ## 3. Restore — `RestoreAsync(backupFilePath, actorUserId)`
 
@@ -84,7 +83,7 @@ Safety rules, in order:
 2. **Open sessions block restore:** all POS sessions must be closed first.
 3. **Mandatory pre-restore backup (VULN-23):** a safety copy with a `pre-restore`
    suffix is created and must succeed before anything touches the database; it is the
-   permanent rollback point (but see the retention-cleanup caveat in section 7).
+   permanent rollback point and is exempt from retention cleanup (section 2).
 4. **Single-user window:** the database is switched to `SINGLE_USER WITH ROLLBACK
    IMMEDIATE` for the restore and always returned to `MULTI_USER` (including on
    failure paths).
@@ -117,15 +116,13 @@ never loses data.
   wizard includes a backup step, see [FISCAL_CLOSING.md](FISCAL_CLOSING.md)).
 - Verify the backup folder is on a different physical disk than the database files
   when possible; the service cannot verify this.
-- Copy `pre-restore` backups somewhere safe manually — retention cleanup does not
-  reliably preserve them (see the note in section 2).
+- Copy `pre-restore` backups somewhere safe manually — they are preserved by
+  retention cleanup, but the cleanup itself is not an off-machine copy.
 
 ## 7. Known Gaps
 
-- **Retention cleanup pattern mismatch:** the cleanup filter looks for `_pre_restore_`
-  (underscores) while the generated file name uses `_pre-restore.` (hyphen), so
-  pre-restore copies are not actually exempt from retention cleanup despite the
-  intent in the code comments.
 - **No successful RESTORE in automated tests** (see section 4).
+  (The retention-cleanup pattern mismatch that left pre-restore copies exposed
+  to cleanup has been fixed — see section 2 and `BackupRetentionTests`.)
 
 
