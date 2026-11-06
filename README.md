@@ -1,264 +1,364 @@
-# سيل · نقطة البيع — Sayl POS
+# SaylPOS
 
-**سيل (Sayl)** نظام نقاط بيع (POS) متكامل يعمل محليًا (Offline-first) للأسواق والمتاجر والصيدليات والوكالات الطبية. مبني على **C# / WinForms / .NET 10** مع **SQL Server**، بواجهة عربية (RTL) افتراضية قابلة للتبديل للإنجليزية، ومناسب للشاشات اللمسية، مع تفرّع حقيقي (جهاز رئيسي + شاشات عبر الشبكة المحلية).
+SaylPOS is a Windows Forms Point-of-Sale and business management system for retail and
+supermarket operations. It runs entirely on the shop's own Windows machine with a local
+SQL Server database — there is no external server and no cloud dependency. The
+application covers sales, purchasing, batch-tracked inventory, customers and suppliers,
+payments, returns, expenses, payroll, fiscal-year closing, backup/restore, and
+role-based permissions.
 
-**Sayl** is a complete, offline-first Point-of-Sale system for retail stores, pharmacies and medical agencies. Built on **C# / WinForms / .NET 10** with **SQL Server**, an Arabic-first (RTL) interface switchable to English, touch-ready, and a true multi-terminal model (Main host + Terminals over LAN).
+The user interface is Arabic-first (RTL) with an English switch.
 
----
+> **Status:** a working single-machine POS application under active development. This
+> README describes the implementation as it exists today; known gaps are listed under
+> [Known limitations](#known-limitations).
 
-## الفكرة / The Idea
+## Purpose
 
-نظام بيع تُدار بياناته **على أجهزة المحل نفسه** — المنتجات والعملاء والفواتير والأرصدة والجلسات في قاعدة بيانات محلية، بلا اعتماد على خادم خارجي أو سحابة. هذا يمنح التاجر:
+Small retail businesses need the operational depth of a full POS system — batch/lot
+control with expiry tracking, receivables, payroll, and year-end closing — without the
+overhead of a hosted service. SaylPOS addresses this by keeping all data on the
+merchant's machine:
 
-> - **ملكية كاملة لبياناته** مجزأة على أجهزة محله فقط.
-> - **استمرارية عمل بدون اتصال بالإنترنت** إطلاقًا.
-> - **نسخ احتياطي واستعادة** بأمر واحد — يوميًا وعند كل إغلاق.
-> - **تفرّع محلي**: جهاز رئيسي يستضيف القاعدة، وشاشات/أكشاك إضافية تتصل عبر الشبكة المحلية برمز وصول.
+- **Data ownership** — every record lives in the local `SaylDB` database.
+- **Offline operation** — nothing in the daily workflow requires internet access.
+- Backup, guarded restore with a mandatory pre-restore safety copy.
+- **Shared access on site** — the installer can configure an additional PC to connect
+  to the main machine's SQL Server instance over the LAN (an installation role, not a
+  separate server application).
 
-A store-managed POS where **all business data lives on the customer's own machines** — no external server, no forced cloud. The merchant gets full data ownership, uninterrupted offline operation, one-command backup/restore, and an optional LAN deployment (one **Main** host plus extra **Terminal** screens).
+## Main features
 
----
+| Area | Features |
+|---|---|
+| Point of sale | Live product search, barcode scanning, mixed payments (cash/card/credit) with change calculation, suspended invoices with stock reservation and resume, daily cash-drawer sessions with Z-report reconciliation, thermal receipt printing (ESC/POS, CP1256), optional customer display |
+| Inventory | Batch/lot tracking with expiry dates, FEFO consumption, quarantine of unsellable stock, manual stock receive, adjustments, batch transfer, physical stock counts with idempotent posting |
+| Purchasing | Purchase invoices with per-batch costing and discount allocation, supplier returns, supplier payments |
+| Returns | Customer and supplier returns linked to original invoices, exact proportional refunds, stock restored to original batches or quarantined |
+| Parties | Unified customer/supplier records, balances, credit limits, collections and payments |
+| Money | Invoice payments, general collections with deterministic oldest-first allocation, expenses, payroll (hourly/daily/monthly) with linked expense records |
+| Reporting | Daily sales, inventory status, profit (COGS), product/customer profitability, top sellers, debt ageing, cash flow, sales trend, expiring batches, dashboard — with PDF (QuestPDF) and Excel (ClosedXML) export |
+| Governance | Fiscal-year readiness checks and closing with history protection, role-based permissions (bitmask), audit log (`SystemLogs`), backup/restore |
+| Licensing | Offline per-device activation with RSA-2048 signatures bound to a hardware fingerprint |
 
-## المزايا الرئيسية / Key Features
+## Technology stack
 
-- **شاشة الكاشير (POS)**: بحث حي فوري، إضافة سريعة للسلة، مسح باركود (مع أو بدون Enter)، فواتير معلّقة واستئناف، جلسة درج يومية، دفع متعدد (نقد/شبكة/آجل) مع حساب الباقي، طباعة حرارية ESC/POS تلقائية، وشاشة زبون ثانوية اختيارية.
-- **لوحة التحكم (Main)**: لوحة مؤشرات، المنتجات، المخزون (استلام/جرد/تسوية)، العملاء، الموردون، الفواتير، المصروفات، التقارير، الموظفون والرواتب، المستخدمون والأدوار، الإعدادات، والسنة المالية.
-- **مرتجعات ذكية**: مرتجعات العملاء والموردين مرتبطة بالفواتير الأصلية، استرداد نسبي دقيق، ونقد المرتجعات موجّه لجلسة الدرج الفعلية.
-- **مخزون FEFO**: البيع يسحب الدفعات الأقرب للانتهاء أولًا (First-Expiry-First-Out) مع تتبع الدفعة في كل بند فاتورة وحركة مخزون.
-- **الرواتب**: أجور ساعية/يومية/شهرية من بيانات الشفتات، محمية بسنة مالية مغلقة.
-- **الصلاحيات بالأدوار**: مدير / كاشير / محاسب بنمط bitmask، وتمنحها الرتب العليا.
-- **التقارير**: مبيعات اليوم، حالة المخزون، الربح (COGS)، الأكثر مبيعًا، الدفعات المنتهية، التقارير الدورية، وتصدير Excel وPDF.
-- **الترخيص بلا اتصال**: تفعيل لكل جهاز على حدة (Hardware ID) بتوقيع RSA-2048.
-- **ثنائي اللغة**: عربي RTL (افتراضي) + إنجليزية.
+| Component | Technology |
+|---|---|
+| Runtime | .NET 10 (`net10.0`; WinForms projects target `net10.0-windows`) |
+| Language | C# |
+| UI | Windows Forms (WinForms) — Windows only |
+| Data access | Entity Framework Core 10 (`Microsoft.EntityFrameworkCore.SqlServer` 10.0.10) |
+| Database | SQL Server (Express named instance in production installs; LocalDB for tests) |
+| Password hashing | BCrypt.Net-Next 4.2.0 |
+| PDF / Excel / Charts | QuestPDF 2026.8.0, ClosedXML 0.104.2, LiveChartsCore.SkiaSharpView.WinForms 2.0.5 |
+| Testing | xUnit 2.9.2 with real-database integration tests on LocalDB |
+| Licensing | Custom offline RSA-2048 library (`PosLicensing`) |
+| Installer | Inno Setup (`installer/setup.iss`) |
 
-- **Cashier screen (POS)**: instant live search, one-tap cart add, barcode scan (with or without Enter), suspend/resume invoices, daily drawer session, mixed payment with change, automatic ESC/POS thermal printing, optional customer display.
-- **Admin dashboard**: KPIs, products, stock (receiving/count/adjust), customers, suppliers, invoices, expenses, reports, employees & payroll, users & roles, settings, fiscal year.
-- **Smart returns**: customer & supplier returns linked to original invoices, precise pro-rata refunds, cash routed to the actual drawer session.
-- **FEFO inventory**: sells oldest-expiring batches first, with batch tracing on invoice lines and stock movements.
-- **Payroll**: hourly/daily/monthly wages from shift data, guarded by closed fiscal years.
-- **Role-based permissions**: Admin / Cashier / Accountant via bitmask, delegated by superiors.
-- **Reports**: day sales, stock status, profit (COGS), top sellers, expiring batches, periodic reports, Excel/PDF export.
-- **Offline licensing**: per-device activation (Hardware ID) with RSA-2048 signatures.
-- **Bilingual**: Arabic-first RTL (default) plus English.
+## Architecture overview
 
----
+The application is a single WinForms process talking directly to SQL Server. Business
+logic and data access live in one service layer (`Sayl.Core.Services`); there is no
+separate repository layer, no API, and no stored procedures. All service operations
+return a `Result` / `Result<T>` object, and every state-changing operation enforces
+permissions at the service boundary.
 
-## وحدات النظام / Modules
-
-| الوحدة                    | Module            | المسؤولية                               |
-|---------------------------|-------------------|-----------------------------------------|
-| شاشة البيع                | Sales screen      | بيع، مرتجعات، معلّقات، دفع، طباعة        |
-| لوحة المؤشرات             | Dashboard         | ملخص المبيعات والأرباح والمخزون          |
-| المنتجات                  | Products          | إدارة + باركود + دفعات                   |
-| المخزون                   | Inventory         | استلام، جرد، تسوية، تتبع دفعات           |
-| العملاء / الموردون        | Customers/Suppliers| حسابات فورية + حدود ائتمان               |
-| الفواتير                  | Invoices          | بيع/شراء/مرتجع + تفاصيل + طباعة          |
-| المصروفات                 | Expenses          | تسجيل وتصنيف المصروفات                   |
-| الموظفون والرواتب         | Employees & Payroll| مطابقة + شفتات + أجور                   |
-| المستخدمون والأدوار       | Users & Roles     | حسابات + صلاحيات مقطّعة                  |
-| التقارير                  | Reports           | مبيعات/مخزون/ربح/دورية                   |
-| جلسات الدرج               | Cash sessions     | فتح/إغلاق + تقرير Z                      |
-| السنة المالية             | Fiscal year       | إغلاق/فتح + حراسات                       |
-| الإعدادات                 | Settings          | معلومات المتجر والضريبة والطباعة والنسخ  |
-
----
-
-## شاشات التطبيق الرئيسية / Main Screens
-
-| الشاشة       | Screen       | الوصف                                                              |
-|--------------|--------------|---------------------------------------------------------------------|
-| تسجيل الدخول | LoginForm    | اختيار المستخدم + كلمة المرور، توجيه حسب الدور إلى POS أو اللوحة     |
-| البيع        | PosForm      | شاشة الكاشير اللمسية: بحث حي، سلة، معلّقات، دفع، طباعة تلقائية      |
-| اللوحة       | MainForm     | مكوّن من 13 قسمًا برأية صلاحيات، يستضيف الوحدات في إطار واحد        |
-| الإنشاء الأول| OwnerSetupForm| شاشة إنشاء «حساب المدير» عند أول تركيب (لا حسابات افتراضية)        |
-| التفعيل      | ActivationForm| إدخال رخصة لكل جهاز                                                 |
-
----
-
-## المعمارية / Architecture
-
-```
-+---------------------------------------------------------------+
-|                    Sayl.UI (WinForms UI)                      |
-|  PosForm / MainForm | أقسام UserControl | DialogForms          |
-|  Infrastructure: AppLang (ar/en) | AppTheme | AppNavigator      |
-|  AppClock (توقيت المحل UTC+3)                                  |
-+-------------------------------+-------------------------------+
-        | user actions             | Result<T> / DTO / ViewModel
-        v                          v
-+--------------------------------------------------------------------------------+
-|        Sayl.Core (Sayl_DataAccess) — طبقة الأعمال والبيانات                     |
-|  SaylDbContext (EF Core) | 24 خدمة أعمال (Services) | سجل تدقيق (SystemLogs)    |
-+-------------------------------+-------------------------------+
-        | EF Core / SQL           | Audit
-        v
-+--------------------------------------------------------------------------------+
-|   SQL Server (SaylDB) — قاعدة محلية مثبّتة على جهاز المحل                       |
-|   فهارس فريدة | قيود مالية CHECK | طوابع زمنية UTC | حراسات FEFO والجلسات      |
-+--------------------------------------------------------------------------------+
+```mermaid
+flowchart TB
+    UI["Sayl.UI - WinForms<br/>Forms, UserControls, printing, session state"] --> SVC["Sayl.Core.Services<br/>business logic + validation + transactions"]
+    SVC --> DB[("SQL Server<br/>SaylDB")]
+    SVC --> C["Common<br/>DTOs, Result, AppPermissions, ProgramClock"]
+    UI --> LIC["PosLicensing<br/>offline activation gate"]
 ```
 
-- **فصل تام**: كيانات EF لا تعبر إلى الواجهة إطلاقًا — كل التبادل عبر `Result<T>` + نماذج نقل (DTO/ViewModel).
-- **حقن تبعية مركزي**: مشروع `DependencyInjection` يسجّل القاعدة وجميع خدمات الأعمال معًا (`AddSaylServices`).
-- **ساعة موحدة `AppClock`**: التخزين بالـ UTC، والعرض بتوقيت المحل الثابت (UTC+3) — لا زحف زمني عبر الأجهزة.
-- **قرارات محاسبية على مستوى الخدمة**: حراس مالية، توليد رواتب، إغلاق سنوات مالية — كلها داخل طبقة الأعمال لا الواجهة.
-- **اختبار متكامل (E2E)**: الهارنس `consol app` يقود نفس الخدمات على قاعدة حية (87 اختبارًا عبر مسارات محاكاة هجوم).
+A full description — layer responsibilities, transaction and locking strategy, data
+flows, and the database schema — lives in the [documentation](#documentation).
 
-English mirror:
+## Main modules
 
-- **Clean separation**: EF entities never cross the UI boundary — all traffic is `Result<T>` + DTO/ViewModel.
-- **Central dependency injection**: the `DependencyInjection` project wires the DbContext and all 24 business services together (`AddSaylServices`).
-- **Unified `AppClock`**: storage in UTC, presentation in the store's fixed local time (UTC+3) — no time drift across machines.
-- **Accounting decisions live in the service layer**: financial guards, payroll generation, fiscal-year close — none leak into the UI.
-- **E2E harness**: `consol app` drives the same services against a live database (87 checks across attacker-style paths).
+| Module | Responsibility |
+|---|---|
+| POS (`PosForm`) | Cashier sales, suspend/resume, drawer sessions, receipt printing |
+| Dashboard | KPIs, inventory valuation, low-stock and expiring-batch indicators |
+| Products | Catalog, barcodes, batches, net-available quantity |
+| Inventory | Receive, adjust, batch transfer, physical stock counts |
+| Customers / Suppliers | Party records, balances, credit limits, collections/payments |
+| Invoices | Sales and purchase invoice browsing, details, printing |
+| Expenses | Operational costs with fiscal-year protection |
+| Reports | Sales, profit, profitability, debt ageing, cash flow |
+| Employees & Payroll | Staff records, shifts, holidays, payroll generation and payment |
+| Users & Roles | Accounts, password policy, permission bitmask |
+| Settings | Store info, fiscal year, backup/restore |
+| Fiscal year | Close wizard with readiness checks |
 
----
+## Database overview
 
-## حزمة التقنيات / Technology Stack
+`SaylDB` contains 24 tables — no stored procedures, functions, triggers, or views.
+Concurrency-critical rules are enforced twice: in the service layer (transactions,
+`sp_getapplock` named locks, CAS-style conditional updates) and by the database itself
+(filtered unique indexes and CHECK constraints). Highlights:
 
-| الطبقة          | Layer             | التقنية                                                       |
-|-----------------|-------------------|---------------------------------------------------------------|
-| الواجهة         | UI                | WinForms (.NET 10), مزخرفة يدويًا دون Designer، RTL/Dark theme |
-| الأعمال/البيانات | Business/Data     | EF Core 10 + SQL Server، نمط Result + DTO/VM                  |
-| الأمان          | Security          | BCrypt.Net (كلمات المرور)، RSA-2048 (الترخيص)، DPAPI (الرخصة) |
-| التقارير        | Reporting         | QuestPDF (PDF)، ClosedXML (Excel)، LiveChartsCore (الرسوم)    |
-| التثبيت         | Installer         | Inno Setup 6 + SQL Server 2022 Express مورد محليًا             |
-| الوحدة الاختبارية | Testing harness  | `consol app` — E2E على قاعدة حية                              |
+- `Batches.UnitCost` stores the per-batch acquisition cost — the source of COGS.
+- `StockMovements` is an append-only audit log with `SourceType`/`SourceId`
+  provenance; stock-count posting uses `SourceId = CountId` as an idempotency key.
+- `Invoices` is a unified header for sales, purchases and returns; returns are stored
+  with negative amounts and an `OriginalInvoiceId` link.
+- `Payments` is the single cash ledger, attributed to a drawer session for Z reports.
 
----
+See [docs/database/DATABASE_OVERVIEW.md](docs/database/DATABASE_OVERVIEW.md),
+[docs/database/ENTITY_RELATIONSHIPS.md](docs/database/ENTITY_RELATIONSHIPS.md) and
+[docs/database/STORED_PROCEDURES.md](docs/database/STORED_PROCEDURES.md).
 
-## قاعدة البيانات / Database
+## Authentication and authorization
 
-23 جدولًا في `SaylDB.sql` تغطي: الأطراف (عملاء/موردون)، الموظفون، الأدوار، المستخدمون، المنتجات، الدفعات (Batches)، المخزون، الفواتير وبنودها، المدفوعات، حركات المخزون، المصروفات، سجل التدقيق، جلسات الدرج، الإعدادات، حركات النقد، الشفتات، سجلات الرواتب، والجرد.
+Users sign in with username + password (BCrypt hashes); each user has one role holding
+a permission bitmask over 12 administrative screens. Three fixed roles are seeded
+(administrator `4095`, accountant `508`, cashier `0`); custom roles are capped below
+the Roles screen. The UI hides unauthorized screens, but the real gate is a permission
+check at the start of every state-changing service operation. Cash-bearing operations
+additionally validate drawer-session ownership, and sensitive actions write to
+`SystemLogs`.
 
-أبرز نقاط التصميم:
+See [docs/security/AUTHENTICATION_AND_AUTHORIZATION.md](docs/security/AUTHENTICATION_AND_AUTHORIZATION.md).
 
-- **طوابع Zمن UTC** في كل الجداول، مع عرض ثابت بتوقيت المحل.
-- **قيود مالية CHECK**: مبالغ موجبة، صافٍ غير سالب للبيع/الشراء (المرتجعات سالبة بالتصميم)، أرصدة عملاء/موردين غير سالبة.
-- **فهارس فريدة**: باركود المنتج، بريد الطرف، مستخدم واحد لكل موظف، جلسة درج واحدة مفتوحة لكل مستخدم، دفعة (منتج+رقم)، راتب (موظف+فترة).
-- **توجيه درج**: `Payments.SessionId` يعزو النقد لجلسة الدرج الفعلية التي استلمته وقد تختلف عن جلسة الفاتورة (معلّقات/مرتجعات).
-- **احتياط المعلّقات**: `Inventory.QuantityReserved` يحجز الكمية للفاتورة المعلّقة حتى تُستأنف أو تُلغى، وجدول `StockReservations` يوثّق ملكية الحجز لكل (فاتورة، منتج) — الإكمال يستهلك حجز الفاتورة ذاته والإلغاء يحرره وحده دون مساس بحجوزات فواتير أخرى.
-- **تحديث تدريجي**: سكربتات `Upgrade_0X` للخوادم المنصوبة مسبقًا دون لمس البيانات.
+## Prerequisites
 
-23 tables in `SaylDB.sql`: parties (customers/suppliers), employees, roles, users, products, batches, inventory, invoices & items, payments, stock movements, expenses, system logs, POS sessions, settings, cash movements, shifts, payroll records, stock counts.
+- Windows 10 or later (the app is a WinForms executable).
+- .NET SDK 10 to build from source; the .NET 10 Desktop Runtime to run a built binary.
+- SQL Server (Express, Developer, or LocalDB) reachable from the machine — the
+  installer provisions an Express named instance; LocalDB is sufficient for
+  development and tests.
+- `sqlcmd` (SQL Server command-line utilities) for manual database initialization.
 
-Design highlights: UTC timestamps everywhere with store-localtime display; financial CHECK constraints (positive amounts, non-negative net for sales/purchases, non-negative party balances); unique indexes (product barcode, party email, one user per employee, one open drawer session per user, batch per product+number); drawer-session routing on payments (`Payments.SessionId`); quantity reservation for suspended invoices; incremental `Upgrade_0X` scripts for existing servers.
+## Installation and setup
 
----
+Two paths are supported.
 
-## الترخيص / Licensing
+**End-user installer (recommended for shop machines):**
 
-- **PosLicensing**: محرك ترخيص بلا اتصال مدمج في التطبيق — بصمة جهاز (HWID) من CPU/Disk/Board/BIOS، رخصة = `base64(payload).base64(signature)` بتوقيع RSA-2048، تحقق من انتهاء الصلاحية وربط الجهاز أصلًا.
-- **مرساة زمن**: `LastSeenUtc` في التسجيل يرفض أي رجوع للساعة يتجاوز اليوم — حماية من تهريب الترخيص بالتلاعب بالوقت.
-- **KeygenTool**: أداة الموزّع فقط (لا تُشحن مع المنتج) — توليد المفاتيح وإصدار رخص لكل جهاز.
-- **تفعيل**: شاشة `ActivationForm` قبل الدخول؛ الرخصة محفوظة مشفّرة DPAPI.
+1. Build the installer with `installer/build-installer.ps1` or use a prepared build.
+2. Run the Inno Setup wizard and choose a role:
+   - **MAIN** — installs the application, auto-installs SQL Server Express if no
+     database engine is present, creates `SaylDB`, and optionally seeds demo data.
+   - **TERMINAL** — configures an additional PC to connect to the main machine's
+     instance over the LAN.
 
-Online-less licensing: per-device fingerprint (HWID) from CPU/Disk/Board/BIOS; a license is `base64(payload).base64(signature)` signed with RSA-2048, expiry and hardware binding enforced; clock-rollback protection via a `LastSeenUtc` registry anchor; `KeygenTool` is vendor-only (never shipped); activation happens in `ActivationForm` before login, license stored DPAPI-encrypted.
+**Developer setup (from source):**
 
----
+1. Install the .NET 10 SDK and a SQL Server instance (LocalDB is sufficient).
+2. Initialize the database (next section).
+3. Configure `Sayl.UI/appsettings.json` (next section).
+4. Build and run (next section).
 
-## التثبيت والانتشار / Installation & Deployment
+## Database initialization
 
-المثبّت `installer\setup.iss` (Inno Setup) يحزّم كل شيء:
+All scripts live in the repository root and run with `sqlcmd`, for example:
+`sqlcmd -S <server> -d <database> -i <script>`.
 
-- **دور رئيسي (MAIN)**: تثبيت صامت لـ SQL Server 2022 Express (مثبّت محليًا في الحزمة، ~250MB) بإنشاء `SAYL` وTCP 1433، إنشاء تسجيل دخول `sayl` بأدنى امتياز (dbcreator + db_backupoperator + dbo — لا sysadmin أبدًا)، تهيئة القاعدة من سكربتات `SaylDB.sql` + بيانات تجريبية اختيارية، كتابة `appsettings.json`.
-- **قاعدة قديمة عند إعادة التركيب**: إن وُجدت `SaylDB` يسأل المثبّت: **الاحتفاظ بالبيانات (الافتراضي)** أو **مسحها والبدء نظيفًا**؛ المسح يكتب نسخة احتياطية أولًا ولا يكمل إن فشلت. التركيب الصامت يحتفظ ما لم يُمرَّر `/RESETDB=1`.
-- **دور شاشة (TERMINAL)**: الاتصال بالجهاز الرئيسي عبر الشبكة المحلية باسم الكمبيوتر + رمز وصول مولّد. لا يُسأل عن قاعدة محلية ولا يحذفها.
-- **أول تشغيل**: إن لم يوجد أي مستخدم نشط يُنشئ التطبيق `admin` بكلمة مرور مؤقتة `Admin@123` ويُجبر على تغييرها أول دخول. وإذا كانت القاعدة القديمة تحوي `admin` معطّلًا (بعد فك تثبيت سابق) يُعاد تفعيله وتصفير كلمته بدل الفشل بـ«اسم المستخدم موجود مسبقًا».
-- **فك التثبيت**: على الجهاز الرئيسي فقط، ويسأل عن حذف `SaylDB` مع **الافتراضي «لا»** ونسخة احتياطية إلزامية قبل الحذف؛ التركيب الصامت والطرفيات يحتفظون بالقاعدة.
-- **تحقق آلي**: `installer\build-installer.ps1` ينشر التطبيق، يجهّز سكربتات القاعدة، يوضع الـ redist، ويجمّع بـ ISCC في حزمة واحدة.
+| Script | When to run |
+|---|---|
+| `SaylDB.sql` | **Fresh installs only.** Creates the database, all tables, constraints, indexes and minimal seed data. A safety gate aborts the script if any table already exists; it contains no `DROP` statements. |
+| `DataSeed.sql` | Optional demo data. **It deletes existing data in the target database first** — run it only on a fresh database. |
+| `Upgrade_09_SaylLeastPrivilege.sql` | Terminal deployments that need a least-privilege SQL login. |
+| `Upgrade_10_PartyEmailNullableUnique.sql` | Older databases: filtered unique email on `Parties`. |
+| `Upgrade_11_BatchUnitCost.sql` | Older databases: `Batches.UnitCost` plus backfill. |
+| `Upgrade_12_StockCountCountedAt.sql` | Older databases: count-line snapshot columns and the open-count unique index. |
+| `Upgrade_13_StockCountPostedMovementId.sql` | Older databases: posting idempotency column and filtered movement index. |
 
-The installer (`setup.iss`, Inno Setup) ships as one package: **MAIN role** silently installs SQL Server 2022 Express (bundled offline, ~250 MB) on instance `SAYL` (TCP 1433), creates the least-privilege `sayl` login (dbcreator + db_backupoperator + dbo — never sysadmin), builds the database from `SaylDB.sql` with optional demo data, and writes `appsettings.json`; **TERMINAL role** joins the main PC over LAN with a generated access code and never touches a local database. If `SaylDB` already exists, MAIN asks to **keep it (default)** or **erase and start clean**; erasing always writes a backup first and aborts if the backup fails. Silent MAIN installs keep existing data unless `/RESETDB=1` is passed. Uninstall on MAIN asks whether to delete `SaylDB` (**default No**) and backs it up first; silent uninstalls and terminals keep it. On first launch with zero active users, the app creates `admin / Admin@123` and forces a password change; a leftover inactive `admin` row is reactivated instead of failing with “username exists”. `build-installer.ps1` automates publish, staging, and ISCC compilation.
+In addition, the application applies three idempotent schema upgrades automatically at
+startup (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
+`EnsureCountSchemaAsync`), so a database created by an older `SaylDB.sql` is brought
+forward on first launch. On a database with zero active users, the app creates the
+default `admin` account and forces a password change at first sign-in.
 
----
+## Configuration
 
-## الأمان / Security
+The application reads `appsettings.json` from the directory next to the executable
+(`Sayl.UI/appsettings.json` in a source checkout). Never commit real credentials;
+use placeholders and fill them in locally.
 
-- **لا حسابات تجريبية مزروعة**: أُزيلت حسابات `admin` و`cashier1` من بيانات SQL؛ عند انعدام أي مستخدم نشط يُنشئ/يعيد تفعيل التطبيق `admin` بكلمة مرور مؤقتة `Admin@123` ويُجبر تغييرها أول دخول (تعافٍ آمن بعد إعادة التركيب).
-- **أدنى امتياز لقول السايبول**: تسجيل `sayl` لا يملك sysadmin بل الأدوار اللازمة فقط.
-- **كلمات مرور بأسلوب BCrypt** مع حساب مضاد للتوقيت (dummy hash) لغير الموجودين، وإخفاء أخطاء الدخول الموحدة.
-- **سجل تدقيق** (SystemLogs) لعمليات الحساسة (بيع، مرجعات، رواتب، مستخدمون)، best-effort ولا يعطّل العمل عند امتلائه.
-- **حراس مالية في القاعدة والخدمة**: قيود CHECK + تحقق قبل كل معاملة.
-- رحلة تحصين موثقة: تقرير هجوم بمدد 45 مكتشفًا، أُغلق 44/45 مختبرًا حيًا (VULN-22 مؤجل بقرار المالك لتدوير مفتاح الاختبار قبل الإطلاق)، إضافة VULN-46/47 بعد التقرير.
-
-- **No seeded demo accounts**: `admin` and `cashier1` are no longer inserted by SQL; when no active user exists, the app creates/reactivates `admin` with temporary `Admin@123` and forces a password change at first sign-in (safe recovery after reinstall).
-- **Least privilege for SQL**: the `sayl` login is never sysadmin.
-- **BCrypt passwords** with timing-safe dummy hashes and unified error messages.
-- **Audit log** (SystemLogs) for sensitive operations, best-effort (never blocks work).
-- **Financial guards at DB and service level**: CHECK constraints plus per-transaction validation.
-- Hardening is documented: a 45-finding attack report, 44/45 closed and live-tested (VULN-22 deferred by owner decision to rotate the test key pre-launch), plus post-report VULN-46/47.
-
----
-
-## الشروع في العمل / Getting Started
-
-**المتطلبات**: Windows 10/11 · .NET 10 SDK · SQL Server Express (أو استخدام المثبّت المرفق). Inno Setup 6 للتجميع.
-
-```bash
-# البناء
-dotnet build Sayl.UI\Sayl.UI.csproj
-
-# تشغيل الواجهة
-dotnet run --project Sayl.UI\Sayl.UI.csproj
-
-# اختبار E2E على قاعدة حية
-dotnet run --project "consol app\consol app.csproj"
-
-# بناء الحزمة الكاملة
-powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1 -Version 1.0.0
+```json
+{
+  "ConnectionStrings": {
+    "SaylDb": "Server=<YOUR_SERVER>;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True"
+  },
+  "Language": "ar"
+}
 ```
 
-**Requirements**: Windows 10/11 · .NET 10 SDK · SQL Server Express (or use the bundled installer). Inno Setup 6 to compile the package.
+| Key | Meaning |
+|---|---|
+| `ConnectionStrings:SaylDb` | SQL Server connection string. Trusted (Windows) authentication is the supported configuration; a SQL login would use the usual `User Id=`/`Password=` keys — store such values only outside version control. |
+| `Language` | Default UI language (`ar` or `en`); the user's saved preference in `%LocalAppData%` overrides it after the first switch. |
 
-```bash
-# Build
-dotnet build Sayl.UI\Sayl.UI.csproj
+Error logs are written to `%LocalAppData%\Sayl_POS\ui-error.log`.
 
-# Run the UI
-dotnet run --project Sayl.UI\Sayl.UI.csproj
+## Build and run
 
-# E2E checks against a live database
-dotnet run --project "consol app\consol app.csproj"
+This is a Windows Forms application — it builds and runs on Windows only.
 
-# Full installer package
-powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1 -Version 1.0.0
+```powershell
+# from the repository root
+dotnet build Sayl_POS.slnx -c Release
+
+# run the application
+dotnet run --project Sayl.UI -c Release
 ```
 
-**الملاحظة**: الهارنس يتطلب قاعدة SQL حية قابلة للاتصال (بصمت اتصال التطبيق) — لا يفتح اتصالات وهمية.
+The main solution file is `Sayl_POS.slnx` (XML solution format).
 
-**Note**: the E2E harness requires a reachable live SQL database (it uses the app's connection) — no mocks.
+## Tests
 
----
-
-## هيكل المستودع / Repository Layout
-
+```powershell
+dotnet test Sayl.Tests\Sayl.Tests.csproj
 ```
+
+The test suite is integration-style: it runs against real SQL Server (LocalDB) and
+exercises the actual service layer and schema.
+
+- **Isolated per-run databases.** Each run creates a uniquely named database
+  (`SaylCogsTest_<hex>`), applies `SaylDB.sql` plus the upgrade scripts, and drops it
+  afterwards. Parallel runs and CI do not collide, and leftover databases from
+  previous runs are cleaned up by prefix.
+- **Destructive-operation gates.** The test fixture only ever drops databases whose
+  names carry the test prefix; it refuses to touch anything else
+  (`DatabaseFixtureSafetyTests` covers these gates). This exists because an earlier
+  version of the schema script destroyed a live database.
+- **Restore is not exercised end-to-end** — it is destructive by design; only its
+  authorization gate and pre-checks are tested.
+
+**Console QA harness** (`consol app`): runs full usage cycles through the real service
+layer. By default it targets an isolated scratch database (`SaylQAScratch_<unique>`)
+built from `SaylDB.sql` + `DataSeed.sql` and dropped at exit. Options:
+
+```text
+dotnet run --project "consol app"            # scratch database (default, safe)
+dotnet run --project "consol app" -- --keep-db   # keep the scratch database for inspection
+dotnet run --project "consol app" -- --live  # explicit opt-in to write the REAL SaylDB
+                                             # (requires confirmation unless --yes is passed)
+```
+
+## Project structure
+
+```text
 Sayl_POS/
-├─ Sayl.UI/            الواجهة (WinForms) — الشاشات والوحدة والموارد والترجمات
-├─ Sayl_DataAccess/    Sayl.Core — النماذج/السياق (EF Core) وخدمات الأعمال
-├─ Common/             الأنواع المشتركة: DTO وResult والصلاحيات والثوابت
-├─ DependencyInjection/ مركّب الحقن: تسجيل القاعدة + الخدمات
-├─ PosLicensing/       محرك الترخيص المدمج
-├─ KeygenTool/         أداة الموزّع لإصدار الرخص (لا تُشحن)
-├─ installer/          Inno Setup + build-installer.ps1 + SQL redist
-├─ consol app/         هارنس الاختبار المتكامل (E2E)
-├─ Services/           كود استقرار قديم (غير مربوط بالحقن)
-└─ docs/               خطط وتوثيق (ترحيل بيانات، إلخ.)
+├── Sayl_POS.slnx              # solution (XML format)
+├── SaylDB.sql                 # full schema script (fresh installs only)
+├── DataSeed.sql               # demo data (deletes existing data first)
+├── Upgrade_09..13_*.sql       # idempotent migration scripts
+├── Common/                    # shared contracts (net10.0)
+│   ├── DTOs/                  #   request models + view models
+│   ├── Enums/  Results/       #   enums, Result / Result<T>
+│   └── Utils/                 #   AppPermissions, ProgramClock, validation
+├── Sayl_DataAccess/           # Sayl.Core project (net10.0)
+│   ├── Data/SaylDbContext.cs  #   EF Core model (24 DbSets)
+│   ├── Models/                #   entities
+│   └── Services/              #   23 registered services + static helpers
+├── DependencyInjection/       # AddSaylServices registration (net10.0)
+├── Sayl.UI/                   # WinForms frontend (net10.0-windows, WinExe)
+│   ├── Forms/                 #   login, POS, main shell, ~30 task dialogs
+│   ├── UserControls/          #   one per MainForm section
+│   └── Infrastructure/        #   navigation, session state, theming,
+│                              #   PDF/Excel/receipt/label printing, licensing gate
+├── PosLicensing/              # offline RSA-2048 HWID-bound licensing library
+├── KeygenTool/                # vendor-only license issuer (never shipped)
+├── Sayl.Tests/                # xUnit integration tests (LocalDB)
+├── consol app/                # console E2E QA harness (scratch DB by default)
+├── installer/                 # Inno Setup script + build script
+└── docs/                      # technical documentation (see below)
 ```
 
----
+The top-level `Services/` folder is legacy leftover code that is not part of the
+solution and not referenced by the application.
 
-## التوثيق / Documentation
+## Important design decisions
 
-| الملف                        | File                         | المحتوى                        |
-|------------------------------|------------------------------|--------------------------------|
-| `Agent.md`                   | Agents context               | هندسة المشروع واتفاقيات الكود  |
-| `TASK.md`                    | Backlog                      | المهمات القادمة والنوايا       |
-| `ATTACK_REPORT.md`           | Attack report                | مراجعة الهجوم (45 مكتشفًا)     |
-| `REMEDIATION_CHECKLIST.md`   | Remediation log              | سجل إصلاح المكتشفات P0..P3     |
-| `docs/MIGRATION_PLAN.md`     | Migration plan               | استيراد من Excel/CSV مستقبلًا  |
-| `LicenseSystem/LICENSE-SYSTEM-SPEC.md` | Licensing spec   | مواصفة الترخيص والتفعيل        |
+- **Batch costing / FEFO.** Consumption order is First-Expiry-First-Out (excluding
+  expired and quarantined batches), but cost is read from each consumed batch
+  (`Batches.UnitCost`), not from the product's last-purchase price. A sale line that
+  consumed several batches is split into one `InvoiceItem` row per batch.
+  See [docs/COSTING.md](docs/COSTING.md).
+- **Weighted-average cost merging.** Adding quantity to an existing batch (purchase,
+  manual receive, transfer) merges costs by quantity-weighted average; a batch with
+  no stored cost falls back to `Product.CostPrice` — a documented reserve, never an
+  invented figure.
+- **Idempotent stock-count posting.** Each posting adjustment writes
+  `StockMovements.SourceType = 'ManualAdjustment'` with `SourceId = CountId`; before
+  posting, the service checks the database for an existing movement with that key, so
+  a partial failure is always safe to retry. `StockCounts.PostedMovementId` records
+  the link permanently.
+- **Result error pattern.** Services return `Result` / `Result<T>` with user-facing
+  messages; exceptions are internal plumbing converted to failed results at the
+  operation boundary.
+- **Service-boundary authorization.** The UI hides unauthorized screens, but every
+  state-changing service operation independently verifies the actor's role bitmask,
+  so UI visibility is never the enforcement point (see the actor-identity limitation
+  below).
+- **UTC + fixed-offset program day.** Transactional timestamps are stored in UTC
+  (`DateTime.UtcNow`, `GETUTCDATE()`); the "shop day" used by reports, FEFO expiry,
+  and fiscal boundaries is UTC + 3 (`Common.Utils.ProgramClock`), deliberately not
+  the machine's local time zone.
+- **App locks and CAS updates.** Cross-request serialization uses
+  `sp_getapplock` (stock-count open/post); state transitions use conditional
+  UPDATEs that succeed only from the expected previous state.
+- **No stored procedures.** All logic lives in C#; the schema script is a pure
+  table/index/constraint definition. See
+  [docs/database/STORED_PROCEDURES.md](docs/database/STORED_PROCEDURES.md).
 
----
+## Known limitations
 
-**سيل — نظام نقاط بيع يبقى في يد صاحبه.** — Sayl POS keeps the business in the merchant's hands.
+- **Client-supplied actor identity (audit finding A3).** Service methods receive the
+  acting user's id as a parameter. Within the supported single-machine (or
+  trusted-LAN) deployment the application process is the trust boundary; a
+  multi-terminal or server-hosted design would need authenticated identity first.
+- **`Roles.RoleId` is `TINYINT IDENTITY`** — a maximum of 255 roles; a production
+  schema follow-up.
+- **Legacy column defaults use `GETDATE()`** while all new writers use UTC values; a
+  default-migration follow-up (Upgrade_14) is planned.
+- **No successful RESTORE in automated tests** — restore is destructive by design;
+  only its authorization gate and pre-checks are covered.
+- **Denied authorization attempts are not audited** — failures are returned but not
+  written to `SystemLogs`.
+- **Direct SQL access is possible by design** — the database holds no procedures or
+  security layer; protection relies on the application and on Windows/database login
+  permissions.
+- **Windows only.** WinForms and SQL Server tooling tie the project to Windows.
+- **In-memory login lockout.** Failed-attempt lockout state resets when the process
+  restarts.
+
+## Documentation
+
+Detailed technical documentation lives in `docs/`:
+
+| Document | Content |
+|---|---|
+| [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md) | Architecture, startup, navigation, transactions, limitations |
+| [docs/architecture/LAYER_RESPONSIBILITIES.md](docs/architecture/LAYER_RESPONSIBILITIES.md) | Layer map and full service catalog |
+| [docs/architecture/DATA_FLOW.md](docs/architecture/DATA_FLOW.md) | Sequence diagrams for all main operations |
+| [docs/database/DATABASE_OVERVIEW.md](docs/database/DATABASE_OVERVIEW.md) | Tables, constraints, indexes, migrations |
+| [docs/database/ENTITY_RELATIONSHIPS.md](docs/database/ENTITY_RELATIONSHIPS.md) | ER model and integrity rules |
+| [docs/database/STORED_PROCEDURES.md](docs/database/STORED_PROCEDURES.md) | Why none exist; where data-level logic lives |
+| [docs/workflows/SALES_WORKFLOW.md](docs/workflows/SALES_WORKFLOW.md) | POS checkout, suspended invoices |
+| [docs/workflows/PURCHASE_WORKFLOW.md](docs/workflows/PURCHASE_WORKFLOW.md) | Purchase invoices, batch intake, supplier balance |
+| [docs/workflows/INVENTORY_WORKFLOW.md](docs/workflows/INVENTORY_WORKFLOW.md) | Receive, adjust, transfer, reservations |
+| [docs/workflows/STOCK_COUNT_WORKFLOW.md](docs/workflows/STOCK_COUNT_WORKFLOW.md) | Physical counts and idempotent posting |
+| [docs/workflows/PAYMENTS_AND_RETURNS.md](docs/workflows/PAYMENTS_AND_RETURNS.md) | Allocation engine, drawer sessions, returns |
+| [docs/workflows/FISCAL_CLOSING.md](docs/workflows/FISCAL_CLOSING.md) | Readiness checks and the annual close |
+| [docs/workflows/BACKUP_AND_RESTORE.md](docs/workflows/BACKUP_AND_RESTORE.md) | Backup strategy and guarded restore |
+| [docs/security/AUTHENTICATION_AND_AUTHORIZATION.md](docs/security/AUTHENTICATION_AND_AUTHORIZATION.md) | Login, roles, permission evaluation, audit |
+| [docs/COSTING.md](docs/COSTING.md) | Batch costing policy in depth |
+
+## Contributing
+
+Contributions are welcome. Before writing code, read
+[Agent.md](Agent.md) — it defines the architecture rules for this repository
+(single-layer services, `Result` pattern, permission checks at the service boundary,
+UTC+3 program-day convention) and the working rules agents and contributors are
+expected to follow: no unnecessary layers, no unrelated refactoring, no weakening of
+tests to make builds pass, and documentation updates whenever architecture or
+behavior changes. When a change requires a database modification, propose the schema
+change in an idempotent `Upgrade_*.sql` script before touching code.
+
+
+
