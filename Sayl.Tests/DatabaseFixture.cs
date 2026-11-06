@@ -14,10 +14,29 @@ public class DatabaseCollection : ICollectionFixture<DatabaseFixture> { }
 /// تُبنى من SaylDB.sql (مع استبدال اسم القاعدة وحذف سطر UnitCost
 /// كي يُنشئه سكربت Upgrade_11 نفسه — فيُختبر الترحيل أيضًا)،
 /// ثم يُطبَّق Upgrade_11_BatchUnitCost.sql.
+///
+/// السلامة:
+/// - اسم القاعدة عشوائي لكل رَن (SaylCogsTest_{hex}) فلا يتصادم رَنان متوازيان
+///   ولا يُسقط أحدهما قاعدة الآخر.
+/// - أي DROP يمر حصريًا عبر DropDatabase التي ترفض أي اسم لا يطابق نمط
+///   قواعد الاختبار الحصري (SaylCogsTest أو SaylCogsTest_{32hex})، وتتحقق من
+///   وجود القاعدة بالاسم المطلوب (باراميتر، لا حقن) قبل أي أمر إتلاف.
+/// - كنسخ اليتامى (drop-by-prefix) يُنفَّذ فقط للأسماء المطابقة للنمط الحصري،
+///   وبعمر يتجاوز 24 ساعة — كي لا يمس رَنًا موازيًا بدأ قبل قليل.
+/// - بعد البناء يُتحقق من هوية القاعدة المتصلة (DB_NAME()) — إن تعذّر
+///   التحقق يفشل الإقلاع قبل كتابة أي بيانات.
 /// </summary>
 public sealed partial class DatabaseFixture : IAsyncLifetime
 {
-    public const string DbName = "SaylCogsTest";
+    /// <summary>بادئة حصرية لقواعد بيانات الاختبارات — لا يُسقط أي اسم خارجها.</summary>
+    public const string TestDbPrefix = "SaylCogsTest";
+
+    /// <summary>الاسم الثابت القديم (قبل التوزيع العشوائي) — يُنظَّف كيتيم فقط.</summary>
+    public const string LegacyDbName = "SaylCogsTest";
+
+    /// <summary>اسم فريد لكل رَن — رَنان متوازيان لا يتشاركان قاعدة أبدًا.</summary>
+    public static string DbName { get; } = $"{TestDbPrefix}_{Guid.NewGuid():N}";
+
     public static string ConnectionString =>
         $@"Server=(localdb)\MSSQLLocalDB;Database={DbName};Trusted_Connection=True;TrustServerCertificate=True";
 
@@ -25,8 +44,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
     {
         try
         {
-            // إسقاط بقايا رَن سابق ثم البناء من الصفر
-            DropDatabase();
+            // تنظيف اليتامى (أسماء قديمة تخص رَن سابق) ثم البناء من الصفر
+            DropOrphanedTestDatabases();
+            DropDatabase(DbName);
             // السكربت ينشئ القاعدة بنفسه (CREATE DATABASE + USE) — يتصل بـmaster أولًا
             ExecuteBatches(LoadSaylDbScriptWithoutUnitCost(), master: true);
             // مسار الإقلاع الفعلي: EnsureSchema يضيف ما تأخر عن SaylDB.sql (مثل IsQuarantined)
@@ -36,6 +56,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade12Script());
             // مسار الإقلاع الفعلي: عمود idempotency (PostedMovementId) + فهرس الحركات المرتبطة
             ExecuteBatches(LoadUpgrade13Script());
+            // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
+            VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
         }
         catch (Exception ex)
@@ -49,7 +71,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
     {
         // إغلاق أي جلسة جرد مفتوحة تركها اختبار فاشل — يمنع تسرب الجلسة إلى الاختبارات التالية.
         try { CloseOpenSessionIfAny(); } catch { /* ignore cleanup errors */ }
-        DropDatabase();
+        // إسقاط قاعدة هذا الرَن فقط — أي شيء آخر خارج النطاق تمامًا
+        DropDatabase(DbName);
         return Task.CompletedTask;
     }
 
@@ -115,21 +138,102 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
     private static string LoadUpgrade13Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_13_StockCountPostedMovementId.sql"));
 
-    private static void DropDatabase()
+    /// <summary>
+    /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:
+    /// 1) الاسم يطابق نمط قواعد الاختبار الحصري (وإلا رفض صريح — فشل-آمن).
+    /// 2) وجود القاعدة بهذا الاسم بالضبط يُتحقق باراميتر قبل أي أمر إتلاف.
+    /// </summary>
+    private static void DropDatabase(string dbName)
+    {
+        if (!IsSafeTestDbName(dbName))
+            throw new InvalidOperationException(
+                $"[fixture] refusing to drop '{dbName}': name does not match the test-only " +
+                $"'{TestDbPrefix}' pattern. Destructive SQL is limited to databases created by this fixture.");
+
+        var csb = new SqlConnectionStringBuilder(ConnectionString) { InitialCatalog = "master" };
+        using var cn = new SqlConnection(csb.ConnectionString);
+        cn.Open();
+
+        // التحقق من الهوية: القاعدة موجودة بالاسم المطلوب بالضبط (باراميتر — لا حقن ولا wildcard)
+        using (var check = cn.CreateCommand())
+        {
+            check.CommandText = "SELECT name FROM sys.databases WHERE name = @name";
+            check.Parameters.AddWithValue("@name", dbName);
+            if (check.ExecuteScalar() is null)
+                return; // لا شيء يُسقط
+        }
+
+        // الاسم مُتحقَّق منه بالـregex (حروف/أرقام/شرطة سفلية فقط) فالاقتباس آمن
+        using (var cmd = cn.CreateCommand())
+        {
+            cmd.CommandText = $"ALTER DATABASE [{dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{dbName}];";
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// تنظيف قواعد يتيمة من رَن سابق انهار قبل Dispose: فقط الأسماء المطابقة
+    /// للنمط الحصري، والعتيقة (> 24 ساعة) — كي لا يلمس هذا الرَن قاعدة
+    /// رَن متوازٍ بدأ قبل قليل. الاسم الثابت القديم (SaylCogsTest) يُنظَّف دائمًا:
+    /// لم يُنشئه سوى النسخة القديمة من هذا الفيكسر.
+    /// </summary>
+    private static void DropOrphanedTestDatabases()
     {
         var csb = new SqlConnectionStringBuilder(ConnectionString) { InitialCatalog = "master" };
         using var cn = new SqlConnection(csb.ConnectionString);
         cn.Open();
-        using (var cmd = cn.CreateCommand())
+        using var cmd = cn.CreateCommand();
+        // [ _ ] داخل LIKE يطابق حرف الشرطة السفلية حرفيًا (لا wildcard)
+        cmd.CommandText = @"
+SELECT name, create_date FROM sys.databases
+WHERE name = @legacy OR name LIKE @prefixPattern";
+        cmd.Parameters.AddWithValue("@legacy", LegacyDbName);
+        cmd.Parameters.AddWithValue("@prefixPattern", TestDbPrefix + "[_%]");
+
+        var orphans = new List<(string Name, DateTime CreatedUtc)>();
+        using (var reader = cmd.ExecuteReader())
         {
-            cmd.CommandText = $@"
-IF DB_ID(N'{DbName}') IS NOT NULL
-BEGIN
-    ALTER DATABASE {DbName} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE {DbName};
-END";
-            cmd.ExecuteNonQuery();
+            while (reader.Read())
+            {
+                string name = reader.GetString(0);
+                // sys.databases.create_date قيمة UTC (Kind=Unspecified من الدرايفر)
+                orphans.Add((name, reader.GetDateTime(1)));
+            }
         }
+
+        foreach (var (name, createdUtc) in orphans)
+        {
+            // فشل-آمن: أي اسم غير مطابق للنمط الحصري يُتجاهل (ولا يُسقط أبدًا)
+            if (!IsSafeTestDbName(name)) continue;
+            bool legacy = string.Equals(name, LegacyDbName, StringComparison.OrdinalIgnoreCase);
+            bool stale = createdUtc <= DateTime.UtcNow.AddHours(-24);
+            if (legacy || stale)
+                DropDatabase(name);
+        }
+    }
+
+    /// <summary>نمط أسماء قواعد الاختبار الحصري: SaylCogsTest أو SaylCogsTest_{32hex}.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"^SaylCogsTest(_[0-9a-fA-F]{32})?$")]
+    private static partial System.Text.RegularExpressions.Regex Regex_SafeTestDbName();
+
+    /// <summary>بوابة كل عملية إتلاف: true فقط لأسماء قواعد الاختبار الحصرية.</summary>
+    internal static bool IsSafeTestDbName(string? name) =>
+        !string.IsNullOrEmpty(name) && Regex_SafeTestDbName().IsMatch(name);
+
+    /// <summary>
+    /// تحقق هوية بعد البناء: الاتصال يجب أن يكون على قاعدة هذا الرَن تحديدًا.
+    /// إن تعذّر التحقق — فشل صريح قبل أن يكتب أي اختبار بيانات.
+    /// </summary>
+    private static void VerifyTestDatabaseIdentity()
+    {
+        using var cn = new SqlConnection(ConnectionString);
+        cn.Open();
+        using var cmd = cn.CreateCommand();
+        cmd.CommandText = "SELECT DB_NAME()";
+        var actual = cmd.ExecuteScalar() as string;
+        if (!string.Equals(actual, DbName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"[fixture] test database identity could not be verified: connected to '{actual}', expected '{DbName}'. Aborting before any data is written.");
     }
 
     /// <summary>تنفيذ سكربت SQL مقسومًا على GO — SqlClient يشغل بـ QUOTED_IDENTIFIER/ANSI_NULLS ON افتراضيًا.</summary>

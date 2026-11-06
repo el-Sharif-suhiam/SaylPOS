@@ -55,7 +55,9 @@ DBCC CHECKIDENT ('Payments', RESEED, 0);
 DBCC CHECKIDENT ('StockMovements', RESEED, 0);
 DBCC CHECKIDENT ('Expenses', RESEED, 0);
 DBCC CHECKIDENT ('SystemLogs', RESEED, 0);
-DBCC CHECKIDENT ('POSSessions', RESEED, 0);
+-- DBCC CHECKIDENT ('POSSessions', RESEED, 0);  ← حُذف: على جدول لم تُدرج فيه صفوف
+-- قط، يجعل RESEED 0 أول صف مُدرَج يأخذ هوية 0 (سلوك SQL Server الموثق) —
+-- فتفتح أول جلسة بمعرف 0 وتُقرأ كـ«لا جلسة». الجدول فارغ فالهوية تبدأ من بذرها الطبيعي.
 GO
 
 -- ===============================================

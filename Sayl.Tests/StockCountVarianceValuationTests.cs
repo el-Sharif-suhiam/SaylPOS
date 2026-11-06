@@ -37,16 +37,13 @@ public class StockCountVarianceValuationTests
 
     /// <summary>بذر بيانات دون إنشاء دور جديد: Roles.RoleId عمود TINYINT IDENTITY —
     /// المجموعة الكاملة للاختبارات تستهلك مداه كاملًا (255) فأي دور إضافي يُفجّر
-    /// «Arithmetic overflow». نعيد استخدام دور نشط يحمل بت المخزون (مدير SaylDB.sql
-    /// في قاعدة جديدة، أو دور المدير الذي بذرته اختبارات سابقة في الرَن الكامل) —
+    /// «Arithmetic overflow». نعيد استخدام دور مدير نشط (يمتلك بت المخزون) عبر
+    /// TestSeed.GetOrCreateRoleAsync — يُنشأ فقط في أول بذر بالرَن.
     /// المستخدم/المورد/العميل/المنتج أعمدة INT فتنشأ لكل اختبار كالمعتاد.</summary>
     private async Task<TestSeed> SeedAsync(string m)
     {
         await using var db = _fx.CreateContext();
-        var role = await db.Roles
-            .Where(r => r.IsActive && (r.RoleValue & AppPermissions.Inventory) != 0)
-            .OrderByDescending(r => r.RoleValue)
-            .FirstAsync();
+        var role = await TestSeed.GetOrCreateRoleAsync(db, AppPermissions.AdminRoleValue);
 
         var user = new User
         {

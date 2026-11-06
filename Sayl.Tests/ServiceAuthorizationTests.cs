@@ -30,8 +30,8 @@ public class ServiceAuthorizationTests
 
     private static async Task<int> SeedUserAsync(SaylDbContext db, string marker, int roleValue)
     {
-        var role = new Role { Name = $"role-{marker}", RoleValue = roleValue, IsActive = true };
-        db.Roles.Add(role);
+        // الدور مُعاد استخدامه من TestSeed.GetOrCreateRoleAsync (RoleId tinyint — لا دور جديد لكل اختبار)
+        var role = await TestSeed.GetOrCreateRoleAsync(db, roleValue);
         var user = new User { Username = $"user-{marker}", PasswordHash = "x", Role = role, IsActive = true };
         db.Users.Add(user);
         await db.SaveChangesAsync();

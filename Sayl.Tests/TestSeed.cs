@@ -12,21 +12,40 @@ public sealed class TestSeed
     public int CustomerId { get; init; }
     public int ProductId { get; init; }
 
+    /// <summary>
+    /// دور مشترك معاد استخدامه حسب قيمة بت الصلاحية — Roles.RoleId عمود
+    /// TINYINT IDENTITY (حد 255 صفًا): بذر دور جديد لكل اختبار يفيض الهوية
+    /// في الرَن الكامل (Arithmetic overflow). الأدوار المتشابكة بقيمة واحدة
+    /// مترادفة دلاليًا (التصريح يُقرأ من RoleValue) فإعادة الاستخدام آمنة،
+    /// والإنشاء يحدث مرة واحدة لكل قيمة بت مختلفة (عدد محدود) لا لكل اختبار.
+    /// ملاحظة: الدور المُعاد مستخدم للقراءة فقط (ربطه بمستخدمين). أي اختبار
+    /// يعدّل حالة الدور نفسه (تعطيل/تعديل) يجب أن ينشئ دوره الخاص بعلامة فريدة.
+    /// </summary>
+    public static async Task<Role> GetOrCreateRoleAsync(SaylDbContext db, int roleValue)
+    {
+        var role = await db.Roles
+            .Where(r => r.IsActive && r.RoleValue == roleValue)
+            .OrderBy(r => r.RoleId)
+            .FirstOrDefaultAsync();
+        if (role != null) return role;
+
+        role = new Role
+        {
+            Name = $"test-role-{roleValue}-{Guid.NewGuid():N}"[..32],
+            RoleValue = roleValue,
+            IsActive = true
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        return role;
+    }
+
     public static async Task<TestSeed> SeedAsync(SaylDbContext db, string marker)
     {
         // Roles.RoleId عمود TINYINT IDENTITY (حد 255 صفًا): بذر دور لكل اختبار
-        // يفيض الهوية في الرَن الكامل (Arithmetic overflow). يُعاد استخدام دور
+        // يفيض الهوية في الرَن الكامل (Arithmetic overflow). نعيد استخدام دور
         // مدير نشط موجود — نفس RoleValue فلا فرق دلالي — ويُنشأ فقط في أول بذر.
-        // (النمط نفسه الموثق في StockCountVarianceValuationTests.)
-        var role = await db.Roles
-            .Where(r => r.IsActive && r.RoleValue == Common.Utils.AppPermissions.AdminRoleValue)
-            .FirstOrDefaultAsync();
-
-        if (role == null)
-        {
-            role = new Role { Name = $"test-admin-{marker}", RoleValue = Common.Utils.AppPermissions.AdminRoleValue, IsActive = true };
-            db.Roles.Add(role);
-        }
+        var role = await GetOrCreateRoleAsync(db, Common.Utils.AppPermissions.AdminRoleValue);
 
         var user = new User
         {

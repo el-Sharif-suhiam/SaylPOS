@@ -670,11 +670,11 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
         return payroll.PayrollId;
     }
 
-    /// <summary>Seed a user with an explicit role value (for permission tests).</summary>
+    /// <summary>Seed a user with an explicit role value (for permission tests).
+    /// الدور مُعاد استخدامه من TestSeed.GetOrCreateRoleAsync (RoleId tinyint).</summary>
     private static async Task<int> SeedUserWithRoleAsync(SaylDbContext db, string marker, int roleValue)
     {
-        var role = new Role { Name = $"role-{marker}", RoleValue = roleValue, IsActive = true };
-        db.Roles.Add(role);
+        var role = await TestSeed.GetOrCreateRoleAsync(db, roleValue);
         var user = new User
         {
             Username = $"user-{marker}",

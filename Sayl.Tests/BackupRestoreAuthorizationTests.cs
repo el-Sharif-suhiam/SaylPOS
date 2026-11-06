@@ -36,11 +36,11 @@ public class BackupRestoreAuthorizationTests
 
     // ───────────────── helpers (fresh context per step) ─────────────────
 
-    /// <summary>مستخدم بدور محدد (قيمة بت) — نشط افتراضيًا.</summary>
+    /// <summary>مستخدم بدور محدد (قيمة بت) — نشط افتراضيًا. الدور مُعاد استخدامه من
+    /// TestSeed.GetOrCreateRoleAsync (RoleId tinyint — لا دور جديد لكل اختبار).</summary>
     private static async Task<int> SeedUserAsync(SaylDbContext db, string marker, int roleValue, bool isActive = true)
     {
-        var role = new Role { Name = $"role-{marker}", RoleValue = roleValue, IsActive = true };
-        db.Roles.Add(role);
+        var role = await TestSeed.GetOrCreateRoleAsync(db, roleValue);
         var user = new User { Username = $"user-{marker}", PasswordHash = "x", Role = role, IsActive = isActive };
         db.Users.Add(user);
         await db.SaveChangesAsync();

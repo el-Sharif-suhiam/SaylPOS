@@ -13,11 +13,30 @@ using Sayl.Core.Models;
 namespace consol_app
 {
     /// <summary>
-    /// E2E test harness: runs full usage cycles against the real SaylDB
-    /// exactly like the UI would call the services.
+    /// E2E test harness: runs full usage cycles through the real service layer.
+    ///
+    /// SAFETY — database targeting:
+    /// - DEFAULT: an isolated scratch database (SaylQAScratch_{unique}) built fresh
+    ///   from SaylDB.sql + DataSeed.sql on the same server, then dropped at exit.
+    ///   The developer's/production SaylDB is never touched by default.
+    /// - `--live`   : explicit opt-in to run against the REAL SaylDB (the historical
+    ///   behavior). Requires a confirmation prompt unless `--yes` is also passed.
+    /// - `--keep-db`: keep the scratch database after the run (for inspection).
     /// </summary>
-    internal class Program
+    internal partial class Program
     {
+        // ───────────────── DB targeting ─────────────────
+        private const string LiveDbName = "SaylDB";
+        private const string ScratchDbPrefix = "SaylQAScratch";
+        /// <summary>نمط أسماء قواعد الخربشة الحصرية — بوابة كل عملية إسقاط.</summary>
+        [System.Text.RegularExpressions.GeneratedRegex(@"^SaylQAScratch_[0-9]{14}_[0-9a-f]{8}$")]
+        private static partial System.Text.RegularExpressions.Regex Regex_ScratchDbName();
+
+        private static string ServerConnectionString =>
+            @"Server=.\SAYL;Trusted_Connection=True;TrustServerCertificate=True";
+
+        private static string DbName = default!;
+
         private static IServiceProvider Services = default!;
         private static int _pass, _fail;
         private static readonly List<string> _failures = new();
@@ -25,64 +44,217 @@ namespace consol_app
         static async Task Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
-            // المثيل المسماة SAYL — المثبت ينشئها (SaylInstance = 'SAYL' في setup.iss)
-            // والافتراضي '.' قد لا يحمل SaylDB على جهاز التطوير.
+            bool live = args.Any(a => a.Equals("--live", StringComparison.OrdinalIgnoreCase));
+            bool assumeYes = args.Any(a => a.Equals("--yes", StringComparison.OrdinalIgnoreCase));
+            bool keepDb = args.Any(a => a.Equals("--keep-db", StringComparison.OrdinalIgnoreCase));
+            bool scratch = !live;
+
+            if (live)
+            {
+                Console.WriteLine("⚠️  LIVE MODE: requested via --live. The REAL SaylDB on Server=.\\SAYL will be written to.");
+                if (!assumeYes)
+                {
+                    Console.Write("   Type 'live' to confirm, anything else aborts: ");
+                    if (Console.ReadLine()?.Trim().Equals("live", StringComparison.OrdinalIgnoreCase) != true)
+                    {
+                        Console.WriteLine("Aborted. (No database was touched.)");
+                        return;
+                    }
+                }
+                DbName = LiveDbName;
+            }
+            else
+            {
+                // افتراضي آمن: قاعدة خربشة معزولة تُبنى من سكربتات التثبيت نفسها
+                DbName = $"{ScratchDbPrefix}_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString("N")[..8]}";
+                BuildScratchDatabase(DbName);
+            }
+
+            string connectionString =
+                $@"Server=.\SAYL;Database={DbName};Trusted_Connection=True;TrustServerCertificate=True;";
+            Console.WriteLine($"Harness target: Server=.\\SAYL, Database={DbName}" +
+                (scratch ? " (isolated scratch DB)" : " (LIVE)"));
             Services = new ServiceCollection()
-                .AddSaylServices("Server=.\\SAYL;Database=SaylDB;Trusted_Connection=True;TrustServerCertificate=True;")
+                .AddSaylServices(connectionString)
                 .BuildServiceProvider();
 
-            // مسبار التزويد: دورات الهارنس تستهلك مخزون المنتج 1 دورة بعد دورة
-            // (بيع/تعليق/مرتجع...) — نعيد 500 وحدة بدمغة وقتية فريدة قبل كل جولة
-            // كي تبقى الاختبارات قابلة للتكرار إلى ما لا نهاية (idempotent).
-            using (var ws = Scope())
+            try
             {
-                var stock = Svc<clsStockService>(ws);
-                var db = Svc<Sayl.Core.Data.SaylDbContext>(ws);
-                // ترقية المخطط idempotent أولًا: أي قاعدة قائمة (كقاعدة التطوير)
-                // تكتسب عمود MustChangePassword تلقائيًا قبل أول استعلام.
-                await Svc<clsUsersService>(ws).EnsureSchemaUpgradesAsync();
-                // جدول حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
-                await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
-                // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
-                await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
-                var admin = await db.Users
-                    .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
-                await stock.ReceiveStockAsync(new DtoStockReceiveRequest
+                // مسبار التزويد: دورات الهارنس تستهلك مخزون المنتج 1 دورة بعد دورة
+                // (بيع/تعليق/مرتجع...) — نعيد 500 وحدة بدمغة وقتية فريدة قبل كل جولة
+                // كي تبقى الاختبارات قابلة للتكرار إلى ما لا نهاية (idempotent).
+                using (var ws = Scope())
                 {
-                    ProductId = 1,
-                    BatchNumber = "HARNESS-" + DateTime.Now.Ticks,
-                    Quantity = 500
-                }, admin?.UserId ?? 0);
-            }
+                    var stock = Svc<clsStockService>(ws);
+                    var db = Svc<Sayl.Core.Data.SaylDbContext>(ws);
+                    // ترقية المخطط idempotent أولًا: أي قاعدة قائمة (كقاعدة التطوير)
+                    // تكتسب عمود MustChangePassword تلقائيًا قبل أول استعلام.
+                    await Svc<clsUsersService>(ws).EnsureSchemaUpgradesAsync();
+                    // جدول حجوزات الفواتير المعلقة (StockReservations) — idempotent كذلك
+                    await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
+                    // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
+                    await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
+                    var admin = await db.Users
+                        .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
+                    await stock.ReceiveStockAsync(new DtoStockReceiveRequest
+                    {
+                        ProductId = 1,
+                        BatchNumber = "HARNESS-" + DateTime.Now.Ticks,
+                        Quantity = 500
+                    }, admin?.UserId ?? 0);
+                }
 
-            await AuthCycle();
-            var (sessionId, cashierId) = await SessionAndSaleCycle();
-            await QuickAddPartyCycle();
-            if (sessionId > 0)
+                await AuthCycle();
+                var (sessionId, cashierId) = await SessionAndSaleCycle();
+                await QuickAddPartyCycle();
+                if (sessionId > 0)
+                {
+                    await SuspendResumeCancelCycle(sessionId, cashierId);
+                    await ReservationOwnershipCycle();
+                    await ReturnCycle();
+                    await CashDeskCycle(sessionId);
+                }
+                await FinancialGuardsAttackCycle(sessionId);
+                await CreditRulesCycle();
+                await PermissionRulesCycle();
+                await BitmaskPermissionsCycle();
+                await ReportsCycle();
+                await SettingsBackupCycle();
+                await CrudSmokeCycle();
+                await AdjustBatchConsistencyCycle();
+                await InventoryBatchConsistencyCycle();
+                await StockCountCycle();
+                await OwnerRecoveryCycle();
+                await PaymentAllocationCycle();
+                await RefundPlanCycle();
+
+                Console.WriteLine();
+                Console.WriteLine($"================ RESULT: {_pass} PASSED / {_fail} FAILED ================");
+                foreach (var f in _failures)
+                    Console.WriteLine("FAIL: " + f);
+            }
+            finally
             {
-                await SuspendResumeCancelCycle(sessionId, cashierId);
-                await ReservationOwnershipCycle();
-                await ReturnCycle();
-                await CashDeskCycle(sessionId);
+                if (scratch && !keepDb)
+                {
+                    try { DropScratchDatabase(DbName); }
+                    catch (Exception ex) { Console.Error.WriteLine($"[scratch] cleanup failed: {ex.Message}"); }
+                }
+                else if (scratch)
+                {
+                    Console.WriteLine($"Scratch database kept for inspection: {DbName}");
+                }
             }
-            await FinancialGuardsAttackCycle(sessionId);
-            await CreditRulesCycle();
-            await PermissionRulesCycle();
-            await BitmaskPermissionsCycle();
-            await ReportsCycle();
-            await SettingsBackupCycle();
-            await CrudSmokeCycle();
-            await AdjustBatchConsistencyCycle();
-            await InventoryBatchConsistencyCycle();
-            await StockCountCycle();
-            await OwnerRecoveryCycle();
-            await PaymentAllocationCycle();
-            await RefundPlanCycle();
+        }
 
-            Console.WriteLine();
-            Console.WriteLine($"================ RESULT: {_pass} PASSED / {_fail} FAILED ================");
-            foreach (var f in _failures)
-                Console.WriteLine("FAIL: " + f);
+        // ───────────────── scratch database lifecycle ─────────────────
+
+        /// <summary>مسار جذر المستودع من مجلد الإخراج (bin\Debug\&lt;tfm&gt;).</summary>
+        private static string RepoRoot =>
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
+
+        private static bool IsSafeScratchDbName(string name) => Regex_ScratchDbName().IsMatch(name);
+
+        /// <summary>
+        /// بناء قاعدة الخربشة من SaylDB.sql + DataSeed.sql (مع استبدال الاسم) + بذرة الهارنس.
+        /// حواجز السلامة: الاسم يطابق النمط الحصري، والقاعدة لا توجد مسبقًا إلا فارغة.
+        /// </summary>
+        private static void BuildScratchDatabase(string dbName)
+        {
+            if (!IsSafeScratchDbName(dbName))
+                throw new InvalidOperationException($"[scratch] refusing to build '{dbName}': name does not match the scratch pattern.");
+
+            string saylDbSql = File.ReadAllText(Path.Combine(RepoRoot, "SaylDB.sql")).Replace(LiveDbName, dbName);
+            string dataSeedSql = File.ReadAllText(Path.Combine(RepoRoot, "DataSeed.sql")).Replace(LiveDbName, dbName);
+            // DataSeed تنتهي بـ UPDATE يعيد حساب المخزون من حركات البيع الديمو
+            // (سالبة بلا إيصالات شراء) — على قاعدة حية التاريخ متوازن فلا يضر،
+            // لكن على قاعدة حديثة يجعل مخزون منتجات سالبًا/صفرًا. نقشطه: نحافظ
+            // على قيم INSERT المخزون كما هي (فروق طفيفة مقصودة مع الدفعات).
+            string recalcOriginal = "SET QuantityAvailable = ISNULL((SELECT SUM(Quantity) FROM StockMovements WHERE ProductId = Inventory.ProductId), 0),";
+            if (!dataSeedSql.Contains(recalcOriginal))
+                throw new InvalidOperationException("[scratch] DataSeed inventory-recalc statement not found — refusing to build an inconsistent scratch DB.");
+            dataSeedSql = dataSeedSql.Replace(recalcOriginal, "SET QuantityAvailable = QuantityAvailable,");
+            // SaylDB.sql تنشئ القاعدة نفسها (CREATE DATABASE + USE) — الاتصال بـmaster أولًا
+            ExecuteBatches(saylDbSql, useMaster: true);
+            // DataSeed.sql تبدأ بـ USE (مُستبدَل بالاسم الجديد)
+            ExecuteBatches(dataSeedSql, useMaster: false);
+            ExecuteBatches(HarnessSeedSql(dbName), useMaster: false);
+        }
+
+        /// <summary>بذرة إضافية خاصة بالهارنس: مورد برقم 13 (الدورات الهجومية تستهدفه صراحةً).</summary>
+        private static string HarnessSeedSql(string dbName)
+        {
+            if (!IsSafeScratchDbName(dbName))
+                throw new InvalidOperationException($"[scratch] refusing to seed '{dbName}'.");
+            return $@"
+USE [{dbName}];
+SET IDENTITY_INSERT Parties ON;
+IF NOT EXISTS (SELECT 1 FROM Parties WHERE PartyId = 13)
+    INSERT INTO Parties (PartyId, PartyType, Name, IsActive) VALUES (13, 'S', N'هارنس: مورد اختبار', 1);
+SET IDENTITY_INSERT Parties OFF;
+IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
+    INSERT INTO Suppliers (PartyId, Balance) VALUES (13, 0);
+";
+        }
+
+        /// <summary>إسقاط قاعدة الخربشة — بعد تحقق هوية إلزامي (نمط + وجود بالاسم بالضبط).</summary>
+        private static void DropScratchDatabase(string dbName)
+        {
+            if (!IsSafeScratchDbName(dbName))
+                throw new InvalidOperationException($"[scratch] refusing to drop '{dbName}': name does not match the scratch pattern. Live/dev databases can never be dropped here.");
+
+            using var cn = new Microsoft.Data.SqlClient.SqlConnection(ServerConnectionString);
+            cn.Open();
+            using (var check = cn.CreateCommand())
+            {
+                check.CommandText = "SELECT name FROM sys.databases WHERE name = @name";
+                check.Parameters.AddWithValue("@name", dbName);
+                if (check.ExecuteScalar() is null) return;
+            }
+            using (var cmd = cn.CreateCommand())
+            {
+                cmd.CommandText = $"ALTER DATABASE [{dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{dbName}];";
+                cmd.ExecuteNonQuery();
+            }
+            Console.WriteLine($"Scratch database dropped: {dbName}");
+        }
+
+        /// <summary>تنفيذ سكربت SQL مقسومًا على GO.</summary>
+        private static void ExecuteBatches(string script, bool useMaster)
+        {
+            string cs = useMaster
+                ? ServerConnectionString
+                : $@"Server=.\SAYL;Database={DbName};Trusted_Connection=True;TrustServerCertificate=True";
+            using var cn = new Microsoft.Data.SqlClient.SqlConnection(cs);
+            cn.Open();
+            foreach (var batch in SplitOnGo(script))
+            {
+                if (string.IsNullOrWhiteSpace(batch)) continue;
+                using var cmd = cn.CreateCommand();
+                cmd.CommandText = batch;
+                cmd.CommandTimeout = 120;
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private static IEnumerable<string> SplitOnGo(string script)
+        {
+            var batches = new List<string>();
+            var current = new StringBuilder();
+            foreach (var line in script.Split('\n'))
+            {
+                if (line.Trim().Equals("GO", StringComparison.OrdinalIgnoreCase))
+                {
+                    batches.Add(current.ToString());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(line).Append('\n');
+                }
+            }
+            batches.Add(current.ToString());
+            return batches;
         }
 
         // ───────────────── helpers ─────────────────
@@ -341,8 +513,9 @@ namespace consol_app
             if (!saleA.IsSuccess || !saleB.IsSuccess) return;
 
             // دفعة عامة 120: تُخصَّص A(100) كاملة ثم B(20) — الأقدم أولًا
+            // (بوابات الصلاحية الخدمية تقرأ الفاعل من request.UserId)
             var gen = await payments.ReceiveCustomerPaymentAsync(new DtoPaymentRequest
-            { PartyId = customerId, PartyType = 'C', Amount = 120m, PaymentDate = today, Method = "cash" });
+            { PartyId = customerId, PartyType = 'C', Amount = 120m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("general payment 120 accepted", gen.IsSuccess, gen.Message);
 
             var (statusA, balanceC) = await VerifyAsync(async vdb => (
@@ -353,7 +526,7 @@ namespace consol_app
 
             // التحصيل المزدوج (الثغرة الأصلية): سداد على A المغطاة بدفعة عامة ⇒ مرفوض
             var dup = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = saleA.Data, Amount = 1m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = saleA.Data, Amount = 1m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("double collection on covered invoice rejected", !dup.IsSuccess, dup.Message);
 
             // Even with a STALE unpaid status (بيانات قديمة قبل الإصلاح) التخصيص يمنع السداد
@@ -364,15 +537,15 @@ namespace consol_app
                 return true;
             });
             var dupStale = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = saleA.Data, Amount = 10m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = saleA.Data, Amount = 10m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("double collection blocked by allocation (stale status)", !dupStale.IsSuccess, dupStale.Message);
 
             // سداد فاتورة B: المتبقي 30 فقط — 40 يُرفض، و30 يقبَل ويغلق الفاتورة
             var overB = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = saleB.Data, Amount = 40m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = saleB.Data, Amount = 40m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("invoice payment above allocated remaining rejected", !overB.IsSuccess, overB.Message);
             var payB = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = saleB.Data, Amount = 30m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = saleB.Data, Amount = 30m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("exact remaining accepted", payB.IsSuccess, payB.Message);
             var (statusB, balanceC2) = await VerifyAsync(async vdb => (
                 await vdb.Invoices.Where(i => i.InvoiceId == saleB.Data).Select(i => i.PaymentStatus).FirstAsync(),
@@ -382,7 +555,7 @@ namespace consol_app
 
             // لا تحصيل من رصيد صفري (لا رصيد دائن وهمي)
             var noPhantom = await payments.ReceiveCustomerPaymentAsync(new DtoPaymentRequest
-            { PartyId = customerId, PartyType = 'C', Amount = 10m, PaymentDate = today, Method = "cash" });
+            { PartyId = customerId, PartyType = 'C', Amount = 10m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("collection from zero balance rejected", !noPhantom.IsSuccess, noPhantom.Message);
 
             // ── مورد: شراء بدفعة جزئية ثم سداد عام ثم سداد فاتورة ──
@@ -405,7 +578,7 @@ namespace consol_app
             if (purchId <= 0) return;
 
             var paySup = await payments.PaySupplierAsync(new DtoPaymentRequest
-            { PartyId = supplierId, PartyType = 'S', Amount = 25m, PaymentDate = today, Method = "cash" });
+            { PartyId = supplierId, PartyType = 'S', Amount = 25m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("general supplier payment 25 accepted", paySup.IsSuccess, paySup.Message);
 
             var (pStatus, balanceS) = await VerifyAsync(async vdb => (
@@ -415,10 +588,10 @@ namespace consol_app
             Check("supplier balance 40->15", balanceS == 15m, $"balance={balanceS}");
 
             var dupSup = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = purchId, Amount = 20m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = purchId, Amount = 20m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("double supplier payment rejected", !dupSup.IsSuccess, dupSup.Message);
             var paySupInv = await payments.PayInvoiceAsync(new DtoPaymentRequest
-            { InvoiceId = purchId, Amount = 15m, PaymentDate = today, Method = "cash" });
+            { InvoiceId = purchId, Amount = 15m, PaymentDate = today, Method = "cash", UserId = admin.UserId });
             Check("exact supplier remaining accepted", paySupInv.IsSuccess, paySupInv.Message);
             int supStatus2 = await VerifyAsync(async vdb =>
                 (int)await vdb.Invoices.Where(i => i.InvoiceId == purchId).Select(i => i.PaymentStatus).FirstAsync());
@@ -664,7 +837,7 @@ namespace consol_app
                 await sessions.CloseSessionAsync(existing.Data.SessionId, 0, cashier.UserId);
 
             var open = await sessions.OpenSessionAsync(cashier.UserId, 100m);
-            Check("open session (opening=100)", open.IsSuccess && open.Data > 0);
+            Check("open session (opening=100)", open.IsSuccess && open.Data > 0, open.Message);
             int sessionId = open.IsSuccess ? open.Data : 0;
 
             // barcode scan path
@@ -752,7 +925,9 @@ namespace consol_app
                 prod.BasePrice = original; // إرجاع فوري — الفحص على الطلب فقط
                 var snapReq = new DtoCheckoutRequest
                 {
-                    UserId = cashier.UserId,
+                    // الفاعل هنا مدير: بوابة الخصم الضمني تسمح لصاحب صلاحية فواتير
+                    // البيع بالتسعير تحت الأساس — والفحص يقيس ثبات سعر السلة لا البوابة
+                    UserId = admin.UserId,
                     SessionId = sessionId,
                     Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = 1, UnitPrice = original } },
                     Payments = new List<DtoPaymentInfo> { new() { Amount = original, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }

@@ -275,9 +275,9 @@ public class PartyProductPriceTests
 
     private async Task<(int CashierId, int ManagerId)> SeedRolesAsync(SaylDbContext db, string marker)
     {
-        var cashierRole = new Role { Name = $"cashier-{marker}", RoleValue = AppPermissions.CashierRoleValue, IsActive = true };
-        var managerRole = new Role { Name = $"manager-{marker}", RoleValue = AppPermissions.AdminRoleValue, IsActive = true };
-        db.Roles.AddRange(cashierRole, managerRole);
+        // الأدوار مُعاد استخدامه من TestSeed.GetOrCreateRoleAsync (RoleId tinyint — لا دور جديد لكل اختبار)
+        var cashierRole = await TestSeed.GetOrCreateRoleAsync(db, AppPermissions.CashierRoleValue);
+        var managerRole = await TestSeed.GetOrCreateRoleAsync(db, AppPermissions.AdminRoleValue);
 
         var cashier = new User { Username = $"cashier-{marker}", PasswordHash = "x", Role = cashierRole, IsActive = true };
         var manager = new User { Username = $"manager-{marker}", PasswordHash = "x", Role = managerRole, IsActive = true };
