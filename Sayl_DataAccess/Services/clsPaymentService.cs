@@ -93,9 +93,13 @@ namespace Sayl.Core.Services
                                || invoice.Type == enInvoicesType.supplier_return;
             int requiredPayBit = isPurchaseSide ? AppPermissions.PurchaseInvoices : AppPermissions.SalesInvoices;
             if (invoicePayRole < 0 || !AppPermissions.Has(invoicePayRole, requiredPayBit))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentDenied",
+                    $"سداد فاتورة #{invoice.InvoiceId} مرفوض: يتطلب صلاحية {(isPurchaseSide ? "شاشة فواتير الشراء" : "شاشة فواتير البيع")}.");
                 return Result.Fail(isPurchaseSide
                     ? "سداد فاتورة الشراء يتطلب صلاحية شاشة فواتير الشراء."
                     : "سداد فاتورة البيع يتطلب صلاحية شاشة فواتير البيع.");
+            }
 
             // Serializable + إعادة حساب المتبقي داخل المعاملة:
             // قفل نطاقي على مدفوعات الفاتورة يمنع إدراج دفعتين متوازيتين تتجاوزان المتبقي معاً
@@ -124,7 +128,12 @@ namespace Sayl.Core.Services
                     return Result.Fail("الفاتورة مسددة بالكامل (مع مراعاة الدفعات العامة والمرتجعات).");
 
                 if (request.Amount > remaining)
+                {
+                    // تدقيق الرفض — كتابة مستقلة تنجو من تراجع معاملة السداد
+                    await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentRejected",
+                        $"سداد مرفوض: المبلغ {request.Amount:N2} أكبر من المتبقي {remaining:N2} على الفاتورة #{invoice.InvoiceId}.");
                     return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة بعد الدفعات العامة والمرتجعات ({remaining:N2}).");
+                }
 
                 _dbContext.Payments.Add(new Payment
                 {
@@ -204,7 +213,11 @@ namespace Sayl.Core.Services
             // الفحص مستقل عن الجلسة: تمرير SessionId = null لا يتجاوزه إطلاقًا.
             int collectorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, request.UserId);
             if (collectorRole < 0 || !AppPermissions.Has(collectorRole, AppPermissions.Customers))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentDenied",
+                    "تحصيل دفعة من عميل مرفوض: يتطلب صلاحية شاشة العملاء.");
                 return Result.Fail("تحصيل دفعة من عميل يتطلب صلاحية شاشة العملاء.");
+            }
 
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع تحصيلين متوازيين يتجاوزان الرصيد
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -226,7 +239,11 @@ namespace Sayl.Core.Services
                     .FirstOrDefaultAsync() ?? 0m;
 
                 if (balance < request.Amount)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentRejected",
+                        $"تحصيل مرفوض: المبلغ {request.Amount:N2} أكبر من رصيد العميل #{request.PartyId} المستحق ({balance:N2}).");
                     return Result.Fail($"المبلغ أكبر من رصيد العميل المستحق ({balance:N2}).");
+                }
 
                 _dbContext.Payments.Add(new Payment
                 {
@@ -287,7 +304,11 @@ namespace Sayl.Core.Services
             // الفحص مستقل عن الجلسة: تمرير SessionId = null لا يتجاوزه إطلاقًا.
             int payerRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, request.UserId);
             if (payerRole < 0 || !AppPermissions.Has(payerRole, AppPermissions.Suppliers))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentDenied",
+                    "سداد دفعة لمورد مرفوض: يتطلب صلاحية شاشة الموردين.");
                 return Result.Fail("سداد دفعة للمورد يتطلب صلاحية شاشة الموردين.");
+            }
 
             // Serializable + إعادة فحص الرصيد داخل المعاملة: يمنع سدادين متوازيين يتجاوزان الرصيد
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -309,7 +330,11 @@ namespace Sayl.Core.Services
                     .FirstOrDefaultAsync() ?? 0m;
 
                 if (balance < request.Amount)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PaymentRejected",
+                        $"سداد مرفوض: المبلغ {request.Amount:N2} أكبر من رصيد المورد #{request.PartyId} المستحق ({balance:N2}).");
                     return Result.Fail($"المبلغ أكبر من رصيد المورد المستحق ({balance:N2}).");
+                }
 
                 _dbContext.Payments.Add(new Payment
                 {

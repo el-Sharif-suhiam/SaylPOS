@@ -30,7 +30,11 @@ namespace Sayl.Core.Services
 
             int creatorRole = await GetUserRoleValueAsync(request.UserId);
             if (!AppPermissions.Has(creatorRole, AppPermissions.PurchaseInvoices))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "PurchaseDenied",
+                    "فاتورة شراء مرفوضة: تتطلب صلاحية شاشة فواتير الشراء.");
                 return Result<int>.Fail("إنشاء فاتورة شراء يتطلب صلاحية شاشة فواتير الشراء.");
+            }
 
             foreach (var item in request.Items)
             {

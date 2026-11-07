@@ -137,10 +137,18 @@ namespace Sayl.Core.Services
 
             int actorValue = await GetActorRoleValueAsync(actorUserId);
             if (actorValue < 0)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "UserManageDenied",
+                    $"عملية إدارية على '{target.Username}' مرفوضة: تعذر التحقق من صلاحيات الفاعل.");
                 return Result.Fail("تعذر التحقق من صلاحياتك — أعد تسجيل الدخول.");
+            }
 
             if (!AppPermissions.Outranks(actorValue, target.Role.RoleValue))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "UserManageDenied",
+                    $"عملية إدارية على '{target.Username}' (دوره {target.Role.RoleValue}) مرفوضة: دور الفاعل ({actorValue}) لا يعلوه.");
                 return Result.Fail($"لا يمكنك إدارة حساب '{target.Username}' — دوره يوازي دورك أو أعلى منه. راجع مدير النظام.");
+            }
 
             return Result.Ok();
         }
@@ -166,7 +174,11 @@ namespace Sayl.Core.Services
             {
                 int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
                 if (actorValue < 0 || !AppPermissions.Has(actorValue, AppPermissions.Users))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                        $"إنشاء حساب '{req.userName}' مرفوض: يتطلب صلاحية شاشة المستخدمين.");
                     return Result.Fail("إنشاء المستخدمين يتطلب صلاحية شاشة المستخدمين.");
+                }
             }
             else
             {
@@ -293,6 +305,19 @@ BEGIN
         ORDER BY i.CreatedAt DESC, ii.InvoiceItemId DESC
     ) pi
     WHERE b.UnitCost IS NULL AND pi.UnitCost IS NOT NULL;');
+END;
+/* Upgrade_14: SystemLogs.UserId قابل للـ NULL — تدقيق المحاولات المرفوضة.
+   كان NOT NULL مع FK يمنع تسجيل محاولات الدخول الفاشلة باسم مستخدم غير
+   معروف (تصيّد بيانات الدخول) إطلاقًا. تعديل nullability عمود مرتبط بـ FK
+   يتطلب إسقاط القيد وإعادته — EXEC ديناميكي لأن ALTER COLUMN في نفس الدفعة
+   لا يُرى وقت تجميعها. Idempotent: يعمل فقط إن كان العمود NOT NULL. */
+IF OBJECT_ID(N'dbo.SystemLogs', N'U') IS NOT NULL
+   AND COLUMNPROPERTY(OBJECT_ID(N'dbo.SystemLogs'), N'UserId', 'AllowsNull') = 0
+BEGIN
+    ALTER TABLE dbo.SystemLogs DROP CONSTRAINT FK_SystemLogs_UserId;
+    EXEC(N'ALTER TABLE dbo.SystemLogs ALTER COLUMN UserId INT NULL;
+           ALTER TABLE dbo.SystemLogs ADD CONSTRAINT FK_SystemLogs_UserId
+               FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId);');
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
@@ -500,7 +525,11 @@ END;";
 
                 int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
                 if (actorValue < 0 || !AppPermissions.Has(actorValue, AppPermissions.Users))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                        $"تغيير دور المستخدم #{userId} مرفوض: يتطلب صلاحية شاشة المستخدمين.");
                     return Result.Fail("تغيير أدوار المستخدمين يتطلب صلاحية شاشة المستخدمين.");
+                }
 
                 var user = await _dbContext.Users
                     .Include(u => u.Role)
@@ -543,7 +572,11 @@ END;";
 
             int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
             if (actorValue < 0 || !AppPermissions.Has(actorValue, AppPermissions.Users))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                    $"ربط موظف #{employeeId} بالمستخدم #{userId} مرفوض: يتطلب صلاحية شاشة المستخدمين.");
                 return Result.Fail("ربط الحسابات بالمستخدمين يتطلب صلاحية شاشة المستخدمين.");
+            }
 
             bool empExists = await _dbContext.Employees.AnyAsync(e => e.EmployeeId == employeeId);
             if (!empExists)
@@ -573,7 +606,11 @@ END;";
 
             int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
             if (actorValue < 0 || !AppPermissions.Has(actorValue, AppPermissions.Users))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                    $"تعطيل المستخدم #{userId} مرفوض: يتطلب صلاحية شاشة المستخدمين.");
                 return Result.Fail("تعطيل الحسابات يتطلب صلاحية شاشة المستخدمين.");
+            }
 
             var user = await _dbContext.Users
                 .Include(u => u.Role)
@@ -601,7 +638,11 @@ END;";
 
             int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
             if (actorValue < 0 || !AppPermissions.Has(actorValue, AppPermissions.Users))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                    $"تفعيل المستخدم #{userId} مرفوض: يتطلب صلاحية شاشة المستخدمين.");
                 return Result.Fail("تفعيل الحسابات يتطلب صلاحية شاشة المستخدمين.");
+            }
 
             var user = await _dbContext.Users
                 .Include(u => u.Role)
@@ -627,13 +668,22 @@ END;";
 
             // قفل الحساب بعد المحاولات الفاشلة المتكررة
             string lockoutKey = NormalizeLockoutKey(username);
+            bool lockedOut = false;
+            int lockRemainingMinutes = 0;
             lock (_failedLogins)
             {
                 if (_failedLogins.TryGetValue(lockoutKey, out var state) && state.LockUntil > DateTime.UtcNow)
                 {
-                    int remaining = (int)Math.Ceiling((state.LockUntil - DateTime.UtcNow).TotalMinutes);
-                    return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {remaining} دقيقة.");
+                    lockedOut = true;
+                    lockRemainingMinutes = (int)Math.Ceiling((state.LockUntil - DateTime.UtcNow).TotalMinutes);
                 }
+            }
+            if (lockedOut)
+            {
+                // تدقيق الرفض: محاولة دخول أثناء قفل الحساب (قد لا يكون لها فاعل معروف)
+                await clsAudit.LogRejectedAsync(_dbContext, null, "LoginDenied",
+                    $"محاولة دخول أثناء قفل مؤقت للحساب '{lockoutKey}' — حاول بعد {lockRemainingMinutes} دقيقة.");
+                return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {lockRemainingMinutes} دقيقة.");
             }
 
             var user = await _dbContext.Users
@@ -650,18 +700,27 @@ END;";
             if (user == null)
             {
                 _ = BCrypt.Net.BCrypt.Verify(password, dummyHash); // يعمل بنفس زمن الحقيقي
+                // تدقيق الرفض: اسم مستخدم غير معروف — بلا فاعل (UserId = null)
+                await clsAudit.LogRejectedAsync(_dbContext, null, "LoginFailed",
+                    $"محاولة دخول باسم مستخدم غير معروف: '{username}'.");
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
             if (!user.IsActive)
             {
                 _ = BCrypt.Net.BCrypt.Verify(password, dummyHash);
+                // تدقيق الرفض: محاولة دخول لحساب معطل
+                await clsAudit.LogRejectedAsync(_dbContext, user.UserId, "LoginDenied",
+                    $"محاولة دخول لحساب معطل: '{user.Username}'.");
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
             if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             {
                 RegisterFailedLogin(username);
+                // تدقيق الرفض: كلمة مرور غير صحيحة — الفاعل معروف (لا كلمة المرور أبدًا)
+                await clsAudit.LogRejectedAsync(_dbContext, user.UserId, "LoginFailed",
+                    $"محاولة دخول فاشلة بكلمة مرور غير صحيحة للحساب '{user.Username}'.");
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
@@ -766,6 +825,9 @@ END;";
             if (!BCrypt.Net.BCrypt.Verify(oldPassword, user.PasswordHash))
             {
                 RegisterFailedLogin(username);
+                // تدقيق الرفض: فشل إثبات الهوية عند تغيير كلمة المرور (ناقل تصيّد محتمل)
+                await clsAudit.LogRejectedAsync(_dbContext, user.UserId, "PasswordChangeDenied",
+                    $"فشل تغيير كلمة المرور: كلمة المرور القديمة غير صحيحة للحساب '{user.Username}'.");
                 return Result.Fail("كلمة المرور القديمة غير صحيحة.");
             }
 
@@ -804,7 +866,11 @@ END;";
 
             int actorValue = await GetActorRoleValueAsync(actorUserId.Value);
             if (actorValue < 0 || !AppPermissions.IsAdmin(actorValue))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId.Value, "UserOpDenied",
+                    $"إعادة تعيين كلمة مرور المستخدم #{userId} مرفوضة: لمدير النظام وحده.");
                 return Result.Fail("إعادة تعيين كلمات المرور للآخرين لمدير النظام وحده.");
+            }
 
             string? policyError = ValidatePasswordPolicy(newPassword);
             if (policyError != null)

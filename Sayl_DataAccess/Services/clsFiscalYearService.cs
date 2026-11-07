@@ -188,14 +188,26 @@ namespace Sayl.Core.Services
             //    مطابقة لبوابة الزر في SettingsControl؛ المستخدم بلا دور نشط (-1) يُرفض.
             int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
             if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseDenied",
+                    "إغلاق السنة المالية مرفوض: يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).");
                 return Result.Fail("إغلاق السنة المالية يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).");
+            }
 
             var current = await GetFiscalYearStartAsync();
             if (newYearStart <= current)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
+                    $"إغلاق مرفوض: تاريخ السنة الجديدة {newYearStart:yyyy-MM-dd} ليس بعد بداية السنة الحالية ({current:yyyy-MM-dd}).");
                 return Result.Fail($"تاريخ السنة الجديدة يجب أن يكون بعد {current:yyyy-MM-dd} (بداية السنة الحالية).");
+            }
 
             if (newYearStart > ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
+                    $"إغلاق مرفوض: تاريخ سنة مالية في المستقبل ({newYearStart:yyyy-MM-dd}).");
                 return Result.Fail("لا يمكن بدء سنة مالية في المستقبل.");
+            }
 
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
@@ -208,7 +220,12 @@ namespace Sayl.Core.Services
                 //    إلا بقيمته القديمة الصحيحة، فالقراءة هنا صحيحة في الحالتين.
                 var readiness = await GetCloseReadinessAsync(newYearStart);
                 if (!readiness.CanClose)
+                {
+                    // تدقيق الرفض داخل المعاملة — كتابة مستقلة تنجو من التراجع
+                    await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
+                        $"إغلاق مرفوض: فحوصات الجاهزية لم تكتمل ({string.Join("؛ ", readiness.Errors)}).");
                     return Result.Fail("فحوصات الجاهزية لم تكتمل:\n- " + string.Join("\n- ", readiness.Errors));
+                }
 
                 // 2) المقارنة-والتبديل الذرية: التحديث ينجح فقط إن كانت بداية السنة
                 //    ما زالت القيمة المقروءة — من يصل أولًا يفوز، والمتأخر يرى صفر

@@ -112,7 +112,11 @@ namespace Sayl.Core.Services
 
             int creatorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
             if (!AppPermissions.Has(creatorRole, AppPermissions.Expenses))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, dtoExpense.UserId, "ExpenseOpDenied",
+                    "إضافة مصروف مرفوضة: تتطلب صلاحية شاشة المصروفات.");
                 return Result<int>.Fail("إضافة مصروف يتطلب صلاحية شاشة المصروفات.");
+            }
 
             if (await IsBeforeCurrentFiscalYearAsync(dtoExpense.ExpenseDate))
                 return Result<int>.Fail("مصروف من سنة مالية مغلقة — لا يمكن إضافته (مؤرشف).");
@@ -155,7 +159,11 @@ namespace Sayl.Core.Services
             // تعديل المصروف = تعديل الربح — شاشة المصروفات
             int editorRole = await GetUserRoleValueAsync(dtoExpense.UserId ?? 0);
             if (!AppPermissions.Has(editorRole, AppPermissions.Expenses))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, dtoExpense.UserId, "ExpenseOpDenied",
+                    $"تعديل مصروف #{dtoExpense.ExpenseId} مرفوض: يتطلب صلاحية شاشة المصروفات.");
                 return Result.Fail("تعديل المصروفات يتطلب صلاحية شاشة المصروفات.");
+            }
 
             // ══ حماية السنة المالية المغلقة ══
             // حُكم القفل يعتمد على تاريخ المصروف المخزَّن لا على ما أرسله المستدعي:
@@ -200,7 +208,11 @@ namespace Sayl.Core.Services
             // حذف المصروفات يتطلب شاشة المصروفات
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
             if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Expenses))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ExpenseOpDenied",
+                    $"حذف مصروف #{expenseId} مرفوض: يتطلب صلاحية شاشة المصروفات.");
                 return Result.Fail("حذف المصروفات يتطلب صلاحية شاشة المصروفات.");
+            }
 
             // حماية السنة المالية المغلقة: حذف مصروف سنة مغلقة يقلب ربحيتها المؤرشفة
             if (await IsBeforeCurrentFiscalYearAsync(expense.ExpenseDate))

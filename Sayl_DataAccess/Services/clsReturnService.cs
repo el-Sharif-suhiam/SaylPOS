@@ -50,7 +50,11 @@ namespace Sayl.Core.Services
             int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
             if (actorRole < 0 || (!AppPermissions.IsCashier(actorRole)
                 && !AppPermissions.Has(actorRole, AppPermissions.SalesInvoices)))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, userId, "ReturnDenied",
+                    "مرتجع بيع مرفوض: يتطلب هوية الكاشير أو صلاحية شاشة فواتير البيع.");
                 return Result<int>.Fail("إنشاء مرتجع البيع يتطلب هوية الكاشير أو صلاحية شاشة فواتير البيع.");
+            }
             return null;
         }
 
@@ -58,7 +62,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.PurchaseInvoices))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, userId, "ReturnDenied",
+                    "مرتجع شراء مرفوض: يتطلب صلاحية شاشة فواتير الشراء.");
                 return Result<int>.Fail("إنشاء مرتجع الشراء يتطلب صلاحية شاشة فواتير الشراء.");
+            }
             return null;
         }
 

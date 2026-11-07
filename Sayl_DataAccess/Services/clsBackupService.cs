@@ -151,23 +151,45 @@ namespace Sayl.Core.Services
             {
                 // ── بوابة التصريح (VULN-27): قبل أي فحص آخر وأي أمر SQL —
                 // -1 = هوية مفقودة أو مستخدم/دور غير موجود أو غير مفعّل.
+                // كل رفض هنا يُدقَّق (تدقيق المحاولات المرفوضة) — خارج أي
+                // معاملة فلا خطر ضياع السجل، والكتابة مستقلة أفضل جهد.
                 if (actorUserId <= 0)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, null, "RestoreDenied",
+                        $"محاولة استعادة مرفوضة: هوية منفّذ الاستعادة غير محددة (الملف '{backupFilePath}').");
                     return Result<string>.Fail("هوية منفّذ الاستعادة غير محددة — العملية مرفوضة.");
+                }
 
                 int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId);
                 if (actorRole < 0)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RestoreDenied",
+                        $"محاولة استعادة مرفوضة: المنفّذ #{actorUserId} غير موجود أو غير مفعّل (الملف '{backupFilePath}').");
                     return Result<string>.Fail("منفّذ الاستعادة غير موجود أو غير مفعّل — العملية مرفوضة.");
+                }
 
                 if (!AppPermissions.Has(actorRole, AppPermissions.Settings))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RestoreDenied",
+                        $"محاولة استعادة مرفوضة: المنفّذ #{actorUserId} (دور {actorRole}) بلا صلاحية شاشة الإعدادات (الملف '{backupFilePath}').");
                     return Result<string>.Fail("استعادة النسخة الاحتياطية تتطلب صلاحية شاشة الإعدادات — العملية مرفوضة.");
+                }
 
                 if (string.IsNullOrWhiteSpace(backupFilePath) || !File.Exists(backupFilePath))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RestoreDenied",
+                        $"محاولة استعادة مرفوضة: ملف النسخة الاحتياطية غير موجود ('{backupFilePath}').");
                     return Result<string>.Fail("ملف النسخة الاحتياطية غير موجود.");
+                }
 
                 bool hasOpenSessions = await _dbContext.PosSessions
                     .AnyAsync(s => s.Status == enPosSessionStatusType.open);
                 if (hasOpenSessions)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RestoreDenied",
+                        $"محاولة استعادة مرفوضة: توجد جلسات بيع مفتوحة (المنفّذ #{actorUserId}، الملف '{backupFilePath}').");
                     return Result<string>.Fail("توجد جلسات بيع مفتوحة. أغلق جميع الجلسات ثم حاول الاستعادة.");
+                }
 
                 // تدقيق: من بدأ الاستعادة ومتى (VULN-27). يُكتب قبل النسخة الوقائية
                 // ليدخل ضمنها — الاستعادة نفسها تمحو سجل القاعدة الحية، ونسخة
@@ -182,7 +204,11 @@ namespace Sayl.Core.Services
                                           ?? DefaultBackupFolder;
                 var preBackup = await BackupToFolderAsync(preRestoreFolder, fileNameSuffix: PreRestoreSuffix);
                 if (!preBackup.IsSuccess || string.IsNullOrWhiteSpace(preBackup.Data))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RestoreDenied",
+                        $"استعادة مرفوضة: فشلت النسخة الوقائية قبل الاستعادة ({preBackup.Message}). لم تُلمس قاعدة البيانات.");
                     return Result<string>.Fail($"يجب نجاح نسخة احتياطية قبل الاستعادة (فشلت: {preBackup.Message}). لم تُلمس قاعدة البيانات.");
+                }
 
                 string dbName = _dbContext.Database.GetDbConnection().Database;
                 string safeName = dbName.Replace("]", "]]");

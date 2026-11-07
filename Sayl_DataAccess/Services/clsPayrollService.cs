@@ -107,7 +107,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PayrollDenied",
+                    "توليد رواتب مرفوض: يتطلب صلاحية شاشة الموظفين والرواتب.");
                 return Result<int>.Fail("توليد الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+            }
 
             if (periodTo < periodFrom)
                 return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
@@ -279,7 +283,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PayrollDenied",
+                    $"تعديل كشف رواتب #{payrollId} مرفوض: يتطلب صلاحية شاشة الموظفين والرواتب.");
                 return Result.Fail("تعديل الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+            }
 
             if (workedUnits < 0 || holidayUnits < 0 || deductions < 0 || additions < 0)
                 return Result.Fail("القيم يجب أن تكون صفراً أو أكثر.");
@@ -387,7 +395,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PayrollDenied",
+                    $"صرف كشف رواتب #{payrollId} مرفوض: يتطلب صلاحية شاشة الموظفين والرواتب.");
                 return Result.Fail("صرف الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+            }
 
             var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
             if (record == null)
@@ -469,7 +481,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Employees))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PayrollDenied",
+                    $"عكس صرف كشف رواتب #{payrollId} مرفوض: يتطلب صلاحية شاشة الموظفين والرواتب.");
                 return Result.Fail("عكس صرف الرواتب يتطلب صلاحية شاشة الموظفين والرواتب.");
+            }
 
             var record = await _dbContext.PayrollRecords.FindAsync(payrollId);
             if (record == null)

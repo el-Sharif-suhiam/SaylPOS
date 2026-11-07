@@ -53,7 +53,12 @@ namespace Sayl.Core.Services
         {
             int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            {
+                // تدقيق الرفض: محاولة عملية جرد بلا تصريح — قبل أي كتابة
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "StockCountDenied",
+                    "عملية جرد (فتح/عدّ/ترحيل) مرفوضة: تتطلب صلاحية شاشة المخزون.");
                 return Result<int>.Fail("عمليات الجرد تتطلب صلاحية شاشة المخزون.");
+            }
             return null;
         }
 

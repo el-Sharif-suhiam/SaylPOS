@@ -412,7 +412,9 @@ GO
 CREATE TABLE SystemLogs
 (
     LogId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    UserId INT NOT NULL,
+    -- Upgrade_14: NULL مسموح — محاولات الدخول الفاشلة باسم مستخدم غير معروف
+    -- تُدقَّق بلا فاعل (كاشف تصيّد بيانات الدخول). FK يبقى قائمًا على القيمة إن وُجدت.
+    UserId INT NULL,
     Action NVARCHAR(100) NOT NULL,
     Details NVARCHAR(MAX) NULL,
     CreatedAt DATETIME2 NULL CONSTRAINT DF_SystemLogs_CreatedAt DEFAULT (GETDATE()),

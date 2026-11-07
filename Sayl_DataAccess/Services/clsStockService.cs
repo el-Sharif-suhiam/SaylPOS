@@ -35,7 +35,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "StockReceiveDenied",
+                    "استلام مخزون مرفوض: يتطلب صلاحية شاشة المخزون.");
                 return Result.Fail("استلام المخزون يتطلب صلاحية شاشة المخزون.");
+            }
 
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
@@ -271,7 +275,11 @@ namespace Sayl.Core.Services
             // التسوية اليدوية للمخزون تتطلب شاشة المخزون (بت 2)
             int actorRole = await GetUserRoleValueAsync(request.UserId);
             if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "StockAdjustmentDenied",
+                    "تسوية مخزون مرفوضة: تتطلب صلاحية شاشة المخزون.");
                 return Result.Fail("تسوية المخزون تتطلب صلاحية شاشة المخزون.");
+            }
 
             var product = await _dbContext.Products.FindAsync(request.ProductId);
             if (product == null)
@@ -408,7 +416,12 @@ namespace Sayl.Core.Services
                     // إعادة-فحص داخل المعاملة بعد قفل النطاق
                     int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                     if (available < request.Quantity)
+                    {
+                        // تدقيق الرفض — كتابة مستقلة تنجو من تراجع المعاملة
+                        await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "StockAdjustmentRejected",
+                            $"تسوية مرفوضة: الكمية {request.Quantity} أكبر من المتاح ({available}) للمنتج '{product.Name}'.");
                         return Result.Fail($"الكمية المطلوبة أكبر من المخزون المتاح للمنتج {product.Name}.");
+                    }
 
                     if (!string.IsNullOrWhiteSpace(request.BatchNumber))
                     {
@@ -450,7 +463,11 @@ namespace Sayl.Core.Services
                         }
 
                         if (remaining > 0)
+                        {
+                            await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "StockAdjustmentRejected",
+                                $"تسوية نقصان مرفوضة: المخزون غير كافٍ لتغطية {request.Quantity} عبر الدفعات للمنتج '{product.Name}'.");
                             return Result.Fail($"المخزون غير كافٍ لتغطية التسوية للمنتج {product.Name}.");
+                        }
                     }
 
                     inventory.QuantityAvailable -= request.Quantity;

@@ -56,6 +56,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade12Script());
             // مسار الإقلاع الفعلي: عمود idempotency (PostedMovementId) + فهرس الحركات المرتبطة
             ExecuteBatches(LoadUpgrade13Script());
+            // تدقيق الرفض: SystemLogs.UserId قابل للـ NULL (محاولات دخول بلا هوية)
+            ExecuteBatches(LoadUpgrade14Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -137,6 +139,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade13Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_13_StockCountPostedMovementId.sql"));
+
+    private static string LoadUpgrade14Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_14_SystemLogsUserIdNullable.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

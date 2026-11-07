@@ -113,7 +113,11 @@ namespace Sayl.Core.Services
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || (!AppPermissions.IsCashier(actorRole)
                 && !AppPermissions.Has(actorRole, AppPermissions.SalesInvoices)))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SessionCloseDenied",
+                    $"إغلاق جلسة درج #{sessionId} مرفوض: يتطلب صلاحية الكاشير أو شاشة فواتير البيع.");
                 return Result.Fail("إغلاق الجلسة يتطلب صلاحية الكاشير أو شاشة فواتير البيع.");
+            }
 
             if (closingAmount < 0)
                 return Result.Fail("مبلغ الإغلاق يجب أن يكون صفرا أو أكثر.");
@@ -130,7 +134,11 @@ namespace Sayl.Core.Services
             // مستخدم آخر يتطلب صلاحية مدير صريحة (المالك يغلق جلسته،
             // ومدير النظام وحده يعبر حدود الملكية).
             if (session.UserId != actorUserId && !AppPermissions.IsAdmin(actorRole))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SessionCloseDenied",
+                    $"إغلاق جلسة درج #{sessionId} لمستخدم آخر (مالكها #{session.UserId}) مرفوض: يتطلب صلاحية مدير النظام.");
                 return Result.Fail("لا يمكنك إغلاق جلسة مستخدم آخر — إغلاق الجلسات غير المملوكة يتطلب صلاحية مدير النظام.");
+            }
 
             // الانتقال الذري داخل معاملة: أول من يصل يفوز — يمنع إغلاقين متوازيين
             // ويلتقط حركات نقد تُسجَّل الآن (سيرفضها AddMovementAsync على جلسة مغلقة)

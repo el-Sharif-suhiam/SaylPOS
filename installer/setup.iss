@@ -61,6 +61,8 @@ Source: "staging\database\Upgrade_09_SaylLeastPrivilege.sql"; DestDir: "{app}\Da
 Source: "staging\database\Upgrade_10_PartyEmailNullableUnique.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_11_BatchUnitCost.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_12_StockCountCountedAt.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
+Source: "staging\database\Upgrade_13_StockCountPostedMovementId.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
+Source: "staging\database\Upgrade_14_SystemLogsUserIdNullable.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\xml\*"; DestDir: "{app}\Database\xml"; Flags: ignoreversion
 Source: "staging\redist\SQLEXPR_x64_ENU.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
 

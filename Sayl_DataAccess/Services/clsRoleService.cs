@@ -108,7 +108,11 @@ namespace Sayl.Core.Services
             // بوابة بت الأدوار: من يضيف أدوارًا يجب أن يملك شاشة الأدوار (المدير)
             var actorRole = await GetActorRoleAsync(actorUserId);
             if (actorRole == null || !AppPermissions.Has(actorRole.RoleValue, AppPermissions.Roles))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RoleOpDenied",
+                    $"إضافة دور '{dtoRole.Name}' مرفوضة: تتطلب صلاحية مدير النظام (بت الأدوار).");
                 return Result<byte>.Fail("إدارة الأدوار تتطلب صلاحية مدير النظام.");
+            }
 
             if (string.IsNullOrWhiteSpace(dtoRole.Name))
                 return Result<byte>.Fail("اسم الدور مطلوب.");
@@ -149,7 +153,11 @@ namespace Sayl.Core.Services
         {
             var actorRole = await GetActorRoleAsync(actorUserId);
             if (actorRole == null || !AppPermissions.Has(actorRole.RoleValue, AppPermissions.Roles))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RoleOpDenied",
+                    "عملية إدارة أدوار مرفوضة: تتطلب صلاحية مدير النظام (بت الأدوار).");
                 return Result.Fail("إدارة الأدوار تتطلب صلاحية مدير النظام.");
+            }
 
             var role = await _dbContext.Roles.FindAsync(dtoRole.RoleId);
             if (role == null)
@@ -192,7 +200,11 @@ namespace Sayl.Core.Services
         {
             var actorRole = await GetActorRoleAsync(actorUserId);
             if (actorRole == null || !AppPermissions.Has(actorRole.RoleValue, AppPermissions.Roles))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RoleOpDenied",
+                    "عملية إدارة أدوار مرفوضة: تتطلب صلاحية مدير النظام (بت الأدوار).");
                 return Result.Fail("إدارة الأدوار تتطلب صلاحية مدير النظام.");
+            }
 
             var role = await _dbContext.Roles.FindAsync(roleId);
             if (role == null)
@@ -222,7 +234,11 @@ namespace Sayl.Core.Services
         {
             var actorRole = await GetActorRoleAsync(actorUserId);
             if (actorRole == null || !AppPermissions.Has(actorRole.RoleValue, AppPermissions.Roles))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RoleOpDenied",
+                    "عملية إدارة أدوار مرفوضة: تتطلب صلاحية مدير النظام (بت الأدوار).");
                 return Result.Fail("إدارة الأدوار تتطلب صلاحية مدير النظام.");
+            }
 
             var role = await _dbContext.Roles.FindAsync(roleId);
             if (role == null)
@@ -246,7 +262,11 @@ namespace Sayl.Core.Services
         {
             var actorRole = await GetActorRoleAsync(actorUserId);
             if (actorRole == null || !AppPermissions.Has(actorRole.RoleValue, AppPermissions.Roles))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "RoleOpDenied",
+                    "عملية إدارة أدوار مرفوضة: تتطلب صلاحية مدير النظام (بت الأدوار).");
                 return Result.Fail("إدارة الأدوار تتطلب صلاحية مدير النظام.");
+            }
 
             var role = await _dbContext.Roles.FindAsync(roleId);
             if (role == null)

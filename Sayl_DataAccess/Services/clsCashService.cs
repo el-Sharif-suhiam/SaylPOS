@@ -33,7 +33,11 @@ namespace Sayl.Core.Services
             int effectiveActorUserId = actorUserId ?? userId;
             int actorRole = await GetUserRoleValueAsync(effectiveActorUserId);
             if (actorRole < 0)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, effectiveActorUserId, "CashMovementDenied",
+                    "حركة نقد مرفوضة: مستخدم غير صالح.");
                 return Result.Fail("لا يمكن تسجيل حركة نقد: مستخدم غير صالح.");
+            }
 
             if (movementType != 'I' && movementType != 'O')
                 return Result.Fail("نوع الحركة غير صالح.");
@@ -51,10 +55,20 @@ namespace Sayl.Core.Services
                 var session = await _dbContext.PosSessions.AsNoTracking()
                     .FirstOrDefaultAsync(s => s.SessionId == sessionId);
                 if (session == null || session.Status != enPosSessionStatusType.open)
+                {
+                    // تدقيق الرفض — كتابة مستقلة تنجو من تراجع المعاملة
+                    // (حركة نقد على درج مغلق = محاولة تلاعب محتملة)
+                    await clsAudit.LogRejectedAsync(_dbContext, effectiveActorUserId, "CashMovementDenied",
+                        $"حركة نقد مرفوضة: جلسة الدرج #{sessionId} غير موجودة أو مغلقة.");
                     return Result.Fail("الجلسة غير موجودة أو مغلقة.");
+                }
 
                 if (session.UserId != effectiveActorUserId)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, effectiveActorUserId, "CashMovementDenied",
+                        $"حركة نقد مرفوضة: جلسة درج #{sessionId} لمستخدم آخر (مالكها #{session.UserId}).");
                     return Result.Fail("لا يمكنك تسجيل حركة نقد في جلسة مستخدم آخر.");
+                }
 
                 _dbContext.CashMovements.Add(new CashMovement
                 {

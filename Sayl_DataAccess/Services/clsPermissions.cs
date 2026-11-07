@@ -51,16 +51,28 @@ namespace Sayl.Core.Services
                 .FirstOrDefaultAsync(s => s.SessionId == sessionId.Value);
 
             if (session == null)
+            {
+                await clsAudit.LogRejectedAsync(db, userId, "DrawerSessionDenied",
+                    $"عملية مرفوضة: جلسة الدرج #{sessionId} غير موجودة.");
                 return Common.Results.Result.Fail("جلسة الدرج غير موجودة.");
+            }
 
             if (session.Status != enPosSessionStatusType.open)
+            {
+                await clsAudit.LogRejectedAsync(db, userId, "DrawerSessionDenied",
+                    $"عملية مرفوضة: جلسة الدرج #{sessionId} مغلقة (الحالة {session.Status}).");
                 return Common.Results.Result.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل تسجيل العملية.");
+            }
 
             if (session.UserId != userId)
             {
                 int actorRole = await GetUserRoleValueAsync(db, userId);
                 if (!AppPermissions.IsAdmin(actorRole))
+                {
+                    await clsAudit.LogRejectedAsync(db, userId, "DrawerSessionDenied",
+                        $"عملية مرفوضة: توجيه عملية لجلسة درج #{sessionId} لمستخدم آخر (مالكها #{session.UserId}) — تتطلب صلاحية مدير النظام.");
                     return Common.Results.Result.Fail("لا يمكنك تسجيل عملية في جلسة درج مستخدم آخر — يتطلب ذلك صلاحية مدير النظام.");
+                }
             }
 
             return Common.Results.Result.Ok();
@@ -79,6 +91,51 @@ namespace Sayl.Core.Services
                 Details = details,
                 CreatedAt = DateTime.UtcNow
             });
+        }
+
+        /// <summary>
+        /// تدقيق المحاولات المرفوضة (Audit Log — denied attempts): محاولة دخول
+        /// فاشلة، رفض صلاحية، فشل تحقق أعمال (دفع زائد/مخزون غير كافٍ/سنة مغلقة)…
+        /// تُكتب على اتصال مستقل (سياق جديد + SaveChanges فوري) حتى ينجو السجل
+        /// من تراجع معاملة العملية المرفوضة — الكتابة عبر سياق العملية نفسها
+        /// تُمسح بالـrollback معها فيضل الرفض بلا أثر (الثغرة المرصودة).
+        ///
+        /// • userId قابل للـ null: محاولة دخول باسم مستخدم غير معروف ليس لها
+        ///   فاعل (Upgrade_14 جعل SystemLogs.UserId NULL مسموحًا).
+        /// • أفضل جهد: فشل كتابة التدقيق لا يُلقي ولا يُحوّل الرفض إلى نجاح —
+        ///   الرفض يبقى رفضًا بلا سجل على أسوأ حال.
+        /// • لا تُكتب كلمات مرور أو أسرار — المتصل يمرر سبب الرفض وحده.
+        /// </summary>
+        public static async Task LogRejectedAsync(SaylDbContext db, int? userId, string action, string details)
+        {
+            if (db == null)
+                return;
+
+            try
+            {
+                string? connectionString = db.Database.GetConnectionString();
+                if (string.IsNullOrEmpty(connectionString))
+                    return; // سياق بلا اتصال معروف — لا شيء يُكتب
+
+                var options = new DbContextOptionsBuilder<SaylDbContext>()
+                    .UseSqlServer(connectionString)
+                    .Options;
+
+                await using var auditDb = new SaylDbContext(options);
+                auditDb.SystemLogs.Add(new SystemLog
+                {
+                    UserId = userId,
+                    Action = action,
+                    Details = details,
+                    CreatedAt = DateTime.UtcNow
+                });
+                // حفظ فوري على الاتصال المستقل — لا ينتظر التزام معاملة العملية
+                await auditDb.SaveChangesAsync();
+            }
+            catch
+            {
+                // أفضل جهد — التدقيق لا يكسر رفض العملية أبدًا
+            }
         }
     }
 }

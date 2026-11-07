@@ -260,7 +260,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    "إضافة منتج مرفوضة: تتطلب صلاحية شاشة المنتجات.");
                 return Result<int>.Fail("إضافة المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
 
             if (string.IsNullOrWhiteSpace(dtoProduct.Name))
                 return Result<int>.Fail("اسم المنتج مطلوب.");
@@ -326,7 +330,11 @@ namespace Sayl.Core.Services
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);
             if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"تعديل منتج #{dtoProduct.ProductId} مرفوض: يتطلب صلاحية شاشة المنتجات.");
                 return Result.Fail("تعديل المنتجات يتطلب صلاحية شاشة المنتجات.");
+            }
 
             if (dtoProduct.ProductId <= 0)
                 return Result.Fail("معرف المنتج غير صالح.");
@@ -389,7 +397,11 @@ namespace Sayl.Core.Services
         {
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
             if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"تعطيل منتج #{productId} مرفوض: يتطلب صلاحية شاشة المنتجات.");
                 return Result.Fail("تعطيل المنتجات يتطلب صلاحية شاشة المنتجات.");
+            }
 
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)
@@ -424,7 +436,11 @@ namespace Sayl.Core.Services
         {
             var actor = await _dbContext.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == actorUserId);
             if (actor == null || !AppPermissions.Has(actor.Role.RoleValue, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"إعادة تفعيل منتج #{productId} مرفوضة: تتطلب صلاحية شاشة المنتجات.");
                 return Result.Fail("إعادة تفعيل المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
 
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)

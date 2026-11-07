@@ -7,7 +7,9 @@ public partial class SystemLog
 {
     public int LogId { get; set; }
 
-    public int UserId { get; set; }
+    /// <summary>قابل للـ null (Upgrade_14): محاولات الدخول الفاشلة باسم مستخدم
+    /// غير معروف تُدقَّق بلا هوية — كان NOT NULL مع FK يمنع تسجيل الرفض بلا فاعل.</summary>
+    public int? UserId { get; set; }
 
     public string Action { get; set; } = null!;
 
@@ -15,5 +17,5 @@ public partial class SystemLog
 
     public DateTime? CreatedAt { get; set; }
 
-    public virtual User User { get; set; } = null!;
+    public virtual User? User { get; set; }
 }

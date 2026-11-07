@@ -43,7 +43,11 @@ namespace Sayl.Core.Services
               if (actorRole < 0 ||
                   (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
                   (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
+              {
+                  await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                      $"إضافة طرف '{dtoParty.Name}' (نوع {dtoParty.PartyType}) مرفوضة: تتطلب صلاحية شاشته المخصصة.");
                   return Result<int>.Fail("إضافة هذا النوع من الأطراف تتطلب صلاحية شاشته المخصصة.");
+              }
           }
 
              // فحص الاسم قبل فتح المعاملة: أخطاء الشكل (فارغ/طول) تعود
@@ -146,19 +150,31 @@ namespace Sayl.Core.Services
                 if (actorRole < 0 ||
                     !AppPermissions.Has(actorRole, AppPermissions.Customers) ||
                     !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                        $"تعديل الطرف المشترك #{dtoParty.PartyId} مرفوض: يتطلب صلاحية شاشتي العملاء والموردين.");
                     return Result.Fail("تعديل الطرف المشترك يمسّ سجلي العميل والمورد معًا — يتطلب صلاحية شاشتي العملاء والموردين.");
+                }
             }
             else if (dtoParty.PartyType == 'B')
             {
                 // التحويل من عميل ← مشترك يُنشئ سجل مورد: صلاحية الموردين مطلوبة أيضًا
                 if (actorRole < 0 ||
                     !AppPermissions.Has(actorRole, AppPermissions.Suppliers))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                        $"تحويل عميل #{dtoParty.PartyId} إلى طرف مشترك مرفوض: يتطلب صلاحية الموردين أيضًا.");
                     return Result.Fail("تحويل عميل إلى طرف مشترك يتطلب صلاحية الموردين أيضًا.");
+                }
 
                 // التحويل من مورد ← مشترك يُنشئ سجل عميل: صلاحية العملاء مطلوبة أيضًا
                 if (actorRole < 0 ||
                     !AppPermissions.Has(actorRole, AppPermissions.Customers))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                        $"تحويل مورد #{dtoParty.PartyId} إلى طرف مشترك مرفوض: يتطلب صلاحية العملاء أيضًا.");
                     return Result.Fail("تحويل مورد إلى طرف مشترك يتطلب صلاحية العملاء أيضًا.");
+                }
 
                 convertingToCombined = true;
             }
@@ -166,7 +182,11 @@ namespace Sayl.Core.Services
             {
                 int required = party.PartyType == 'S' ? AppPermissions.Suppliers : AppPermissions.Customers;
                 if (actorRole < 0 || !AppPermissions.Has(actorRole, required))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                        $"تعديل طرف #{dtoParty.PartyId} (نوع {party.PartyType}) مرفوض: يتطلب صلاحية شاشته المخصصة.");
                     return Result.Fail("تعديل بيانات هذا الطرف يتطلب صلاحية شاشته المخصصة.");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(dtoParty.Name))
@@ -245,6 +265,8 @@ namespace Sayl.Core.Services
                 (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
                 (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
             {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                    $"تعطيل طرف #{id} (نوع {party.PartyType}) مرفوض: يتطلب صلاحية شاشته المخصصة.");
                 return Result.Fail(party.PartyType == 'B'
                     ? "تعطيل الطرف المشترك يخفي سجلي العميل والمورد معًا — يتطلب صلاحية شاشتي العملاء والموردين."
                     : "تعطيل الأطراف يتطلب صلاحية شاشته المخصصة.");
@@ -276,6 +298,8 @@ namespace Sayl.Core.Services
                 (needsCustomer && !AppPermissions.Has(actorRole, AppPermissions.Customers)) ||
                 (needsSupplier && !AppPermissions.Has(actorRole, AppPermissions.Suppliers)))
             {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "PartyDenied",
+                    $"إعادة تفعيل طرف #{id} (نوع {party.PartyType}) مرفوضة: تتطلب صلاحية شاشته المخصصة.");
                 return Result.Fail(party.PartyType == 'B'
                     ? "إعادة تفعيل الطرف المشترك تُظهر سجليه في شاشتي العملاء والموردين معًا — تتطلب صلاحية الشاشتين."
                     : "إعادة تفعيل الأطراف تتطلب صلاحية شاشته المخصصة.");

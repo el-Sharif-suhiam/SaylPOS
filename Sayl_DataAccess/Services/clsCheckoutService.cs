@@ -90,7 +90,11 @@ END";
             {
                 int actorRole = await GetUserRoleValueAsync(request.UserId);
                 if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutDenied",
+                        $"بيع مرفوض: خصم ({request.DiscountPercent:0.#}% / {request.DiscountAmount:N2}) يتطلب صلاحية شاشة فواتير البيع.");
                     return Result<int>.Fail($"الخصم فوق {clsPermissions.MaxCashierDiscountPercent:0.#}% يتطلب صلاحية شاشة فواتير البيع. راجع المدير.");
+                }
             }
 
             // ══ صلاحية أسعار الوحدة المُرسلة من العميل (الواجهة ليست حد الثقة) ══
@@ -118,9 +122,13 @@ END";
                         {
                             int actorRole = await GetUserRoleValueAsync(request.UserId);
                             if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                            {
+                                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutDenied",
+                                    $"بيع مرفوض: سعر وحدة المنتج «{prod.Name}» يمثل خصمًا ضمنيًا {implicitDiscountPercent:0.#}% يتطلب صلاحية شاشة فواتير البيع.");
                                 return Result<int>.Fail(
                                     $"سعر الوحدة المُرسل للمنتج «{prod.Name}» يمثل خصمًا ضمنيًا بنسبة {implicitDiscountPercent:0.#}% " +
                                     $"يتجاوز الحد المسموح ({clsPermissions.MaxCashierDiscountPercent:0.#}%) — يتطلب صلاحية شاشة فواتير البيع.");
+                            }
                         }
                     }
                 }
@@ -207,6 +215,12 @@ END";
                 await transaction.RollbackAsync();
                 // إزالة الكيانات المتتبعة حتى لا تُحقن في العملية القادمة على نفس السياق
                 _dbContext.ChangeTracker.Clear();
+                // تدقيق الرفض: رفض تحقق أعمال أثناء المعاملة (دفع زائد، مخزون غير
+                // كافٍ، خصم سالب، حد ائتمان…) — كتابة مستقلة بعد التراجع فتنجو منه.
+                // InvalidOperationException هنا = رفض أعمال مقصود؛ الأعطال التقنية
+                // (catch التالي) تُستثنى عمدًا — ليست محاولات مرفوضة.
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutRejected",
+                    $"{(suspend ? "تعليق" : "بيع")} فاشل: {ex.Message}");
                 return Result<int>.Fail(ex.Message);
             }
             catch (Exception ex) when (IsDeadlock(ex))
@@ -304,14 +318,22 @@ END";
             // نقطة بيع صامت. (الفواتير المعلقة داخل السنة الجارية تُحسم قبل الإغلاق
             // — فحوصات الجاهزية في clsFiscalYearService تمنع الإغلاق دون حسمها.)
             if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(invoice.CreatedAt ?? DateTime.UtcNow)))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
+                    $"إكمال فاتورة معلقة #{invoiceId} مرفوض: تعود لسنة مالية مغلقة (المحاسب وحده عبر قيد تسوية).");
                 return Result.Fail("هذه الفاتورة المعلقة تعود لسنة مالية مغلقة — لا يمكن إكمالها إلا عبر قيد تسوية محاسبية معتمد من المحاسب.");
+            }
 
             // ملكية الإكمال: نفس قاعدة الإلغاء (CancelSuspendedInvoiceAsync)
             if (invoice.UserId != actorUserId)
             {
                 int actorRole = await GetUserRoleValueAsync(actorUserId);
                 if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceDenied",
+                        $"إكمال فاتورة معلقة #{invoiceId} (صاحبها #{invoice.UserId}) مرفوض: يتطلب صلاحية شاشة فواتير البيع.");
                     return Result.Fail("إكمال فاتورة معلقة لكاشير آخر يتطلب صلاحية شاشة فواتير البيع.");
+                }
             }
 
             // المعاملة تحتضن الانتقال الذري: فشل أي خطوة لاحقة يعيد الحالة suspended معها
@@ -371,6 +393,9 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                // تدقيق الرفض: فشل تحقق أعمال أثناء إكمال الفاتورة (دفع زائد/مخزون…)
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
+                    $"إكمال فاتورة معلقة #{invoiceId} فاشل: {ex.Message}");
                 return Result.Fail(ex.Message);
             }
             catch
@@ -395,7 +420,11 @@ END";
             {
                 int actorRole = await GetUserRoleValueAsync(actorUserId);
                 if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceDenied",
+                        $"إلغاء فاتورة معلقة #{invoiceId} (صاحبها #{invoice.UserId}) مرفوض: يتطلب صلاحية شاشة فواتير البيع.");
                     return Result.Fail("إلغاء فاتورة معلقة لأجل كاشير آخر يتطلب صلاحية شاشة فواتير البيع.");
+                }
             }
 
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
