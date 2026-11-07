@@ -343,12 +343,18 @@ namespace Sayl.Core.Services
             if (notes != null)
                 record.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
 
+            // ذرّية التعديل: تحديث الكشف + سجل التدقيق يلتزمان معًا أو يتراجعان معًا —
+            // كان الحفظان متتاليين بلا معاملة، فانهيار بينهما يترك الكشف معدّلًا بلا أثر تدقيق
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
             Recalc(record);
             await _dbContext.SaveChangesAsync();
 
             clsAudit.Log(_dbContext, actorUserId, "UpdatePayroll",
                 $"تعديل كشف راتب #{payrollId} — الصافي: {record.Net:N2}");
             await _dbContext.SaveChangesAsync();
+
+            await transaction.CommitAsync();
 
             return Result.Ok("تم تحديث الكشف.");
         }

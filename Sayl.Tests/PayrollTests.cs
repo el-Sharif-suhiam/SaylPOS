@@ -658,4 +658,53 @@ public class PayrollTests
             await ResetFiscalYearStartAsync(db);
         }
     }
+
+    // ─────────────────────────────────────────────────
+    // ذرّية التعديل: الكشف + التدقيق يلتزمان معًا (VULN-15)
+    // ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdatePayroll_AuditSaveFails_UpdateRolledBack()
+    {
+        string marker = $"pr-{Guid.NewGuid():N}"[..10];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+        int empId = await SeedEmployeeAsync(db, marker, enSalaryType.daily, 100m);
+        int pendingId = await SeedPayrollAsync(db, empId, enSalaryType.daily, Today.AddDays(-30), Today.AddDays(-25), 100m, worked: 10);
+
+        // سياق يُبقي أول حفظ (تحديث الكشف) ناجحًا ويُفشل الثاني (التدقيق) —
+        // يحاكي انهيار قاعدة البيانات بين الحفظين
+        var options = new DbContextOptionsBuilder<SaylDbContext>().UseSqlServer(DatabaseFixture.ConnectionString).Options;
+        await using (var failing = new SecondSaveFailingContext(options))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                NewService(failing).UpdatePayrollAsync(pendingId, 5, 0, 0, 0, null, seed.UserId));
+        }
+
+        // مع السياق الجديد: التعديث تراجع كاملًا — لا تحديث بلا أثر تدقيق
+        await using (var verify = _fx.CreateContext())
+        {
+            var rec = await verify.PayrollRecords.AsNoTracking().FirstAsync(p => p.PayrollId == pendingId);
+            Assert.Equal(10m, rec.WorkedUnits);
+
+            Assert.Equal(0, await verify.SystemLogs.CountAsync(l =>
+                l.Action == "UpdatePayroll" && l.Details != null && l.Details.Contains($"#{pendingId}")));
+        }
+    }
+
+    /// <summary>سياق يُفشل ثاني استدعاء SaveChangesAsync فقط — الأول (تحديث الكشف) يمر
+    /// والثاني (سجل التدقيق) ينهار، لمحاكاة الفشل بين الحفظين.</summary>
+    private sealed class SecondSaveFailingContext : SaylDbContext
+    {
+        private int _saveCalls;
+        public SecondSaveFailingContext(DbContextOptions<SaylDbContext> options) : base(options) { }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            _saveCalls++;
+            if (_saveCalls >= 2)
+                throw new InvalidOperationException("simulated-audit-save-failure");
+            return base.SaveChangesAsync(cancellationToken);
+        }
+    }
 }
