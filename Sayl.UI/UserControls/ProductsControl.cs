@@ -31,14 +31,14 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colCost", AppLang.T("Common.Label.Cost"));
             Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-            Grid.Columns["colName"].FillWeight = 28;
-            Grid.Columns["colBarcode"].FillWeight = 18;
-            Grid.Columns["colUnit"].FillWeight = 9;
-            Grid.Columns["colType"].FillWeight = 9;
-            Grid.Columns["colPrice"].FillWeight = 12;
-            Grid.Columns["colCost"].FillWeight = 12;
-            Grid.Columns["colReorder"].FillWeight = 8;
-            Grid.Columns["colStatus"].FillWeight = 8;
+            UiHelpers.Column(Grid, "colName").FillWeight = 28;
+            UiHelpers.Column(Grid, "colBarcode").FillWeight = 18;
+            UiHelpers.Column(Grid, "colUnit").FillWeight = 9;
+            UiHelpers.Column(Grid, "colType").FillWeight = 9;
+            UiHelpers.Column(Grid, "colPrice").FillWeight = 12;
+            UiHelpers.Column(Grid, "colCost").FillWeight = 12;
+            UiHelpers.Column(Grid, "colReorder").FillWeight = 8;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 8;
 
             try
             {

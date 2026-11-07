@@ -112,25 +112,25 @@ namespace Sayl.UI.Forms
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
 
             _grid.Columns.Add("colProduct", AppLang.T("StockCount.Col.Product"));
-            _grid.Columns["colProduct"].FillWeight = 34;
-            _grid.Columns["colProduct"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 34;
+            UiHelpers.Column(_grid, "colProduct").ReadOnly = true;
             _grid.Columns.Add("colBook", AppLang.T("StockCount.Col.Book"));
-            _grid.Columns["colBook"].FillWeight = 13;
-            _grid.Columns["colBook"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colBook").FillWeight = 13;
+            UiHelpers.Column(_grid, "colBook").ReadOnly = true;
             var colCounted = new DataGridViewTextBoxColumn { Name = "colCounted", HeaderText = AppLang.T("StockCount.Col.Counted"), FillWeight = 13 };
             colCounted.DefaultCellStyle.BackColor = AppTheme.FieldBg;
             colCounted.DefaultCellStyle.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
             _grid.Columns.Add(colCounted);
             _grid.Columns.Add("colDiff", AppLang.T("StockCount.Col.Diff"));
-            _grid.Columns["colDiff"].FillWeight = 11;
-            _grid.Columns["colDiff"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colDiff").FillWeight = 11;
+            UiHelpers.Column(_grid, "colDiff").ReadOnly = true;
             _grid.Columns.Add("colCost", AppLang.T("StockCount.Col.DiffCost"));
-            _grid.Columns["colCost"].FillWeight = 14;
-            _grid.Columns["colCost"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colCost").FillWeight = 14;
+            UiHelpers.Column(_grid, "colCost").ReadOnly = true;
             // عمود الحالة: ✓ + وقت العد (وللسطر المُعاد عدّه علامة ↻) — فارغ لغير المعدود
             _grid.Columns.Add("colStatus", AppLang.T("StockCount.Col.Status"));
-            _grid.Columns["colStatus"].FillWeight = 15;
-            _grid.Columns["colStatus"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colStatus").FillWeight = 15;
+            UiHelpers.Column(_grid, "colStatus").ReadOnly = true;
 
             _grid.CellEndEdit += async (_, args) => await CountedEditedAsync(args);
             _grid.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) args.SuppressKeyPress = true; };

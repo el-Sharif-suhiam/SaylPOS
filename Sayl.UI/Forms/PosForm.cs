@@ -874,8 +874,8 @@ namespace Sayl.UI.Forms
 
             _gridCart.Columns.AddRange(new DataGridViewColumn[] { colMinus, colQty, colPlus, colTotal, colDelete });
 
-            _gridCart.Columns["colProduct"].FillWeight = 39;
-            _gridCart.Columns["colPrice"].FillWeight = 15;
+            UiHelpers.Column(_gridCart, "colProduct").FillWeight = 39;
+            UiHelpers.Column(_gridCart, "colPrice").FillWeight = 15;
             _gridCart.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             _gridCart.CellClick += GridCart_CellClick;

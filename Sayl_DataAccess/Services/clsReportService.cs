@@ -481,9 +481,11 @@ namespace Sayl.Core.Services
                 .Select(i => new { i.SessionId, i.InvoiceId, i.Type, i.NetAmount })
                 .ToListAsync();
 
+            // المفاتيح مفلترة مسبقًا عبر sessionIds.Contains فلا تكون null؛
+            // ?? 0 مفتاح وهمي مستحيل (معرفات الجلسات تبدأ من 1) يُبقي القاموس int.
             var saleBySession = sessionInvoiceRows
                 .Where(x => x.Type == enInvoicesType.sale)
-                .GroupBy(x => x.SessionId)
+                .GroupBy(x => x.SessionId ?? 0)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             var sessionInvoiceIds = sessionInvoiceRows.Select(x => x.InvoiceId).ToList();
@@ -504,7 +506,7 @@ namespace Sayl.Core.Services
                 .ToListAsync();
 
             var payBySession = sessionPayments
-                .GroupBy(p => p.SessionId ?? invoiceSessionMap[p.InvoiceId!.Value])
+                .GroupBy(p => (p.SessionId ?? invoiceSessionMap[p.InvoiceId!.Value]) ?? 0)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             // حركات النقد (قبض/صرف) لكل الجلسات دفعة واحدة
@@ -513,8 +515,9 @@ namespace Sayl.Core.Services
                 .Select(m => new { m.SessionId, m.MovementType, m.Amount })
                 .ToListAsync();
 
+            // نفس ملاحظة saleBySession: المفاتيح مفلترة مسبقًا فلا تكون null.
             var moveBySession = cashMoves
-                .GroupBy(m => m.SessionId)
+                .GroupBy(m => m.SessionId ?? 0)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             var sessionLines = new List<PeriodSessionLineVM>();

@@ -31,14 +31,14 @@ namespace Sayl.Core.Services
                 Phone1 = c.Phone1,
                 AddressLine1 = c.AddressLine1,
                 AddressLine2 = c.AddressLine2,
-                Balance = c.Customer.Balance,
+                Balance = c.Customer != null ? c.Customer.Balance : null,
                 CreatedAt = c.CreatedAt,
                 Email = c.Email,
                 IsActive = c.IsActive,
                 Notes = c.Notes,
                 Phone2 = c.Phone2,
                 UpdatedAt = c.UpdatedAt,
-                CreditLimit = c.Customer.CreditLimit
+                CreditLimit = c.Customer != null ? c.Customer.CreditLimit : null
             });
             return customerQuery;
         }
@@ -56,7 +56,7 @@ namespace Sayl.Core.Services
         public async Task<List<Customer>> GetCustomersListAsync(string search = "", bool includeInactive = false)
         {
             var query = _dbContext.Customers.Include(c => c.Party)
-                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || (c.Party.Email ?? string.Empty).Contains(search));
 
             // الافتراضي: العملاء النشطون فقط — العرض الكامل عند الطلب من الواجهة
             if (!includeInactive)
@@ -76,7 +76,7 @@ namespace Sayl.Core.Services
             pageSize = Math.Max(1, pageSize);
 
             var query = _dbContext.Customers.Include(c => c.Party)
-                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || (c.Party.Email ?? string.Empty).Contains(search));
 
             if (!includeInactive)
                 query = query.Where(c => c.Party.IsActive);
@@ -107,7 +107,7 @@ namespace Sayl.Core.Services
             if (creditLimit < 0)
                 throw new ConflictException("The credit limit should be 0 at leaste");
 
-            Customer customer = await _dbContext.Customers.SingleOrDefaultAsync(c =>  c.PartyId == cutomerId);
+            Customer? customer = await _dbContext.Customers.SingleOrDefaultAsync(c =>  c.PartyId == cutomerId);
 
             if (customer == null)
                 throw new NotFoundException("this customer is not found");

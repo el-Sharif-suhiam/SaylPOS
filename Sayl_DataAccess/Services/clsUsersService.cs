@@ -62,7 +62,7 @@ namespace Sayl.Core.Services
                     RoleName = u.Role.Name,
                     RoleId = u.RoleId,
                     RoleValue = u.Role.RoleValue,
-                    Name = u.Employee.Name ?? "No Employee",
+                    Name = u.Employee == null ? "No Employee" : u.Employee.Name ?? "No Employee",
                     IsActive = u.IsActive
                 })
                 .ToListAsync();
@@ -92,7 +92,7 @@ namespace Sayl.Core.Services
                     RoleName = u.Role.Name,
                     RoleId = u.RoleId,
                     RoleValue = u.Role.RoleValue,
-                    Name = u.Employee.Name ?? "No Employee",
+                    Name = u.Employee == null ? "No Employee" : u.Employee.Name ?? "No Employee",
                     IsActive = u.IsActive
                 })
                 .ToListAsync();
@@ -111,7 +111,7 @@ namespace Sayl.Core.Services
                         RoleName = u.Role.Name,
                         RoleId = u.RoleId,
                         RoleValue = u.Role.RoleValue,
-                        Name = u.Employee.Name ?? "No Employee",
+                        Name = u.Employee == null ? "No Employee" : u.Employee.Name ?? "No Employee",
                         IsActive = u.IsActive
                     })
                     .SingleOrDefaultAsync();
@@ -911,7 +911,7 @@ END;";
                     RoleName = u.Role.Name,
                     RoleId = u.RoleId,
                     RoleValue = u.Role.RoleValue,
-                    Name = u.Employee.Name ?? "No Employee"
+                    Name = u.Employee == null ? "No Employee" : u.Employee.Name ?? "No Employee"
                 })
                 .SingleOrDefaultAsync();
         }

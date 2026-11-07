@@ -95,7 +95,7 @@ namespace Sayl.UI.Infrastructure
         }
 
         /// <summary>مفتاح صيغة بمعاملات — "المبلغ {0} غير صالح" مع قيم مرتبة.</summary>
-        public static string T(string key, params object[] args)
+        public static string T(string key, params object?[] args)
         {
             var raw = T(key);
             try { return string.Format(raw, args); }

@@ -31,10 +31,10 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colName", AppLang.T("Roles.Label.RoleName"));
             Grid.Columns.Add("colDesc", AppLang.T("Roles.Label.Perms"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-            Grid.Columns["colId"].FillWeight = 10;
-            Grid.Columns["colName"].FillWeight = 28;
-            Grid.Columns["colDesc"].FillWeight = 46;
-            Grid.Columns["colStatus"].FillWeight = 16;
+            UiHelpers.Column(Grid, "colId").FillWeight = 10;
+            UiHelpers.Column(Grid, "colName").FillWeight = 28;
+            UiHelpers.Column(Grid, "colDesc").FillWeight = 46;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 16;
 
             try
             {

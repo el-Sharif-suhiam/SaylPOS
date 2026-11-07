@@ -35,13 +35,13 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colSalary", AppLang.T("Employees.Label.Rate"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
             Grid.Columns.Add("colAccount", AppLang.T("Employees.Label.LinkedAccount"));
-            Grid.Columns["colName"].FillWeight = 20;
-            Grid.Columns["colPosition"].FillWeight = 14;
-            Grid.Columns["colDept"].FillWeight = 12;
-            Grid.Columns["colType"].FillWeight = 11;
-            Grid.Columns["colSalary"].FillWeight = 11;
-            Grid.Columns["colStatus"].FillWeight = 11;
-            Grid.Columns["colAccount"].FillWeight = 13;
+            UiHelpers.Column(Grid, "colName").FillWeight = 20;
+            UiHelpers.Column(Grid, "colPosition").FillWeight = 14;
+            UiHelpers.Column(Grid, "colDept").FillWeight = 12;
+            UiHelpers.Column(Grid, "colType").FillWeight = 11;
+            UiHelpers.Column(Grid, "colSalary").FillWeight = 11;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 11;
+            UiHelpers.Column(Grid, "colAccount").FillWeight = 13;
 
             try
             {

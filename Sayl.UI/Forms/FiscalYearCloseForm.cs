@@ -13,7 +13,6 @@ namespace Sayl.UI.Forms
     /// </summary>
     public class FiscalYearCloseForm : DialogForm
     {
-        private readonly TableLayoutPanel _root = null!;
         private readonly Panel _pageBody = null!;
         private Button _btnNext = null!;
         private Button _btnBack = null!;
@@ -201,8 +200,8 @@ namespace Sayl.UI.Forms
             UiHelpers.StyleGrid(grid);
             grid.Columns.Add("colType", AppLang.T("Fiscal.Checks.ColType"));
             grid.Columns.Add("colItem", AppLang.T("Fiscal.Checks.ColItem"));
-            grid.Columns["colType"].FillWeight = 16;
-            grid.Columns["colItem"].FillWeight = 84;
+            UiHelpers.Column(grid, "colType").FillWeight = 16;
+            UiHelpers.Column(grid, "colItem").FillWeight = 84;
 
             void AddLine(string type, string item, Color color)
             {

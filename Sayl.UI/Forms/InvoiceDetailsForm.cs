@@ -93,11 +93,11 @@ namespace Sayl.UI.Forms
             _gridItems.Columns.Add("colQty", AppLang.T("Common.Label.Qty"));
             _gridItems.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             _gridItems.Columns.Add("colTotal", AppLang.T("Common.Label.Total"));
-            _gridItems.Columns["colProduct"].FillWeight = 38;
-            _gridItems.Columns["colBatch"].FillWeight = 16;
-            _gridItems.Columns["colQty"].FillWeight = 12;
-            _gridItems.Columns["colPrice"].FillWeight = 17;
-            _gridItems.Columns["colTotal"].FillWeight = 17;
+            UiHelpers.Column(_gridItems, "colProduct").FillWeight = 38;
+            UiHelpers.Column(_gridItems, "colBatch").FillWeight = 16;
+            UiHelpers.Column(_gridItems, "colQty").FillWeight = 12;
+            UiHelpers.Column(_gridItems, "colPrice").FillWeight = 17;
+            UiHelpers.Column(_gridItems, "colTotal").FillWeight = 17;
 
             var lblPayments = new Label
             {
@@ -113,9 +113,9 @@ namespace Sayl.UI.Forms
             _gridPayments.Columns.Add("colDate", AppLang.T("InvoiceDetails.Label.PaymentDate"));
             _gridPayments.Columns.Add("colMethod", AppLang.T("Common.Label.Method"));
             _gridPayments.Columns.Add("colAmount", AppLang.T("Common.Label.Amount"));
-            _gridPayments.Columns["colDate"].FillWeight = 34;
-            _gridPayments.Columns["colMethod"].FillWeight = 33;
-            _gridPayments.Columns["colAmount"].FillWeight = 33;
+            UiHelpers.Column(_gridPayments, "colDate").FillWeight = 34;
+            UiHelpers.Column(_gridPayments, "colMethod").FillWeight = 33;
+            UiHelpers.Column(_gridPayments, "colAmount").FillWeight = 33;
 
             _lblTotals = new Label
             {

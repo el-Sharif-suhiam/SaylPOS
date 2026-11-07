@@ -25,12 +25,12 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colCategory", AppLang.T("Expenses.Label.Category"));
             Grid.Columns.Add("colAmount", AppLang.T("Expenses.Label.Amount"));
             Grid.Columns.Add("colNotes", AppLang.T("Common.Label.Notes"));
-            Grid.Columns["colId"].FillWeight = 8;
-            Grid.Columns["colDate"].FillWeight = 14;
-            Grid.Columns["colDesc"].FillWeight = 30;
-            Grid.Columns["colCategory"].FillWeight = 14;
-            Grid.Columns["colAmount"].FillWeight = 14;
-            Grid.Columns["colNotes"].FillWeight = 20;
+            UiHelpers.Column(Grid, "colId").FillWeight = 8;
+            UiHelpers.Column(Grid, "colDate").FillWeight = 14;
+            UiHelpers.Column(Grid, "colDesc").FillWeight = 30;
+            UiHelpers.Column(Grid, "colCategory").FillWeight = 14;
+            UiHelpers.Column(Grid, "colAmount").FillWeight = 14;
+            UiHelpers.Column(Grid, "colNotes").FillWeight = 20;
 
             try
             {

@@ -11,6 +11,16 @@ namespace Sayl.UI.Infrastructure
         public static string Money(decimal value) => value.ToString("N2");
 
         /// <summary>
+        /// البحث عن عمود جدول بالاسم مع ضمان عدم القيمة الفارغة: الفهرس النصي
+        /// <c>Columns[string]</c> يُرجع null إذا لم يوجد الاسم — هنا نُلقي استثناء
+        /// واضحًا عند نقطة البحث بدل NullReferenceException متأخر عند أول
+        /// استخدام للعمود. الأعمدة تُضاف برمجيًا بأسماء ثابتة في نفس الدالة،
+        /// ففشل البحث خطأ برمجي (اسم مكتوب خطأ) وليس حالة تشغيل متوقعة.
+        /// </summary>
+        public static DataGridViewColumn Column(DataGridView grid, string name) =>
+            grid.Columns[name] ?? throw new InvalidOperationException($"DataGrid column '{name}' was not found.");
+
+        /// <summary>
         /// تفعيل الرسم المزدوج لأي عنصر تحكم. الخاصية DoubleBuffered محمية في
         /// Control — نصل إليها بالانعكاس (حيلة معيارية). تُستخدم للجداول
         /// ولوحات التدفّق التي تومض أو تُرسم ناقصة عند أول فتح.

@@ -333,7 +333,12 @@ namespace Sayl.Core.Services
                             catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex, "UQ_Batches_Product_Batch"))
                             {
                                 _dbContext.ChangeTracker.Clear();
-                                inventory = await _dbContext.Inventories.FindAsync(request.ProductId);
+                                // إعادة جلب الدفعة المتنافسة فقط. لا نُسند نتيجة
+                                // FindAsync القابلة للفراغ إلى inventory: المسار هنا
+                                // (زيادة) لا يعدّل المخزون عبر الكيان — التحديث SQL
+                                // خام أعلاه — وإسنادها كان يُبطل حالة عدم-الفراغ
+                                // المضمونة من الفحص أعلاه.
+                                _ = await _dbContext.Inventories.FindAsync(request.ProductId);
                                 batch = await _dbContext.Batches
                                     .FirstAsync(b => b.ProductId == request.ProductId && b.BatchNumber == request.BatchNumber.Trim());
                                 // دفعة أنشأها طلب متوازٍ: لا دمج بصلاحية مختلفة (نفس قاعدة الدمج أعلاه)

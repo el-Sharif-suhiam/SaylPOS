@@ -181,17 +181,17 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("SupplierReturn.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
-            _grid.Columns["colProduct"].FillWeight = 30;
-            _grid.Columns["colPurchased"].FillWeight = 12;
-            _grid.Columns["colReturned"].FillWeight = 13;
-            _grid.Columns["colRemaining"].FillWeight = 13;
-            _grid.Columns["colPrice"].FillWeight = 12;
-            _grid.Columns["colReturnQty"].FillWeight = 20;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
+            UiHelpers.Column(_grid, "colPurchased").FillWeight = 12;
+            UiHelpers.Column(_grid, "colReturned").FillWeight = 13;
+            UiHelpers.Column(_grid, "colRemaining").FillWeight = 13;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 12;
+            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 20;
             // return qty column is the visual edit affordance (same trick
             // as the cashier cart in PosForm.StyleCartGrid / ReturnForm).
-            _grid.Columns["colReturnQty"].DefaultCellStyle.BackColor = AppTheme.FieldBg;
-            _grid.Columns["colReturnQty"].DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-            _grid.Columns["colReturnQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.BackColor = AppTheme.FieldBg;
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             // input guard: any non-numeric text is rejected before reaching data
             _grid.CellValidating += (_, args) =>
             {

@@ -85,11 +85,11 @@ namespace Sayl.UI.Forms
             // بما هو فعلًا: «شفت ليلي» معلومة عرض لا وعد حساب.
             _gridShifts.Columns.Add("colNight", AppLang.T("Shifts.Col.Night"));
             _gridShifts.Columns.Add("colNotes", AppLang.T("Shifts.Col.Notes"));
-            _gridShifts.Columns["colName"].FillWeight = 24;
-            _gridShifts.Columns["colStart"].FillWeight = 14;
-            _gridShifts.Columns["colEnd"].FillWeight = 14;
-            _gridShifts.Columns["colNight"].FillWeight = 18;
-            _gridShifts.Columns["colNotes"].FillWeight = 30;
+            UiHelpers.Column(_gridShifts, "colName").FillWeight = 24;
+            UiHelpers.Column(_gridShifts, "colStart").FillWeight = 14;
+            UiHelpers.Column(_gridShifts, "colEnd").FillWeight = 14;
+            UiHelpers.Column(_gridShifts, "colNight").FillWeight = 18;
+            UiHelpers.Column(_gridShifts, "colNotes").FillWeight = 30;
 
             tabShifts.Controls.Add(_gridShifts);
             tabShifts.Controls.Add(barShifts);
@@ -118,10 +118,10 @@ namespace Sayl.UI.Forms
             _gridHolidays.Columns.Add("colDate", AppLang.T("Shifts.Col.Date"));
             _gridHolidays.Columns.Add("colDays", AppLang.T("Shifts.Col.Duration"));
             _gridHolidays.Columns.Add("colAnnual", AppLang.T("Shifts.Col.Annual"));
-            _gridHolidays.Columns["colName"].FillWeight = 40;
-            _gridHolidays.Columns["colDate"].FillWeight = 22;
-            _gridHolidays.Columns["colDays"].FillWeight = 18;
-            _gridHolidays.Columns["colAnnual"].FillWeight = 20;
+            UiHelpers.Column(_gridHolidays, "colName").FillWeight = 40;
+            UiHelpers.Column(_gridHolidays, "colDate").FillWeight = 22;
+            UiHelpers.Column(_gridHolidays, "colDays").FillWeight = 18;
+            UiHelpers.Column(_gridHolidays, "colAnnual").FillWeight = 20;
 
             tabHolidays.Controls.Add(_gridHolidays);
             tabHolidays.Controls.Add(barHolidays);
@@ -147,10 +147,10 @@ namespace Sayl.UI.Forms
             _gridAssignments.Columns.Add("colShift", AppLang.T("Shifts.Col.Shift"));
             _gridAssignments.Columns.Add("colDays", AppLang.T("Shifts.Col.Days"));
             _gridAssignments.Columns.Add("colFrom", AppLang.T("Shifts.Col.FromDate"));
-            _gridAssignments.Columns["colEmp"].FillWeight = 28;
-            _gridAssignments.Columns["colShift"].FillWeight = 24;
-            _gridAssignments.Columns["colDays"].FillWeight = 28;
-            _gridAssignments.Columns["colFrom"].FillWeight = 20;
+            UiHelpers.Column(_gridAssignments, "colEmp").FillWeight = 28;
+            UiHelpers.Column(_gridAssignments, "colShift").FillWeight = 24;
+            UiHelpers.Column(_gridAssignments, "colDays").FillWeight = 28;
+            UiHelpers.Column(_gridAssignments, "colFrom").FillWeight = 20;
 
             _pagerAssign = new PagerControl();
             _pagerAssign.PageRequested += page =>

@@ -185,10 +185,10 @@ namespace Sayl.UI.UserControls
             _gridLowStock.Columns.Add("colQty", AppLang.T("Inventory.Label.OnHand"));
             _gridLowStock.Columns.Add("colNet", AppLang.T("Inventory.Label.AvailableForSale"));
             _gridLowStock.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
-            _gridLowStock.Columns["colName"].FillWeight = 46;
-            _gridLowStock.Columns["colQty"].FillWeight = 18;
-            _gridLowStock.Columns["colNet"].FillWeight = 18;
-            _gridLowStock.Columns["colReorder"].FillWeight = 18;
+            UiHelpers.Column(_gridLowStock, "colName").FillWeight = 46;
+            UiHelpers.Column(_gridLowStock, "colQty").FillWeight = 18;
+            UiHelpers.Column(_gridLowStock, "colNet").FillWeight = 18;
+            UiHelpers.Column(_gridLowStock, "colReorder").FillWeight = 18;
             lowPanel.Controls.Add(_gridLowStock);
             lowPanel.Controls.Add(_lblLowStockHeader);
 

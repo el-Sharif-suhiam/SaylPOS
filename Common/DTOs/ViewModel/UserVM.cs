@@ -7,10 +7,10 @@ namespace Common.DTOs.ViewModel
     public class UserVM
     {
         public int UserId { get; set; }
-        public string Name { get; set; }
-        public string UserName { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string UserName { get; set; } = string.Empty;
 
-        public string RoleName { get; set; }
+        public string RoleName { get; set; } = string.Empty;
 
         /// <summary>معرف الدور — الحل الضعف القديم: مطابقة الاسم النصي كانت تنكسر عند إعادة التسمية.</summary>
         public byte RoleId { get; set; }

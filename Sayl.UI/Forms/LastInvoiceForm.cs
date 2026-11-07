@@ -69,10 +69,10 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colQty", AppLang.T("Common.Label.Qty"));
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             _grid.Columns.Add("colTotal", AppLang.T("Common.Label.Total"));
-            _grid.Columns["colProduct"].FillWeight = 46;
-            _grid.Columns["colQty"].FillWeight = 16;
-            _grid.Columns["colPrice"].FillWeight = 19;
-            _grid.Columns["colTotal"].FillWeight = 19;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 46;
+            UiHelpers.Column(_grid, "colQty").FillWeight = 16;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 19;
+            UiHelpers.Column(_grid, "colTotal").FillWeight = 19;
 
             var bottomBar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.CardBg, Padding = new Padding(2, 8, 2, 8) };
 

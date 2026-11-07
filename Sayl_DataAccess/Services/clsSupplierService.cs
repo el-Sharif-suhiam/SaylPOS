@@ -22,7 +22,7 @@ namespace Sayl.Core.Services
         public async Task<List<Supplier>> GetSupplierListAsync(string search = "", bool includeInactive = false)
         {
             var query = _dbContext.Suppliers.Include(c => c.Party)
-                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || (c.Party.Email ?? string.Empty).Contains(search));
 
             // الافتراضي: الموردون النشطون فقط — العرض الكامل عند الطلب من الواجهة
             if (!includeInactive)
@@ -42,7 +42,7 @@ namespace Sayl.Core.Services
             pageSize = Math.Max(1, pageSize);
 
             var query = _dbContext.Suppliers.Include(c => c.Party)
-                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || c.Party.Email.Contains(search));
+                .Where(c => string.IsNullOrWhiteSpace(search) || c.Party.Name.Contains(search) || (c.Party.Email ?? string.Empty).Contains(search));
 
             if (!includeInactive)
                 query = query.Where(c => c.Party.IsActive);

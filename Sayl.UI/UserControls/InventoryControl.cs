@@ -62,14 +62,14 @@ internal class InventoryControl : SectionListControl
             Grid.Columns.Add("colReorder", AppLang.T("Common.Label.Reorder"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
             Grid.Columns.Add("colCounted", AppLang.T("Inventory.Label.LastCount"));
-            Grid.Columns["colName"].FillWeight = 26;
-            Grid.Columns["colUnit"].FillWeight = 8;
-            Grid.Columns["colOnHand"].FillWeight = 10;
-            Grid.Columns["colNet"].FillWeight = 10;
-            Grid.Columns["colReserved"].FillWeight = 10;
-            Grid.Columns["colReorder"].FillWeight = 10;
-            Grid.Columns["colStatus"].FillWeight = 10;
-            Grid.Columns["colCounted"].FillWeight = 16;
+            UiHelpers.Column(Grid, "colName").FillWeight = 26;
+            UiHelpers.Column(Grid, "colUnit").FillWeight = 8;
+            UiHelpers.Column(Grid, "colOnHand").FillWeight = 10;
+            UiHelpers.Column(Grid, "colNet").FillWeight = 10;
+            UiHelpers.Column(Grid, "colReserved").FillWeight = 10;
+            UiHelpers.Column(Grid, "colReorder").FillWeight = 10;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 10;
+            UiHelpers.Column(Grid, "colCounted").FillWeight = 16;
         }
 
         // 📖 أزرار القسم — وصفة AddToolbarButton في SectionListControl.

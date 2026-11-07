@@ -35,7 +35,6 @@ namespace Sayl.UI.Forms
         private System.Windows.Forms.Timer? _idleTimer;    // يراقب صمت السلة
         private System.Windows.Forms.Timer? _floatTimer;   // حركة «التنفس» للترحيب
         private DateTime _lastCartChange = DateTime.UtcNow;
-        private readonly int _idleSeconds;                   // مهلة الخمول (قابلة للضبط)
         private float _floatPhase;                            // طور الموجة الجيبية
 
         // لقطة الفاتورة الحالية (تصل من PosForm)
@@ -64,7 +63,6 @@ namespace Sayl.UI.Forms
         {
             // مهلة الخمول: 30 ثانية من آخر تغيير بالسلة (وليس من تفاعل الكاشير —
             // كاشير يجهز فاتورة كبيرة بهدوء لا يجب أن تُقاطَع شاشته بالترحيب)
-            _idleSeconds = 30;
 
             // ── قواعد نافذة العرض ──
             // FormBorderStyle.None: بلا إطار ولا شريط عنوان — زجاج عرض صرف.
@@ -155,14 +153,14 @@ namespace Sayl.UI.Forms
             _grid.DefaultCellStyle.Padding = new Padding(10, 4, 10, 4);
 
             _grid.Columns.Add("colName", AppLang.T("Display.Label.Item"));
-            _grid.Columns["colName"].FillWeight = 50;
+            UiHelpers.Column(_grid, "colName").FillWeight = 50;
             _grid.Columns.Add("colQty", AppLang.T("Display.Label.Qty"));
-            _grid.Columns["colQty"].FillWeight = 16;
-            _grid.Columns["colQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colQty").FillWeight = 16;
+            UiHelpers.Column(_grid, "colQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             _grid.Columns.Add("colPrice", AppLang.T("Display.Label.Price"));
-            _grid.Columns["colPrice"].FillWeight = 17;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 17;
             _grid.Columns.Add("colTotal", AppLang.T("Display.Label.Total"));
-            _grid.Columns["colTotal"].FillWeight = 17;
+            UiHelpers.Column(_grid, "colTotal").FillWeight = 17;
             root.Controls.Add(_grid, 0, 1);
 
             // ── لوحة الأرقام (خصم/ضريبة/الإجمالي/القطع/تلميح الدفع) ──

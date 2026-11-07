@@ -27,11 +27,11 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colCategory", AppLang.T("Suppliers.Label.Category"));
             Grid.Columns.Add("colBalance", AppLang.T("Suppliers.Label.Balance"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-            Grid.Columns["colName"].FillWeight = 30;
-            Grid.Columns["colPhone"].FillWeight = 20;
-            Grid.Columns["colCategory"].FillWeight = 15;
-            Grid.Columns["colBalance"].FillWeight = 15;
-            Grid.Columns["colStatus"].FillWeight = 12;
+            UiHelpers.Column(Grid, "colName").FillWeight = 30;
+            UiHelpers.Column(Grid, "colPhone").FillWeight = 20;
+            UiHelpers.Column(Grid, "colCategory").FillWeight = 15;
+            UiHelpers.Column(Grid, "colBalance").FillWeight = 15;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 12;
 
             var colDetails = new DataGridViewButtonColumn
             {

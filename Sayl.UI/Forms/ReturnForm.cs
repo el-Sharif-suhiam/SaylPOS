@@ -179,17 +179,17 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("Return.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
-            _grid.Columns["colProduct"].FillWeight = 30;
-            _grid.Columns["colSold"].FillWeight = 10;
-            _grid.Columns["colReturned"].FillWeight = 13;
-            _grid.Columns["colRemaining"].FillWeight = 13;
-            _grid.Columns["colPrice"].FillWeight = 14;
-            _grid.Columns["colReturnQty"].FillWeight = 20;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
+            UiHelpers.Column(_grid, "colSold").FillWeight = 10;
+            UiHelpers.Column(_grid, "colReturned").FillWeight = 13;
+            UiHelpers.Column(_grid, "colRemaining").FillWeight = 13;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 14;
+            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 20;
             // عمود الكمية «دعوة بصرية» للتحرير: خلفية مختلفة عن بقية الجدول
             // (نفس حيلة سلة الكاشير في PosForm.StyleCartGrid).
-            _grid.Columns["colReturnQty"].DefaultCellStyle.BackColor = AppTheme.FieldBg;
-            _grid.Columns["colReturnQty"].DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-            _grid.Columns["colReturnQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.BackColor = AppTheme.FieldBg;
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             // حارس الإدخال: أي نص غير رقمي يُرفض قبل وصوله للبيانات
             _grid.CellValidating += (_, args) =>
             {

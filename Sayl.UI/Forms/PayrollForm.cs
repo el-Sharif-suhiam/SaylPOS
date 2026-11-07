@@ -207,25 +207,25 @@ namespace Sayl.UI.Forms
             colUnpay.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             _grid.Columns.Add(colUnpay);
 
-            _grid.Columns["colEmp"].FillWeight = 18;
-            _grid.Columns["colEmp"].ReadOnly = true;
-            _grid.Columns["colType"].FillWeight = 8;
-            _grid.Columns["colType"].ReadOnly = true;
-            _grid.Columns["colWorked"].FillWeight = 11;
-            _grid.Columns["colHoliday"].FillWeight = 10;
-            _grid.Columns["colRate"].FillWeight = 9;
-            _grid.Columns["colRate"].ReadOnly = true;
-            _grid.Columns["colGross"].FillWeight = 10;
-            _grid.Columns["colGross"].ReadOnly = true;
-            _grid.Columns["colDed"].FillWeight = 9;
-            _grid.Columns["colAdd"].FillWeight = 9;
-            _grid.Columns["colNet"].FillWeight = 10;
-            _grid.Columns["colNet"].ReadOnly = true;
-            _grid.Columns["colStatus"].FillWeight = 9;
-            _grid.Columns["colStatus"].ReadOnly = true;
+            UiHelpers.Column(_grid, "colEmp").FillWeight = 18;
+            UiHelpers.Column(_grid, "colEmp").ReadOnly = true;
+            UiHelpers.Column(_grid, "colType").FillWeight = 8;
+            UiHelpers.Column(_grid, "colType").ReadOnly = true;
+            UiHelpers.Column(_grid, "colWorked").FillWeight = 11;
+            UiHelpers.Column(_grid, "colHoliday").FillWeight = 10;
+            UiHelpers.Column(_grid, "colRate").FillWeight = 9;
+            UiHelpers.Column(_grid, "colRate").ReadOnly = true;
+            UiHelpers.Column(_grid, "colGross").FillWeight = 10;
+            UiHelpers.Column(_grid, "colGross").ReadOnly = true;
+            UiHelpers.Column(_grid, "colDed").FillWeight = 9;
+            UiHelpers.Column(_grid, "colAdd").FillWeight = 9;
+            UiHelpers.Column(_grid, "colNet").FillWeight = 10;
+            UiHelpers.Column(_grid, "colNet").ReadOnly = true;
+            UiHelpers.Column(_grid, "colStatus").FillWeight = 9;
+            UiHelpers.Column(_grid, "colStatus").ReadOnly = true;
 
             foreach (string col in new[] { "colWorked", "colHoliday", "colDed", "colAdd" })
-                _grid.Columns[col].DefaultCellStyle.BackColor = AppTheme.FieldBg;
+                UiHelpers.Column(_grid, col).DefaultCellStyle.BackColor = AppTheme.FieldBg;
 
             _grid.CellEndEdit += async (_, args) => await CellEditedAsync(args);
             _grid.CellClick += async (_, args) => await UnpayCellClickAsync(args);
@@ -320,7 +320,7 @@ namespace Sayl.UI.Forms
         // ───────────────── عكس صرف الصف (زر لكل سطر — نمط الشفتات) ─────────────────
         private async Task UnpayCellClickAsync(DataGridViewCellEventArgs args)
         {
-            if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colUnpay"].Index)
+            if (args.RowIndex < 0 || args.ColumnIndex != UiHelpers.Column(_grid, "colUnpay").Index)
                 return;
 
             int pi = VisibleIndex(args.RowIndex);

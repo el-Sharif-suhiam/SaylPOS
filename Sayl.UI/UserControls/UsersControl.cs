@@ -55,11 +55,11 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colName", AppLang.T("Common.Label.Name"));
             Grid.Columns.Add("colRole", AppLang.T("Common.Label.Role"));
             Grid.Columns.Add("colStatus", AppLang.T("Common.Label.Status"));
-            Grid.Columns["colId"].FillWeight = 10;
-            Grid.Columns["colUser"].FillWeight = 22;
-            Grid.Columns["colName"].FillWeight = 30;
-            Grid.Columns["colRole"].FillWeight = 20;
-            Grid.Columns["colStatus"].FillWeight = 18;
+            UiHelpers.Column(Grid, "colId").FillWeight = 10;
+            UiHelpers.Column(Grid, "colUser").FillWeight = 22;
+            UiHelpers.Column(Grid, "colName").FillWeight = 30;
+            UiHelpers.Column(Grid, "colRole").FillWeight = 20;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 18;
 
             try
             {

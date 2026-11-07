@@ -313,7 +313,7 @@ namespace Sayl.UI.Forms
             string[] names = { "colPeriod", "colCount", "colSales", "colReturns", "colNet", "colCogs", "colGross", "colExp", "colProfit" };
             double[] weights = { 22, 8, 10, 10, 11, 10, 10, 10, 11 };
             for (int i = 0; i < names.Length; i++)
-                _grid.Columns[names[i]].FillWeight = (float)weights[i];
+                UiHelpers.Column(_grid, names[i]).FillWeight = (float)weights[i];
 
             _grid.Rows.Clear();
             foreach (var p in r.Periods)

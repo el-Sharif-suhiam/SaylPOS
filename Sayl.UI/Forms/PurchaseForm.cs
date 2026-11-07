@@ -283,19 +283,19 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colExpiry", AppLang.T("Purchase.Col.Expiry"));
             _grid.Columns.Add("colTotal", AppLang.T("Purchase.Col.Total"));
             _grid.Columns.Add("colDelete", "");
-            _grid.Columns["colProduct"].ReadOnly = true;
-            _grid.Columns["colProduct"].FillWeight = 30;
-            _grid.Columns["colBatch"].FillWeight = 16;
-            _grid.Columns["colQty"].FillWeight = 9;
-            _grid.Columns["colQty"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            _grid.Columns["colCost"].FillWeight = 11;
-            _grid.Columns["colCost"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            _grid.Columns["colExpiry"].FillWeight = 13;
-            _grid.Columns["colExpiry"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            _grid.Columns["colTotal"].ReadOnly = true;
-            _grid.Columns["colTotal"].FillWeight = 12;
-            _grid.Columns["colDelete"].ReadOnly = true;
-            _grid.Columns["colDelete"].FillWeight = 9;
+            UiHelpers.Column(_grid, "colProduct").ReadOnly = true;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
+            UiHelpers.Column(_grid, "colBatch").FillWeight = 16;
+            UiHelpers.Column(_grid, "colQty").FillWeight = 9;
+            UiHelpers.Column(_grid, "colQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colCost").FillWeight = 11;
+            UiHelpers.Column(_grid, "colCost").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colExpiry").FillWeight = 13;
+            UiHelpers.Column(_grid, "colExpiry").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colTotal").ReadOnly = true;
+            UiHelpers.Column(_grid, "colTotal").FillWeight = 12;
+            UiHelpers.Column(_grid, "colDelete").ReadOnly = true;
+            UiHelpers.Column(_grid, "colDelete").FillWeight = 9;
             // CellEndEdit: بعد انتهاء تحرير أي خلية تُعاد الحسابات — إجمالي
             // السطر وكل الملخصات أسفل النافذة يتحدثان فورًا.
             _grid.CellEndEdit += (_, _) => RefreshRowTotals();
@@ -303,7 +303,7 @@ namespace Sayl.UI.Forms
             // args.ColumnIndex نقارن بفهرس العمود الاسمي لا برقم ثابت.
             _grid.CellClick += (_, args) =>
             {
-                if (args.RowIndex < 0 || args.ColumnIndex != _grid.Columns["colDelete"].Index) return;
+                if (args.RowIndex < 0 || args.ColumnIndex != UiHelpers.Column(_grid, "colDelete").Index) return;
                 if (args.RowIndex < _grid.Rows.Count && !_grid.Rows[args.RowIndex].IsNewRow)
                     _grid.Rows.RemoveAt(args.RowIndex);
                 RecalcTotals();

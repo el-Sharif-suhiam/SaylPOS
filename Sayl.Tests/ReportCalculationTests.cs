@@ -156,6 +156,7 @@ public class ReportCalculationTests
 
         var products = await reports.GetProductProfitReportAsync(day, day);
         Assert.True(products.IsSuccess, products.Message);
+        Assert.NotNull(products.Data);
 
         var p1Row = products.Data!.Single(x => x.ProductId == seed.ProductId);
         var p2Row = products.Data.Single(x => x.ProductId == p2.ProductId);
@@ -220,6 +221,7 @@ public class ReportCalculationTests
 
         var profit = await reports.GetProfitSummaryAsync(day, day);
         Assert.True(profit.IsSuccess, profit.Message);
+        Assert.NotNull(profit.Data);
         Assert.Equal(198m, profit.Data!.SalesRevenue);     // الضريبة داخل الإيراد (سياسة الصافي القائمة)
         Assert.Equal(-39.60m, profit.Data.ReturnsAmount);
         Assert.Equal(158.40m, profit.Data.NetRevenue);
@@ -228,6 +230,7 @@ public class ReportCalculationTests
 
         var products = await reports.GetProductProfitReportAsync(day, day);
         Assert.True(products.IsSuccess, products.Message);
+        Assert.NotNull(products.Data);
         var row = Assert.Single(products.Data!);
         Assert.Equal(8, row.Quantity);
         Assert.Equal(158.40m, row.Revenue);                // 198 − 39.60 (بنفس نسبة الصافي)

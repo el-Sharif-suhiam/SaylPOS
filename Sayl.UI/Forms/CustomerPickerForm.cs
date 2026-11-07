@@ -103,9 +103,9 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colId", AppLang.T("CustomerPicker.Label.Id"));
             _grid.Columns.Add("colName", AppLang.T("CustomerPicker.Label.Name"));
             _grid.Columns.Add("colPhone", AppLang.T("CustomerPicker.Label.Phone"));
-            _grid.Columns["colId"].FillWeight = 20;
-            _grid.Columns["colName"].FillWeight = 45;
-            _grid.Columns["colPhone"].FillWeight = 25;
+            UiHelpers.Column(_grid, "colId").FillWeight = 20;
+            UiHelpers.Column(_grid, "colName").FillWeight = 45;
+            UiHelpers.Column(_grid, "colPhone").FillWeight = 25;
             var colPick = new DataGridViewButtonColumn
             {
                 Name = "colPick",
@@ -202,7 +202,7 @@ namespace Sayl.UI.Forms
 
         private void Grid_CellClick(object? sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex >= 0 && e.ColumnIndex == _grid.Columns["colPick"].Index)
+            if (e.RowIndex >= 0 && e.ColumnIndex == UiHelpers.Column(_grid, "colPick").Index)
                 PickSelected();
         }
 

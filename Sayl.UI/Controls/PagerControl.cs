@@ -25,7 +25,7 @@ namespace Sayl.UI.Controls
         public event Action<int>? PageSizeSelected;
 
         /// <summary>حجم الصفحة الحالي (عنصر التحكم هو المصدر الوحيد له).</summary>
-        public int PageSize => (int)_cmbSize.SelectedItem;
+        public int PageSize => _cmbSize.SelectedItem is int size ? size : 20;
 
         public int CurrentPage { get; private set; } = 1;
         public int TotalPages { get; private set; } = 1;

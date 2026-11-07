@@ -118,14 +118,14 @@ namespace Sayl.UI.Forms
             _grid.Columns.Add("colCustomer", AppLang.T("Common.Label.Customer"));
             _grid.Columns.Add("colItems", AppLang.T("Suspended.Label.Items"));
             _grid.Columns.Add("colTotal", AppLang.T("Common.Label.Net"));
-            _grid.Columns["colId"].FillWeight = 14;
-            _grid.Columns["colDate"].FillWeight = 22;
-            _grid.Columns["colCustomer"].FillWeight = 30;
-            _grid.Columns["colItems"].FillWeight = 12;
-            _grid.Columns["colTotal"].FillWeight = 22;
+            UiHelpers.Column(_grid, "colId").FillWeight = 14;
+            UiHelpers.Column(_grid, "colDate").FillWeight = 22;
+            UiHelpers.Column(_grid, "colCustomer").FillWeight = 30;
+            UiHelpers.Column(_grid, "colItems").FillWeight = 12;
+            UiHelpers.Column(_grid, "colTotal").FillWeight = 22;
             // الأرقام وسط الصفوف المالية — أسرع قراءة للكاشير
-            _grid.Columns["colItems"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            _grid.Columns["colTotal"].DefaultCellStyle.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
+            UiHelpers.Column(_grid, "colItems").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            UiHelpers.Column(_grid, "colTotal").DefaultCellStyle.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold);
             // نقر مزدوج على صف = استكماله (اختصار نقرتين لواحدة)
             _grid.DoubleClick += async (_, _) => await ResumeAsync();
             // لا تحديد نص متشابك: الصف كله وحدة اختيار (StyleGrid يضبط FullRowSelect)

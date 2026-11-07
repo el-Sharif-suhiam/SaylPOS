@@ -55,14 +55,14 @@ namespace Sayl.UI.UserControls
             Grid.Columns.Add("colPayStatus", AppLang.T("Invoices.Label.PayStatus"));
             Grid.Columns.Add("colNet", AppLang.T("Common.Label.Net"));
             Grid.Columns.Add("colView", "");
-            Grid.Columns["colId"].FillWeight = 8;
-            Grid.Columns["colDate"].FillWeight = 17;
-            Grid.Columns["colParty"].FillWeight = 20;
-            Grid.Columns["colUser"].FillWeight = 13;
-            Grid.Columns["colStatus"].FillWeight = 11;
-            Grid.Columns["colPayStatus"].FillWeight = 12;
-            Grid.Columns["colNet"].FillWeight = 11;
-            Grid.Columns["colView"].FillWeight = 8;
+            UiHelpers.Column(Grid, "colId").FillWeight = 8;
+            UiHelpers.Column(Grid, "colDate").FillWeight = 17;
+            UiHelpers.Column(Grid, "colParty").FillWeight = 20;
+            UiHelpers.Column(Grid, "colUser").FillWeight = 13;
+            UiHelpers.Column(Grid, "colStatus").FillWeight = 11;
+            UiHelpers.Column(Grid, "colPayStatus").FillWeight = 12;
+            UiHelpers.Column(Grid, "colNet").FillWeight = 11;
+            UiHelpers.Column(Grid, "colView").FillWeight = 8;
 
             // زر سداد لفواتير الشراء غير المدفوعة/الجزئية
             if (_type == enInvoicesType.purchase)
@@ -185,14 +185,14 @@ namespace Sayl.UI.UserControls
                 if (args.RowIndex < 0)
                     return;
 
-                if (args.ColumnIndex == Grid.Columns["colView"].Index)
+                if (args.ColumnIndex == UiHelpers.Column(Grid, "colView").Index)
                 {
                     int idx = args.RowIndex;
                     if (idx < _invoices.Count)
                         new InvoiceDetailsForm(_invoices[idx].InvoiceId).ShowDialog(FindForm());
                 }
                 else if (_type == enInvoicesType.purchase
-                      && args.ColumnIndex == Grid.Columns["colPay"].Index)
+                      && args.ColumnIndex == UiHelpers.Column(Grid, "colPay").Index)
                 {
                     int idx = args.RowIndex;
                     if (idx >= _invoices.Count) return;
@@ -231,7 +231,7 @@ namespace Sayl.UI.UserControls
                         _ = LoadDataAsync();
                 }
                 else if (_type == enInvoicesType.purchase
-                      && args.ColumnIndex == Grid.Columns["colReturn"].Index)
+                      && args.ColumnIndex == UiHelpers.Column(Grid, "colReturn").Index)
                 {
                     int idx = args.RowIndex;
                     if (idx >= _invoices.Count) return;

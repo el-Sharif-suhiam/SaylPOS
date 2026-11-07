@@ -17,6 +17,9 @@ namespace Sayl.UI.Infrastructure
                 try
                 {
                     using var s = Open("sayl-logo.png");
+                    // المورد مضمّن مع التجميع — غيابه خطأ بناء لا حالة تشغيل؛
+                    // الاستثناء يُلتقط أدناه فيصبح الشعار null كما كان.
+                    if (s == null) throw new InvalidOperationException("Embedded resource 'Sayl.UI.Assets.sayl-logo.png' not found.");
                     _logo = Image.FromStream(s); // يبقى الـ Stream حيًّا طوال عمر التطبيق
                 }
                 catch { _logo = null; }
@@ -34,6 +37,8 @@ namespace Sayl.UI.Infrastructure
                 try
                 {
                     using var s = Open("sayl.ico");
+                    // نفس منطق الشعار: غياب المورد المضمّن = استثناء مقصود يُلتقط أدناه.
+                    if (s == null) throw new InvalidOperationException("Embedded resource 'Sayl.UI.Assets.sayl.ico' not found.");
                     using var tmp = new Icon(s);
                     _icon = (Icon)tmp.Clone();
                 }
