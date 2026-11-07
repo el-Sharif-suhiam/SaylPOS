@@ -189,10 +189,11 @@ END";
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
-                // B3: جلسة الدفع يجب أن تكون مفتوحة داخل المعاملة (مطابقة AddMovementAsync)
-                int? paymentSessionId = await ResolveOpenSessionIdAsync(request.SessionId);
-                if (request.SessionId.HasValue && paymentSessionId == null)
-                    return Result<int>.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل إتمام الدفع.");
+                // B3 + VULN-13: جلسة الدفع تُصادَق بالمساعد الموحد داخل المعاملة
+                // (مطابقة AddMovementAsync) — وجود + انفتاح + ملكية الفاعل
+                var (paymentSessionId, sessionError) = await ResolveOpenSessionIdAsync(request.SessionId, request.UserId);
+                if (sessionError != null)
+                    return Result<int>.Fail(sessionError);
 
                 // إنشاء رأس الفاتورة
                 Invoice invoice = await CreateInvoiceHeaderAsync(request, suspend);
@@ -294,16 +295,19 @@ END";
             return date < new DateOnly(today.Year, 1, 1);
         }
 
-        // B3: جلسة الدفع مفتوحة فقط — العائد null يعني "بلا جلسة" (كما كان) أو "جلسة مغلقة"
-        private async Task<int?> ResolveOpenSessionIdAsync(int? sessionId)
+        // B3 + VULN-13: الجلسة المزوَّدة تُصادَق بالمساعد الموحد ValidateDrawerSessionAsync
+        // (وجود + انفتاح + ملكية للفاعل — أو مديرًا، السياسة القائمة). بلا جلسة
+        // مزوَّدة: (null, null) كما كان — لا قيد جلسي ولا تغيير سلوك. مع جلسة
+        // مزوَّدة: SessionId = null + Error = رفض (مغلقة/غير موجودة/ليست ملكه).
+        private async Task<(int? SessionId, string? Error)> ResolveOpenSessionIdAsync(int? sessionId, int actorUserId)
         {
             if (!sessionId.HasValue)
-                return null;
+                return (null, null);
 
-            var session = await _dbContext.PosSessions.FindAsync(sessionId.Value);
-            return session != null && session.Status == enPosSessionStatusType.open
-                ? session.SessionId
-                : null;
+            var check = await clsPermissions.ValidateDrawerSessionAsync(_dbContext, sessionId, actorUserId);
+            return check.IsSuccess
+                ? (sessionId, null)
+                : (null, check.Message);
         }
 
         // ─────────────────────────────────────────────────
@@ -317,10 +321,10 @@ END";
             if (payments == null || !payments.Any(p => p != null && p.Amount > 0))
                 return Result.Fail("يجب إدخال مبلغ دفعة واحد على الأقل.");
 
-            // B3: جلسة الدرج الفعلية للفاعل يجب أن تكون مفتوحة قبل بدء أي حركة
-            int? paymentSessionId = await ResolveOpenSessionIdAsync(actorSessionId);
-            if (paymentSessionId == null && actorSessionId.HasValue)
-                return Result.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل إكمال الفاتورة.");
+            // B3 + VULN-13: جلسة الدرج الفعلية للفاعل تُصادَق قبل بدء أي حركة
+            var (paymentSessionId, sessionError) = await ResolveOpenSessionIdAsync(actorSessionId, actorUserId);
+            if (sessionError != null)
+                return Result.Fail(sessionError);
 
             var invoice = await _dbContext.Invoices
                 .Include(i => i.InvoiceItems)
@@ -364,10 +368,10 @@ END";
                 if (claimed == 0)
                     return Result.Fail("الفاتورة قيد الإكمال من طرف آخر أو تم إغلاقها.");
 
-                // B3: إعادة تأكيد الجلسة داخل المعاملة — قد تغلق أثناء البناء أعلاه
-                paymentSessionId = await ResolveOpenSessionIdAsync(actorSessionId);
-                if (paymentSessionId == null && actorSessionId.HasValue)
-                    return Result.Fail("جلسة الدرج مغلقة — افتح جلسة جديدة قبل إكمال الفاتورة.");
+                // B3 + VULN-13: إعادة تأكيد الجلسة داخل المعاملة — قد تغلق أثناء البناء أعلاه
+                (paymentSessionId, sessionError) = await ResolveOpenSessionIdAsync(actorSessionId, actorUserId);
+                if (sessionError != null)
+                    return Result.Fail(sessionError);
 
                 // تحويل الحالة (المحلية — الحالة في القاعدة ثبتت بالانتقال الذري أعلاه)
                 invoice.Status = enInvoicesStatus.completed;
