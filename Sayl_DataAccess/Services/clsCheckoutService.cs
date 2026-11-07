@@ -98,6 +98,23 @@ END";
                 }
             }
 
+            // VULN-44: صلاحية الضريبة — أي انحراف عن النسبة المعدّة في الإعدادات
+            // يتطلب شاشة فواتير البيع (بت 16)، نمط بوابة الخصم أعلاه: الواجهة ليست
+            // حد الثقة. النسبة الافتراضية تمر للجميع — تُحمَّل للصندوق تلقائيًا ولا
+            // تمسّها يد الكاشير (الواجهة تقفل الحقل للبلا صلاحية).
+            decimal defaultTaxPercent = await new clsSettingsService(_dbContext)
+                .GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
+            if (Math.Round(request.TaxPercent, 2) != Math.Round(defaultTaxPercent, 2))
+            {
+                int taxActorRole = await GetUserRoleValueAsync(request.UserId);
+                if (!AppPermissions.Has(taxActorRole, AppPermissions.SalesInvoices))
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutDenied",
+                        $"بيع مرفوض: ضريبة ({request.TaxPercent:0.##}%) تخالف النسبة المعدّة ({defaultTaxPercent:0.##}%) — يتطلب صلاحية شاشة فواتير البيع.");
+                    return Result<int>.Fail("تعديل نسبة الضريبة يتطلب صلاحية شاشة فواتير البيع. راجع المدير.");
+                }
+            }
+
             // ══ صلاحية أسعار الوحدة المُرسلة من العميل (الواجهة ليست حد الثقة) ══
             // UnitPrice لقطة سعر السلة (VULN-14). أي انحراف لأسفل عن سعر البيع
             // الحالي للمنتج = خصم ضمني — كاشير بلا صلاحية فواتير البيع لا يمكنه

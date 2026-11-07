@@ -1053,7 +1053,10 @@ namespace Sayl.UI.Forms
             totals.Controls.Add(_txtDiscount, 1, 1);
 
             var lblTax = new Label { Text = AppLang.T("Pos.Totals.TaxLabel"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted, Font = new Font("Segoe UI", 10F) };
-            _txtTax = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F) };
+            // VULN-44: حقل الضريبة مقفل للبلا صلاحية فواتير البيع — يعرض النسبة
+            // الافتراضية المحمّلة من الإعدادات لكنه لا يقبل تحريرًا يدويًا؛
+            // البوابة الحقيقية خدمية (ProcessCheckoutAsync) والقفل هنا واجهة فقط.
+            _txtTax = new TextBox { Dock = DockStyle.Fill, TextAlign = HorizontalAlignment.Center, Text = "0", Font = new Font("Segoe UI", 11F), ReadOnly = !SessionState.Can(Common.Utils.AppPermissions.SalesInvoices) };
             _txtTax.TextChanged += (_, _) => RefreshTotals();
             totals.Controls.Add(lblTax, 0, 2);
             totals.Controls.Add(_txtTax, 1, 2);
