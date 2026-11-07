@@ -319,6 +319,43 @@ BEGIN
     EXEC(N'ALTER TABLE dbo.SystemLogs ALTER COLUMN UserId INT NULL;
            ALTER TABLE dbo.SystemLogs ADD CONSTRAINT FK_SystemLogs_UserId
                FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId);');
+END;
+/* VULN-21: فهرس فريد مُرشّح يمنع جلستين مفتوحتين لمستخدم واحد — الحماية على
+   مستوى محرك القاعدة (سد TOCTOU في فحص-ثم-إدراج بطلبات متوازية)، وهو نفس
+   تعريف SaylDB.sql تمامًا. قواعد التثبيت الجديد تنشئه مع الجدول؛ القواعد
+   القديمة تأخذه هنا عند الإقلاع. Idempotent: يُنشأ إن غاب فقط وإعادة
+   التشغيل لا تفعل شيئًا. إن وُجدت جلسات مفتوحة مكررة (بيانات تالفة قائمة
+   قبل الترقية) فلا تُمسّ ولا تُحذف تلقائيًا — THROW يُفشل الإقلاع برسالة
+   تحمل معرّفات المتعارضين ويعالجها المالك يدويًا. EXEC ديناميكي لأن CREATE
+   INDEX في نفس الدفعة لا يُرى وقت تجميعها؛ جلسة SqlClient تقف
+   QUOTED_IDENTIFIER ON فتقبل الفهارس المُرشّحة (نفس قاعدة parties_email_unique). */
+IF OBJECT_ID(N'dbo.POSSessions', N'U') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.indexes
+       WHERE object_id = OBJECT_ID(N'dbo.POSSessions')
+         AND name = N'UX_POSSessions_OneOpenPerUser'
+         AND is_unique = 1 AND has_filter = 1
+   )
+BEGIN
+    DECLARE @dupes NVARCHAR(MAX);
+    SELECT @dupes = ISNULL(@dupes + N', ', N'') + CONVERT(NVARCHAR(20), UserId)
+    FROM dbo.POSSessions
+    WHERE Status = N'open'
+    GROUP BY UserId HAVING COUNT(*) > 1;
+
+    IF @dupes IS NOT NULL
+    BEGIN
+        DECLARE @msg NVARCHAR(2048) =
+            N'فشل ترقية المخطط: جلسات درج مفتوحة مكررة للمستخدمين (' + @dupes
+            + N') — القيد الفريد UX_POSSessions_OneOpenPerUser يمنع وجودها. لم تُمسّ أي جلسة: عالِج التكرار يدويًا (أغلق الجلسة الزائدة أو صحّح بياناتها) ثم أعد التشغيل.';
+        THROW 50001, @msg, 1;
+    END;
+
+    IF EXISTS (SELECT 1 FROM sys.indexes
+               WHERE object_id = OBJECT_ID(N'dbo.POSSessions')
+                 AND name = N'UX_POSSessions_OneOpenPerUser')
+        DROP INDEX UX_POSSessions_OneOpenPerUser ON dbo.POSSessions;
+    EXEC(N'CREATE UNIQUE INDEX UX_POSSessions_OneOpenPerUser ON dbo.POSSessions(UserId) WHERE Status = N''open''');
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
