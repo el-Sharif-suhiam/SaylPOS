@@ -165,12 +165,39 @@ All scripts live in the repository root and run with `sqlcmd`, for example:
 | `Upgrade_11_BatchUnitCost.sql` | Older databases: `Batches.UnitCost` plus backfill. |
 | `Upgrade_12_StockCountCountedAt.sql` | Older databases: count-line snapshot columns and the open-count unique index. |
 | `Upgrade_13_StockCountPostedMovementId.sql` | Older databases: posting idempotency column and filtered movement index. |
+| `Upgrade_15_UtcDefaults.sql` | Older databases: technical timestamp column defaults become UTC. **Not applied automatically at startup** — run it manually (see below). |
 
 In addition, the application applies three idempotent schema upgrades automatically at
 startup (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so a database created by an older `SaylDB.sql` is brought
-forward on first launch. On a database with zero active users, the app creates the
-default `admin` account and forces a password change at first sign-in.
+forward on first launch — these cover `Upgrade_10` through `Upgrade_14`
+(`Upgrade_14_SystemLogsUserIdNullable.sql` has no manual step). On a database with
+zero active users, the app creates the default `admin` account and forces a password
+change at first sign-in.
+
+### Applying `Upgrade_15_UtcDefaults.sql` (existing databases only)
+
+```text
+sqlcmd -S <server> -d <database> -i Upgrade_15_UtcDefaults.sql
+```
+
+For example, on the standard local install:
+`sqlcmd -S .\SAYL -d SaylDB -i Upgrade_15_UtcDefaults.sql`.
+
+- **A database created from the current `SaylDB.sql` already has UTC defaults** —
+  skip this script on fresh installs.
+- **An older existing database requires this upgrade script.** It is the one upgrade
+  not covered by the automatic startup path above.
+- **Timestamp defaults only.** The script replaces column `DEFAULT` constraints
+  (`GETDATE()` → `SYSUTCDATETIME()`, same constraint names). It does not modify any
+  stored historical timestamp values — historical data was already converted to UTC
+  by `Upgrade_08` (VULN-45), and the application writes UTC explicitly. The script is
+  idempotent: reruns are no-ops.
+- **Take a backup first**, e.g. via the application's backup feature or:
+
+  ```text
+  sqlcmd -S <server> -Q "BACKUP DATABASE [SaylDB] TO DISK = N'C:\Backups\SaylDB_pre_upgrade15.bak' WITH INIT"
+  ```
 
 ## Configuration
 
