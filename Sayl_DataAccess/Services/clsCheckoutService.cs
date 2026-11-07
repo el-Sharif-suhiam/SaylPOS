@@ -635,12 +635,33 @@ END";
                 var inv = await _dbContext.Inventories.FindAsync(reservation.ProductId);
                 if (inv != null)
                 {
-                    inv.QuantityReserved -= reservation.Quantity;
-                    if (inv.QuantityReserved < 0) inv.QuantityReserved = 0; // أمان
+                    // VULN-20: القصّص الأماني يبقى (لا سالب أبدًا) لكن الانحراف يُسجَّل تشخيصيًا
+                    // — الصمت القديم كان يخفي تباعد حجز/مخزون بلا أثر
+                    await ClampReservedWithDiagnosticAsync(inv, reservation.Quantity, reservation.ProductId, invoiceId);
                 }
             }
 
             _dbContext.StockReservations.RemoveRange(reservations);
+        }
+
+        /// <summary>VULN-20: طرح المحجوز مع حماية عدم السالب القائمة + تشخيص عند
+        /// الانحراف الفعلي فقط (قبل الطرح &lt; المطلق) — لا سجل عند الطرح السليم.
+        /// التدقيق عبر LogRejectedAsync (اتصال مستقل، أفضل جهد): التباعد حالة بيانات
+        /// قائمة قبل المعاملة، فالسجل ينجو من تراجعها ولا يكسر مسار التحرير أبدًا.</summary>
+        private async Task ClampReservedWithDiagnosticAsync(Inventory inv, int released, int productId, int invoiceId)
+        {
+            int before = inv.QuantityReserved ?? 0;
+            int after = before - released;
+            if (after < 0)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, null, "ReservationUnderflow",
+                    $"تحت الطرح في المخزون المحجوز: المنتج #{productId} — الفاتورة #{invoiceId} — قبل الطرح {before} — الكمية المطلق تحريرها {released} — قُصَّص إلى 0 (انحراف حجز/مخزون يحتاج تدقيقًا يدويًا).");
+                inv.QuantityReserved = 0;
+            }
+            else
+            {
+                inv.QuantityReserved = after;
+            }
         }
 
         private async Task DeductStockAndCreateMovementsAsync(
@@ -767,8 +788,8 @@ END";
                     if (ownRow.Quantity <= 0)
                         _dbContext.StockReservations.Remove(ownRow);
 
-                    inv.QuantityReserved -= ownRelease;
-                    if (inv.QuantityReserved < 0) inv.QuantityReserved = 0; // أمان
+                    // VULN-20: نفس التشخيص — موقع القصّص الثاني (مسار الإكمال)
+                    await ClampReservedWithDiagnosticAsync(inv, ownRelease, item.ProductId, invoiceId);
                 }
                 inv.UpdatedAt = DateTime.UtcNow;
             }
