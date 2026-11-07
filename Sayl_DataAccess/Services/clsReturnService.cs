@@ -712,6 +712,14 @@ namespace Sayl.Core.Services
         {
             var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
 
+            // VULN-19: حالة رأس المرتجع تُشتق من النقد المُردَّد فعليًا (Payments) —
+            // لا من إجمالي الاسترداد ولا من BalanceRefund (تعديل رصيد ليس دفعًا نقديًا):
+            // كامل النقد = paid، جزء نقد وجزء رصيد = partial، رصيد بالكامل = unpaid.
+            decimal cashRefunded = refundPlan.Payments.Sum(p => p.Amount);
+            returnInvoice.PaymentStatus = cashRefunded <= 0m
+                ? enPaymentStatus.unpaid
+                : cashRefunded >= refundTotal ? enPaymentStatus.paid : enPaymentStatus.partial;
+
             foreach (var refund in refundPlan.Payments)
             {
                 _dbContext.Payments.Add(new Payment
@@ -749,6 +757,12 @@ namespace Sayl.Core.Services
         private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
         {
             var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
+
+            // VULN-19: نفس اشتقاق مرتجع العميل — الحالة من النقد المُردَّد فعليًا لا من BalanceRefund.
+            decimal cashRefunded = refundPlan.Payments.Sum(p => p.Amount);
+            returnInvoice.PaymentStatus = cashRefunded <= 0m
+                ? enPaymentStatus.unpaid
+                : cashRefunded >= refundTotal ? enPaymentStatus.paid : enPaymentStatus.partial;
 
             foreach (var refund in refundPlan.Payments)
             {
