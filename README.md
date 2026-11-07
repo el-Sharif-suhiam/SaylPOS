@@ -314,8 +314,9 @@ solution and not referenced by the application.
   multi-terminal or server-hosted design would need authenticated identity first.
 - **`Roles.RoleId` is `TINYINT IDENTITY`** — a maximum of 255 roles; a production
   schema follow-up.
-- **Legacy column defaults use `GETDATE()`** while all new writers use UTC values; a
-  default-migration follow-up (Upgrade_14) is planned.
+- **Legacy column defaults were `GETDATE()`**; all technical timestamp defaults
+  are now UTC (`SYSUTCDATETIME()`) via `Upgrade_15_UtcDefaults.sql` (fresh installs
+  get them from `SaylDB.sql` directly).
 - **No successful RESTORE in automated tests** — restore is destructive by design;
   only its authorization gate and pre-checks are covered.
 - **Denied authorization attempts are not audited** — failures are returned but not

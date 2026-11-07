@@ -58,6 +58,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade13Script());
             // تدقيق الرفض: SystemLogs.UserId قابل للـ NULL (محاولات دخول بلا هوية)
             ExecuteBatches(LoadUpgrade14Script());
+            // افتراضيات UTC: كل افتراضيات الطوابع التقنية -> SYSUTCDATETIME (بدون إزاحة بيانات)
+            ExecuteBatches(LoadUpgrade15Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -142,6 +144,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade14Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_14_SystemLogsUserIdNullable.sql"));
+
+    private static string LoadUpgrade15Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_15_UtcDefaults.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

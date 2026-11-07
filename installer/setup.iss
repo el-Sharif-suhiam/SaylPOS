@@ -63,6 +63,7 @@ Source: "staging\database\Upgrade_11_BatchUnitCost.sql"; DestDir: "{app}\Databas
 Source: "staging\database\Upgrade_12_StockCountCountedAt.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_13_StockCountPostedMovementId.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_14_SystemLogsUserIdNullable.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
+Source: "staging\database\Upgrade_15_UtcDefaults.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\xml\*"; DestDir: "{app}\Database\xml"; Flags: ignoreversion
 Source: "staging\redist\SQLEXPR_x64_ENU.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
 

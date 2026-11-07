@@ -255,7 +255,8 @@ IF OBJECT_ID(N'dbo.Settings', N'U') IS NULL
     (
         SettingKey   NVARCHAR(100)  NOT NULL CONSTRAINT PK_Settings PRIMARY KEY,
         SettingValue NVARCHAR(MAX)  NULL,
-        UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (GETDATE())
+        /* Upgrade_15: افتراضية UTC لا GETDATE — منطقة زمنية واحدة مع الكُتّاب (DateTime.UtcNow / GETUTCDATE) */
+        UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (SYSUTCDATETIME())
     );
 /* Upgrade_10: parties_email_unique -> فهرس فريد مُرشّح. الفهرس الفريد
    العادي يقبض بعد NULL واحد فقط فيرتد أي عميل ثانٍ بلا بريد (منها

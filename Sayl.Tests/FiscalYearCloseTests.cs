@@ -50,7 +50,7 @@ public class FiscalYearCloseTests
         await db.Database.ExecuteSqlRawAsync(@"DELETE FROM StockReservations;
 DELETE FROM InvoiceItems WHERE InvoiceId IN (SELECT InvoiceId FROM Invoices WHERE Status = 'suspended');
 DELETE FROM Invoices WHERE Status = 'suspended';
-UPDATE PosSessions SET Status = 'closed', ClosedAt = GETDATE() WHERE Status = 'open';
+UPDATE PosSessions SET Status = 'closed', ClosedAt = GETUTCDATE() WHERE Status = 'open';
 UPDATE StockCounts SET IsPosted = 1 WHERE IsPosted = 0;
 UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
     }

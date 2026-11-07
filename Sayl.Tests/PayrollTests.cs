@@ -603,7 +603,7 @@ public class PayrollTests
 
         // توجيه الكشف يدويًا إلى المصروف الغريب (محاكاة عبث/خطأ يدوي)
         await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE PayrollRecords SET Status = 'paid', PaidAt = GETDATE(), ExpenseId = {foreignExpenseId} WHERE PayrollId = {id}");
+            $"UPDATE PayrollRecords SET Status = 'paid', PaidAt = GETUTCDATE(), ExpenseId = {foreignExpenseId} WHERE PayrollId = {id}");
 
         // سياق جديد — يتجنب الكيان المتتبع بقيمته القديمة قبل التحديث الخام
         await using var db2 = _fx.CreateContext();

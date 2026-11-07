@@ -16,6 +16,10 @@ NOTE: - Fresh installs ONLY: a safety gate right after USE aborts
       - No DROP statements exist in this file.
       - Session SET options come first because filtered unique indexes
         (concurrency guards) require them.
+      - Technical timestamp defaults (CreatedAt/UpdatedAt/StartedAt) use
+        SYSUTCDATETIME() — UTC per the unified time policy (Upgrade_15).
+        Business dates (PaymentDate, ExpiryDate, fiscal periods) stay DATE
+        with local business meaning.
 ===========================================================
 */
 
@@ -84,7 +88,7 @@ CREATE TABLE Parties
     AddressLine2 NVARCHAR(400) NULL,
     Notes NVARCHAR(600) NULL,
     IsActive BIT NOT NULL DEFAULT (1),
-    CreatedAt DATETIME2 NOT NULL DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 NOT NULL DEFAULT (SYSUTCDATETIME()),
     UpdatedAt DATETIME2 NULL,
 
     CONSTRAINT CK_Parties_PartyType CHECK (PartyType IN ('C','S','B'))
@@ -137,7 +141,7 @@ CREATE TABLE Employees
     Status NVARCHAR(20) NOT NULL DEFAULT ('active'),
     Position NVARCHAR(50) NOT NULL,
     Department NVARCHAR(50) NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT CK_Employees_Status CHECK (Status IN ('active','on_leave','resigned')),
     CONSTRAINT CK_Employees_SalaryType CHECK (SalaryType IN ('hourly','daily','monthly'))
@@ -171,7 +175,7 @@ CREATE TABLE Users
     RoleId TINYINT NOT NULL,
     IsActive bit NOT NULL DEFAULT 1,
     MustChangePassword bit NOT NULL DEFAULT 0,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT UQ_Users_Username UNIQUE (Username),
     -- one account per employee (filtered: NULL = standalone account, unlimited)
@@ -195,7 +199,7 @@ CREATE TABLE Products
     CostPrice DECIMAL(10,2) NOT NULL DEFAULT (0),
     ReorderLevel INT DEFAULT (0),
     IsActive BIT NOT NULL DEFAULT (1),
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     
     CONSTRAINT CK_Products_Type CHECK (Type IN ('stock','service','manufactured'))
 );
@@ -216,7 +220,7 @@ CREATE TABLE Batches
     ExpiryDate DATE NULL,
     BatchQuantity INT NOT NULL,
     UnitCost DECIMAL(10,2) NULL, -- تكلفة الاقتناء التاريخية للوحدة (بعد خصم الشراء) — مصدر COGS
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_Batches_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId),
     CONSTRAINT UQ_Batches_Product_Batch UNIQUE (ProductId, BatchNumber)
@@ -233,7 +237,7 @@ CREATE TABLE Inventory
     ProductId INT NOT NULL PRIMARY KEY,
     QuantityAvailable INT DEFAULT (0),
     QuantityReserved INT DEFAULT (0),
-    UpdatedAt DATETIME2 DEFAULT (GETDATE()),
+    UpdatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     LastCountedAt DATETIME2 NULL,
     CONSTRAINT FK_Inventory_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
 
@@ -260,7 +264,7 @@ CREATE TABLE Invoices
     TaxAmount DECIMAL(10,2) NOT NULL DEFAULT (0),
     NetAmount DECIMAL(10,2) NOT NULL DEFAULT (0),
     Notes NVARCHAR(MAX) NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT CK_Invoices_Type CHECK (Type IN ('sale','purchase','customer_return','supplier_return')),
     CONSTRAINT CK_Invoices_Status CHECK (Status IN ('completed','suspended','cancelled')),
@@ -306,7 +310,7 @@ CREATE TABLE StockReservations
     InvoiceId INT NOT NULL,
     ProductId INT NOT NULL,
     Quantity INT NOT NULL DEFAULT (1),
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_StockReservations_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES Invoices(InvoiceId),
     CONSTRAINT FK_StockReservations_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId),
@@ -337,7 +341,7 @@ CREATE TABLE Payments
     PaymentDate DATE NOT NULL,
     PaymentMethod NVARCHAR(50) NOT NULL,
     Notes NVARCHAR(MAX) NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     -- Cash-drawer attribution (VULN-05): the POS session that physically
     -- received/paid this payment. May differ from the invoice's session
@@ -368,7 +372,7 @@ CREATE TABLE StockMovements
     SourceType VARCHAR(50) NOT NULL,         -- 'Invoice', 'ManualAdjustment', etc.
     SourceId INT NULL,
     BatchId INT NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT CK_StockMovements_MovementType CHECK (MovementType IN (
         'purchase','sale','customer_return','supplier_return','adjustment_in','adjustment_out'
@@ -399,7 +403,7 @@ CREATE TABLE Expenses
     Category NVARCHAR(50) NULL,
     Notes NVARCHAR(MAX) NULL,
     UserId INT NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT CK_Expenses_Amount CHECK (Amount > 0),
     CONSTRAINT FK_Expenses_UserId FOREIGN KEY (UserId) REFERENCES Users(UserId)
 );
@@ -417,7 +421,7 @@ CREATE TABLE SystemLogs
     UserId INT NULL,
     Action NVARCHAR(100) NOT NULL,
     Details NVARCHAR(MAX) NULL,
-    CreatedAt DATETIME2 NULL CONSTRAINT DF_SystemLogs_CreatedAt DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 NULL CONSTRAINT DF_SystemLogs_CreatedAt DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_SystemLogs_UserId FOREIGN KEY (UserId) REFERENCES Users(UserId)
 );
@@ -434,7 +438,7 @@ CREATE TABLE POSSessions
     OpeningAmount DECIMAL(10,2) NOT NULL,
     ClosingAmount DECIMAL(10,2) NULL,
     ExpectedAmount DECIMAL(10,2) NULL,
-    StartedAt DATETIME2  DEFAULT (GETDATE()),
+    StartedAt DATETIME2  DEFAULT (SYSUTCDATETIME()),
     ClosedAt DATETIME2 NULL,
     Status NVARCHAR(10) DEFAULT ('open'),
 
@@ -461,7 +465,7 @@ CREATE TABLE Settings
 (
     SettingKey   NVARCHAR(100)  NOT NULL CONSTRAINT PK_Settings PRIMARY KEY,
     SettingValue NVARCHAR(MAX)  NULL,
-    UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (GETDATE())
+    UpdatedAt    DATETIME       NULL CONSTRAINT DF_Settings_UpdatedAt DEFAULT (SYSUTCDATETIME())
 );
 GO
 -----------------------------------------------------------
@@ -476,7 +480,7 @@ CREATE TABLE CashMovements
     Amount       DECIMAL(10,2) NOT NULL CONSTRAINT DF_CashMovements_Amount DEFAULT (0),
     Reason       NVARCHAR(255) NULL,
     UserId       INT           NOT NULL,
-    CreatedAt    DATETIME      NULL CONSTRAINT DF_CashMovements_CreatedAt DEFAULT (GETDATE()),
+    CreatedAt    DATETIME      NULL CONSTRAINT DF_CashMovements_CreatedAt DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_CashMovements_SessionId FOREIGN KEY (SessionId) REFERENCES POSSessions(SessionId),
     CONSTRAINT FK_CashMovements_UserId    FOREIGN KEY (UserId)    REFERENCES Users(UserId)
@@ -553,7 +557,7 @@ CREATE TABLE PayrollRecords(
     PaidAt DATETIME2 NULL,
     ExpenseId INT NULL,                         -- linked expense created on payment
     Notes NVARCHAR(255) NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_PayrollRecords_EmployeeId FOREIGN KEY (EmployeeId) REFERENCES Employees(EmployeeId),
     CONSTRAINT FK_PayrollRecords_ExpenseId FOREIGN KEY (ExpenseId) REFERENCES Expenses(ExpenseId),
@@ -578,7 +582,7 @@ CREATE TABLE StockCounts
     UnitCost DECIMAL(10,2) NOT NULL DEFAULT (0),
     IsPosted BIT NOT NULL DEFAULT (0),       -- difference applied to inventory?
     CountedBy INT NOT NULL,
-    CreatedAt DATETIME2 DEFAULT (GETDATE()),
+    CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     CountedAt DATETIME2 NULL,                -- moment this specific line was physically counted
     BookQuantityAtCount INT NULL,            -- system quantity at the moment of counting (snapshot)
     PostedMovementId INT NULL,               -- idempotency: StockMovement created by posting this line

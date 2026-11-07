@@ -85,7 +85,7 @@ public partial class SaylDbContext : DbContext
                 .HasColumnType("decimal(10, 2)")
                 .HasDefaultValue(0m);
             entity.Property(e => e.Reason).HasMaxLength(255);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.PosSession).WithMany()
                 .HasForeignKey(d => d.SessionId)
@@ -102,7 +102,7 @@ public partial class SaylDbContext : DbContext
             entity.HasKey(e => e.SettingKey).HasName("PK_Settings");
 
             entity.Property(e => e.SettingKey).HasMaxLength(100);
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<Batch>(entity =>
@@ -118,7 +118,7 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => new { e.ProductId, e.BatchNumber }, "UQ_Batches_Product_Batch").IsUnique();
 
             entity.Property(e => e.BatchNumber).HasMaxLength(100);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.IsQuarantined).HasDefaultValue(false);
             entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
 
@@ -157,7 +157,7 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => e.Status, "IX_Employees_Status");
 
             entity.Property(e => e.Address).HasMaxLength(400);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Department).HasMaxLength(50);
             entity.Property(e => e.Email).HasMaxLength(150);
             entity.Property(e => e.Name).HasMaxLength(100);
@@ -232,7 +232,7 @@ public partial class SaylDbContext : DbContext
                 .HasDefaultValue(enPayrollStatus.pending)
                 .HasConversion<string>();
             entity.Property(e => e.WorkedUnits).HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Notes).HasMaxLength(255);
 
             entity.HasOne(d => d.Employee).WithMany(p => p.PayrollRecords)
@@ -254,7 +254,7 @@ public partial class SaylDbContext : DbContext
 
             entity.Property(e => e.ProductName).HasMaxLength(100);
             entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             // CountedAt, BookQuantityAtCount, PostedMovementId are nullable with no default — conventions handle
 
             entity.HasOne(d => d.Product).WithMany()
@@ -274,7 +274,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.Category)
                 .HasMaxLength(50)
                 .IsUnicode(true);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Description).HasMaxLength(255);
 
             entity.HasOne(d => d.User).WithMany(p => p.Expenses)
@@ -293,7 +293,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.ProductId).ValueGeneratedNever();
             entity.Property(e => e.QuantityAvailable).HasDefaultValue(0);
             entity.Property(e => e.QuantityReserved).HasDefaultValue(0);
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Product).WithOne(p => p.Inventory)
                 .HasForeignKey<Inventory>(d => d.ProductId)
@@ -321,7 +321,7 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.CreatedAt, "IX_Invoices_CreatedAt");
 
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.DiscountAmount).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.NetAmount).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.PartyType)
@@ -398,7 +398,7 @@ public partial class SaylDbContext : DbContext
 
             entity.Property(e => e.AddressLine1).HasMaxLength(400);
             entity.Property(e => e.AddressLine2).HasMaxLength(400);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Email).HasMaxLength(150);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.Name).HasMaxLength(150);
@@ -425,7 +425,7 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => e.PaymentDate, "IX_Payments_PaymentDate");
 
             entity.Property(e => e.Amount).HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.PartyType)
                 .HasMaxLength(1)
                 .IsUnicode(false)
@@ -462,7 +462,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.ClosingAmount).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.ExpectedAmount).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.OpeningAmount).HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.StartedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.StartedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Status)
                 .HasMaxLength(10)
                 .HasDefaultValue(enPosSessionStatusType.open)
@@ -489,7 +489,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.CostPrice)
                 .HasDefaultValue(0m)
                 .HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.Name).HasMaxLength(100);
             entity.Property(e => e.ReorderLevel).HasDefaultValue(0);
@@ -518,7 +518,7 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.ProductId, "IX_StockMovements_ProductId");
 
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.MovementType).HasMaxLength(30).HasConversion<string>();
             entity.Property(e => e.SourceType)
                 .HasMaxLength(50)
@@ -545,7 +545,7 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => new { e.InvoiceId, e.ProductId }, "UQ_StockReservations_Invoice_Product").IsUnique();
 
             entity.Property(e => e.Quantity).HasDefaultValue(1);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Invoice).WithMany()
                 .HasForeignKey(d => d.InvoiceId)
@@ -585,7 +585,7 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => e.UserId, "IX_SystemLogs_UserId");
 
             entity.Property(e => e.Action).HasMaxLength(100);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())", "DF_SystemLogs_CreatedAt");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())", "DF_SystemLogs_CreatedAt");
 
             entity.HasOne(d => d.User).WithMany(p => p.SystemLogs)
                 .HasForeignKey(d => d.UserId)
@@ -601,7 +601,7 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.Username, "UQ_Users_Username").IsUnique();
 
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.PasswordHash).HasMaxLength(255);
             entity.Property(e => e.Username).HasMaxLength(50);
             entity.Property(e => e.IsActive).HasDefaultValue(true);

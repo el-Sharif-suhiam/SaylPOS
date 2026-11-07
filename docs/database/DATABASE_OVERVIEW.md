@@ -15,7 +15,7 @@ the idempotent `Upgrade_09` … `Upgrade_13` scripts in the repository root.
 All transactional timestamps are stored in UTC: `DateTime.UtcNow` from EF writes and
 `GETUTCDATE()` in raw SQL. The "shop day" used by daily reports, FEFO expiry checks,
 payment dates and fiscal boundaries is derived via `ProgramClock` (UTC + fixed +3 h).
-Legacy column defaults are `GETDATE()` (see §7).
+Column defaults are `SYSUTCDATETIME()` (Upgrade_15; see §7).
 
 ## 2. Table Catalog
 
@@ -171,8 +171,11 @@ The application also applies three idempotent schema upgrades at startup
 (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so older databases are brought forward automatically.
 
-Known follow-up (Upgrade_14, planned): migrate legacy `DEFAULT (GETDATE())` column
-defaults to `GETUTCDATE()` so server-side defaults agree with the UTC writer policy.
+Upgrade_15 (`Upgrade_15_UtcDefaults.sql`) redefined every technical timestamp
+default to `SYSUTCDATETIME()`: defaults-only (no stored values shifted —
+Upgrade_08 already converted historical data to UTC), idempotent, and it also
+covers `Settings` and `StockReservations` (tables creatable outside SaylDB.sql
+via the startup EnsureSchema blocks).
 
 ## 8. Seed Data
 

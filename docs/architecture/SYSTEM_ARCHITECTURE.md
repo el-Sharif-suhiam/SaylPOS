@@ -261,10 +261,10 @@ Two structural notes (documented limitations):
   setup and is flagged in the audit report.
 - **`Roles.RoleId` is `TINYINT IDENTITY`** (max 255 roles) — a production schema
   follow-up.
-- **Database column defaults use `GETDATE()`** while all new writers use UTC
-  (`DateTime.UtcNow` / `GETUTCDATE()`). The legacy defaults only apply to rows
-  written without an explicit value; a `GETDATE()` to `GETUTCDATE()` default
-  migration is planned (Upgrade_14).
+- **Database column defaults are UTC** (`SYSUTCDATETIME()`, Upgrade_15) and all
+  writers also stamp UTC (`DateTime.UtcNow` / `GETUTCDATE()`) — one clock domain
+  across code and defaults. Business `DATE` columns (payment/expiry/fiscal) keep
+  their local business meaning by design.
 - **No successful RESTORE was exercised in the automated tests** — restore is
   destructive by design, so only its authorization and pre-checks are covered.
 - **Denied authorization attempts are not audited** — authorization failures are

@@ -29,7 +29,8 @@ BEGIN
         InvoiceId INT NOT NULL,
         ProductId INT NOT NULL,
         Quantity INT NOT NULL CONSTRAINT DF_StockReservations_Quantity DEFAULT (1),
-        CreatedAt DATETIME2 NULL CONSTRAINT DF_StockReservations_CreatedAt DEFAULT (GETDATE()),
+        /* Upgrade_15: افتراضية UTC لا GETDATE — منطقة زمنية واحدة مع الكُتّاب (DateTime.UtcNow / GETUTCDATE) */
+        CreatedAt DATETIME2 NULL CONSTRAINT DF_StockReservations_CreatedAt DEFAULT (SYSUTCDATETIME()),
 
         CONSTRAINT FK_StockReservations_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES dbo.Invoices(InvoiceId),
         CONSTRAINT FK_StockReservations_ProductId FOREIGN KEY (ProductId) REFERENCES dbo.Products(ProductId),
