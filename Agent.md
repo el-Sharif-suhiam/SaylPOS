@@ -63,10 +63,12 @@ All backend services are implemented. Remaining work is listed in TASK.md.
   `PostedMovementId` links to the movement written with `StockMovements.SourceId =
   CountId`.
 - `Expenses`, `POSSessions`, `CashMovements`, `Settings` (key/value, incl.
-  `FiscalYearStart`/`FiscalYearClosedOn`), `SystemLogs` (audit).
+  `FiscalYearStart`/`FiscalYearClosedOn`/`TaxPercent`/`DefaultCreditLimit`),
+  `SystemLogs` (audit).
 - Schema source of truth: `SaylDB.sql` (fresh installs only — safety gate aborts if any
-  table exists; no DROP statements). Idempotent `Upgrade_09..13` scripts migrate older
-  databases; the app also runs three idempotent schema upgrades at startup.
+  table exists; no DROP statements). Idempotent `Upgrade_09..16` scripts migrate older
+  databases; the app also runs idempotent schema upgrades at startup (incl. the
+  one-time `Upgrade_16` credit-limit backfill guarded by a `Settings` marker).
 - Documentation: `docs/database/` (overview, ER model, stored-procedure status).
 
 ## 5. Coding patterns

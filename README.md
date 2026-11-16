@@ -166,11 +166,13 @@ All scripts live in the repository root and run with `sqlcmd`, for example:
 | `Upgrade_12_StockCountCountedAt.sql` | Older databases: count-line snapshot columns and the open-count unique index. |
 | `Upgrade_13_StockCountPostedMovementId.sql` | Older databases: posting idempotency column and filtered movement index. |
 | `Upgrade_15_UtcDefaults.sql` | Older databases: technical timestamp column defaults become UTC. **Not applied automatically at startup** — run it manually (see below). |
+| `Upgrade_16_DefaultCreditLimit.sql` | Older databases: one-time customer credit-limit backfill (`CreditLimit` 0/NULL → 1000), guarded by a `CreditLimitMigrationV1` marker in `Settings` — also applied automatically at startup. |
 
-In addition, the application applies three idempotent schema upgrades automatically at
+In addition, the application applies idempotent schema upgrades automatically at
 startup (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so a database created by an older `SaylDB.sql` is brought
-forward on first launch — these cover `Upgrade_10` through `Upgrade_14`
+forward on first launch — these cover `Upgrade_10` through `Upgrade_14` plus the
+`Upgrade_16` credit-limit backfill
 (`Upgrade_14_SystemLogsUserIdNullable.sql` has no manual step). On a database with
 zero active users, the app creates the default `admin` account and forces a password
 change at first sign-in.
@@ -273,7 +275,7 @@ Sayl_POS/
 ├── Sayl_POS.slnx              # solution (XML format)
 ├── SaylDB.sql                 # full schema script (fresh installs only)
 ├── DataSeed.sql               # demo data (deletes existing data first)
-├── Upgrade_09..13_*.sql       # idempotent migration scripts
+├── Upgrade_09..16_*.sql       # idempotent migration scripts
 ├── Common/                    # shared contracts (net10.0)
 │   ├── DTOs/                  #   request models + view models
 │   ├── Enums/  Results/       #   enums, Result / Result<T>

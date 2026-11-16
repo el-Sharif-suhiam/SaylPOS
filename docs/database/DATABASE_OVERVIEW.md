@@ -43,7 +43,7 @@ Column defaults are `SYSUTCDATETIME()` (Upgrade_15; see §7).
 | `Shifts`, `EmployeeShifts`, `OfficialHolidays` | Shift definitions, weekday-bitmask assignments, paid holidays |
 | `POSSessions` | Cash drawer sessions: opening/closing/expected amounts |
 | `CashMovements` | Paid-in/paid-out movements inside a session |
-| `Settings` | Key/value configuration (store info, VAT, fiscal-year start, backup path) |
+| `Settings` | Key/value configuration (store info, VAT, tax percent, default customer credit limit, fiscal-year start, backup path) |
 | `SystemLogs` | Audit trail (login, logout, sensitive operations) |
 
 ## 3. Keys and Relationships
@@ -166,8 +166,9 @@ line's adjustment commits in its own transaction, and the
 | `Upgrade_11_BatchUnitCost.sql` | `Batches.UnitCost` + backfill from newest purchase items |
 | `Upgrade_12_StockCountCountedAt.sql` | `StockCounts.CountedAt`, `BookQuantityAtCount`, open-product unique index |
 | `Upgrade_13_StockCountPostedMovementId.sql` | `StockCounts.PostedMovementId` + `IX_StockMovements_ManualAdjustmentSource` |
+| `Upgrade_16_DefaultCreditLimit.sql` | One-time customer credit-limit backfill: `Customers.CreditLimit` 0/NULL → 1000, non-zero limits preserved; guarded by a `CreditLimitMigrationV1` marker row in `Settings` (also runs at startup via `EnsureSchemaUpgradesAsync`) |
 
-The application also applies three idempotent schema upgrades at startup
+The application also applies idempotent schema upgrades at startup
 (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so older databases are brought forward automatically.
 
@@ -181,7 +182,9 @@ via the startup EnsureSchema blocks).
 
 - Three fixed roles with Arabic display names: `مدير النظام` (admin, 4095),
   `كاشير` (cashier, 0), `محاسب` (accountant, 508).
-- One demo stock product with 500 units of opening inventory and a demo customer.
+- One demo stock product with 500 units of opening inventory and a demo customer
+  (seeded with `CreditLimit = 0`; the one-time `Upgrade_16` startup backfill raises
+  it to 1000 on first launch — it is "legacy unset zero", not a deliberate policy).
 - **No user accounts are seeded** (VULN-47): first launch creates the default
   `admin` account and forces a password change.
 

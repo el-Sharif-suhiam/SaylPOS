@@ -15,6 +15,7 @@ namespace Sayl.UI.UserControls
         private TextBox _txtFooter = null!;
         private TextBox _txtWelcome = null!;
         private TextBox _txtTax = null!;
+        private TextBox _txtCredit = null!;
         private TextBox _txtBackupFolder = null!;
         private ComboBox _cmbPrinter = null!;
         private CheckBox _chkAutoPrint = null!;
@@ -81,10 +82,17 @@ namespace Sayl.UI.UserControls
             body.Controls.Add(lblTax);
             body.Controls.Add(_txtTax);
 
-            // ── مجلد النسخ الاحتياطي: y+46 يعني «46 بكسل تحت الحقل السابق» ──
+            // ── حد الائتمان الافتراضي للعملاء الجدد: نفس نمط صف الضريبة تمامًا ──
+            // (تسمية يمين + مربع رقم قصير) — القفزة بعده 46 كسطور الضريبة القصيرة.
+            var lblCredit = new Label { Text = AppLang.T("Settings.Label.DefaultCreditLimit"), Bounds = new Rectangle(40, y + 46, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            _txtCredit = new TextBox { Bounds = new Rectangle(320, y + 44, 120, 34), TextAlign = HorizontalAlignment.Center };
+            body.Controls.Add(lblCredit);
+            body.Controls.Add(_txtCredit);
+
+            // ── مجلد النسخ الاحتياطي: y+92 يعني «92 بكسل تحت الحقل السابق» ──
             // القفزة أكبر من 64 العادية لأن سطر الضريبة أقصر (مربع واحد).
-            var lblBackup = new Label { Text = AppLang.T("Settings.Label.BackupFolder"), Bounds = new Rectangle(40, y + 46, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtBackupFolder = new TextBox { Bounds = new Rectangle(320, y + 44, 420, 34) };
+            var lblBackup = new Label { Text = AppLang.T("Settings.Label.BackupFolder"), Bounds = new Rectangle(40, y + 92, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            _txtBackupFolder = new TextBox { Bounds = new Rectangle(320, y + 90, 420, 34) };
             body.Controls.Add(lblBackup);
             body.Controls.Add(_txtBackupFolder);
 
@@ -92,15 +100,15 @@ namespace Sayl.UI.UserControls
             // EnumPrinters استدعاء نظام متزامن كان يُؤخّر فتح القسم من المنشئ.
             // GetInstalledPrinters قد ترجع فارغة (خدمة الطباعة متوقفة) —
             // القائمة تبقى فارغة بلا انفجار.
-            var lblPrinter = new Label { Text = AppLang.T("Settings.Label.ReceiptPrinter"), Bounds = new Rectangle(40, y + 92, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _cmbPrinter = new ComboBox { Bounds = new Rectangle(320, y + 90, 420, 34), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            var lblPrinter = new Label { Text = AppLang.T("Settings.Label.ReceiptPrinter"), Bounds = new Rectangle(40, y + 138, 260, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
+            _cmbPrinter = new ComboBox { Bounds = new Rectangle(320, y + 136, 420, 34), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
             body.Controls.Add(lblPrinter);
             body.Controls.Add(_cmbPrinter);
 
             // ── مفتاح الطباعة التلقائية: CheckBox ──
             // TextAlign=MiddleRight: النص يمين المربع — عربي.
             // Bounds عرضه 420 يغطي مساحة مربعي الحقول السابقين.
-            _chkAutoPrint = new CheckBox { Text = AppLang.T("Settings.Label.AutoPrint"), Bounds = new Rectangle(320, y + 134, 420, 28), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextPrimary };
+            _chkAutoPrint = new CheckBox { Text = AppLang.T("Settings.Label.AutoPrint"), Bounds = new Rectangle(320, y + 180, 420, 28), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextPrimary };
             body.Controls.Add(_chkAutoPrint);
 
             // ── صف الأزرار الأول: حفظ (يمين) ونسخ احتياطي (يسار) ──
@@ -108,18 +116,18 @@ namespace Sayl.UI.UserControls
             // «يمين/يسار» هنا بالإحداثيات: 320 = يمين الشاشة (RTL)،
             // 540 = يساره — على عكس LTR المعروف.
             var btnSave = AppTheme.MakeButton(AppLang.T("Settings.Button.Save"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
-            btnSave.Bounds = new Rectangle(320, y + 176, 200, 48);
+            btnSave.Bounds = new Rectangle(320, y + 222, 200, 48);
             // Click += async (_,_) => ...: ربط حدث النقر بعملية غير متزامنة —
             // اللامدا تتلقى (مرسل الحدث، بياناته) ونتجاهلهما بـ _.
             btnSave.Click += async (_, _) => await SaveAsync();
 
             var btnBackup = AppTheme.MakeButton(AppLang.T("Settings.Button.BackupNow"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
-            btnBackup.Bounds = new Rectangle(540, y + 176, 200, 48);
+            btnBackup.Bounds = new Rectangle(540, y + 222, 200, 48);
             btnBackup.Click += async (_, _) => await BackupNowAsync();
 
             // ── صف الأزرار الثاني: استعادة (يمين) + إغلاق سنة (يسار، أدمن فقط) ──
             var btnRestore = AppTheme.MakeButton(AppLang.T("Settings.Button.Restore"), AppTheme.Warning, hoverColor: Color.FromArgb(180, 100, 5));
-            btnRestore.Bounds = new Rectangle(320, y + 232, 200, 44);
+            btnRestore.Bounds = new Rectangle(320, y + 278, 200, 44);
             btnRestore.Click += async (_, _) => await RestoreNowAsync();
 
             // زر إغلاق السنة المالية — يُضاف لأصحاب شاشة المخزون (الجرد ركن
@@ -127,7 +135,7 @@ namespace Sayl.UI.UserControls
             if (SessionState.Can(Common.Utils.AppPermissions.Inventory))
             {
                 var btnFiscal = AppTheme.MakeButton(AppLang.T("Settings.Button.FiscalClose"), AppTheme.SidebarBg, hoverColor: AppTheme.SidebarHover, height: 44);
-                btnFiscal.Bounds = new Rectangle(540, y + 232, 200, 44);
+                btnFiscal.Bounds = new Rectangle(540, y + 278, 200, 44);
                 // هنا الحدث متزامن (بلا async): ShowDialog يوقف هذه الشاشة
                 // حتى تُغلق نافذة الإغلاق — وهذا مقصود (نافذة حوارية).
                 btnFiscal.Click += (_, _) =>
@@ -141,7 +149,7 @@ namespace Sayl.UI.UserControls
 
             // ── شريط الحالة: نص أخضر/أحمر أسفل الأزرار — يُحدَّث من SaveAsync ──
             // لا Bounds للـ BackColor — Label شفاف فوق خلفية الجسم.
-            _lblStatus = new Label { Text = "", Bounds = new Rectangle(540, y + 240, 420, 26), ForeColor = AppTheme.Success };
+            _lblStatus = new Label { Text = "", Bounds = new Rectangle(540, y + 286, 420, 26), ForeColor = AppTheme.Success };
 
             body.Controls.Add(btnSave);
             body.Controls.Add(btnBackup);
@@ -183,6 +191,10 @@ namespace Sayl.UI.UserControls
                 _txtWelcome.Text = await settings.GetAsync(clsSettingsService.KeyWelcomeMessage, AppLang.T("Settings.Default.Welcome"));
                 decimal tax = await settings.GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
                 _txtTax.Text = tax > 0 ? tax.ToString("0.##") : "";
+                // حد الائتمان الافتراضي: يُعرض دائمًا كرقم (حتى 0) — عكس الضريبة،
+                // فالصفر هنا قيمة مقصودة (عميل جديد بلا آجل) لا «غير مضبوط».
+                decimal creditLimit = await settings.GetDefaultCreditLimitAsync();
+                _txtCredit.Text = creditLimit.ToString("0.##");
                 _txtBackupFolder.Text = await settings.GetAsync(clsSettingsService.KeyBackupFolder,
                     clsBackupService.DefaultBackupFolder);
                 _chkAutoPrint.Checked = await settings.GetBoolAsync(clsSettingsService.KeyAutoPrintReceipt, false);
@@ -210,10 +222,28 @@ namespace Sayl.UI.UserControls
                 return;
             }
 
+            // فحص الشكل للراحة فقط (نمط الضريبة) — القاعدة المرجعية داخل
+            // SetDefaultCreditLimitAsync: السالب وما فوق سعة العمود يُرفض هناك.
+            if (!decimal.TryParse(_txtCredit.Text?.Trim(), out decimal creditLimit) || creditLimit < 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("Settings.Msg.CreditLimitInvalid"));
+                return;
+            }
+
             try
             {
                 using var scope = Program.Services.CreateScope();
                 var settings = scope.ServiceProvider.GetRequiredService<clsSettingsService>();
+
+                // الإعداد المرجعي أولًا: فشل تحقق الخدمة (فوق سعة العمود مثلًا)
+                // يعود برسالته قبل حفظ أي إعداد آخر.
+                var creditResult = await settings.SetDefaultCreditLimitAsync(creditLimit);
+                if (!creditResult.IsSuccess)
+                {
+                    _lblStatus.ForeColor = AppTheme.Danger;
+                    _lblStatus.Text = creditResult.Message;
+                    return;
+                }
 
                 await settings.SetAsync(clsSettingsService.KeyStoreName, _txtStoreName.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyStorePhone, _txtStorePhone.Text?.Trim() ?? "");

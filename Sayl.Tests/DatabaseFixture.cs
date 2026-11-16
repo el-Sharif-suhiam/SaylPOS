@@ -60,6 +60,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade14Script());
             // افتراضيات UTC: كل افتراضيات الطوابع التقنية -> SYSUTCDATETIME (بدون إزاحة بيانات)
             ExecuteBatches(LoadUpgrade15Script());
+            // حد الائتمان الافتراضي: ترحيل العملاء 0/NULL -> 1000 (محروس بصف Settings)
+            ExecuteBatches(LoadUpgrade16Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -147,6 +149,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade15Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_15_UtcDefaults.sql"));
+
+    private static string LoadUpgrade16Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_16_DefaultCreditLimit.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

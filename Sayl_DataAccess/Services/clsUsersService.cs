@@ -356,6 +356,29 @@ BEGIN
                  AND name = N'UX_POSSessions_OneOpenPerUser')
         DROP INDEX UX_POSSessions_OneOpenPerUser ON dbo.POSSessions;
     EXEC(N'CREATE UNIQUE INDEX UX_POSSessions_OneOpenPerUser ON dbo.POSSessions(UserId) WHERE Status = N''open''');
+END;
+/* Task-1: الترحيل لمرة واحدة لحد الائتمان الافتراضي (Upgrade_16).
+   كان إنشاء العميل يكتب CreditLimit = 0 صراحةً (النمط القديم) وافتراضية
+   العمود 0 — الصفر إذًا يعني «لم يُضبط أبدًا» لا «قرارًا صريحًا بالمنع».
+   الترحيل: 0 أو NULL -> 1000 (القيمة الافتراضية المعتمدة للعملاء الجدد)؛
+   الحدود غير الصفرية قيم فعلية يقررها المالك فلا تُمسّ. صف هويّة العملاء
+   وفواتيرهم ومدفوعاتهم لا يتأثر — عمود واحد فقط.
+   الحارس: صف Settings مفتاح CreditLimitMigrationV1 — بعد نجاح الدفعة
+   لا يعاد التنفيذ أبدًا، فعميل ضبطه المالك على 0 لاحقًا (منع الآجل عليه)
+   يبقى 0 في كل إقلاعات لاحقة. UPDATE + INSERT العلامة داخل معاملة واحدة
+   فلا نافذة نصفة-ترحيل عند انقطاع الإقلاع. Idempotent: بالعلامة موجودة
+   لا يفعل شيئًا. نفس المنطق في Upgrade_16_DefaultCreditLimit.sql. */
+IF OBJECT_ID(N'dbo.Customers', N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.Settings', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM dbo.Settings WHERE SettingKey = N'CreditLimitMigrationV1')
+BEGIN
+    BEGIN TRAN;
+    UPDATE dbo.Customers
+    SET CreditLimit = 1000
+    WHERE CreditLimit IS NULL OR CreditLimit = 0;
+    INSERT INTO dbo.Settings (SettingKey, SettingValue, UpdatedAt)
+    VALUES (N'CreditLimitMigrationV1', N'1', SYSUTCDATETIME());
+    COMMIT TRAN;
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>

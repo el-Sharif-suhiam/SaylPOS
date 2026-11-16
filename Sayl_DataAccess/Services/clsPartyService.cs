@@ -80,8 +80,12 @@ namespace Sayl.Core.Services
                  _dbContext.Parties.Add(newParty);
                  await _dbContext.SaveChangesAsync();
 
+                 // حد الائتمان الافتراضي للعميل الجديد يُقرأ من الإعدادات المحفوظة
+                 // (وليس hardcoded) — تغيير المدير للقيمة يسري على العملاء الجدد فقط.
+                 decimal defaultCreditLimit = await new clsSettingsService(_dbContext).GetDefaultCreditLimitAsync();
+
                  if (dtoParty.PartyType == 'C' || dtoParty.PartyType == 'B')
-                     _dbContext.Customers.Add(new Customer { PartyId = newParty.PartyId, Balance = 0, CreditLimit = 0 });
+                     _dbContext.Customers.Add(new Customer { PartyId = newParty.PartyId, Balance = 0, CreditLimit = defaultCreditLimit });
 
                  if (dtoParty.PartyType == 'S' || dtoParty.PartyType == 'B')
                      _dbContext.Suppliers.Add(new Supplier { PartyId = newParty.PartyId, Balance = 0, Category = null });
@@ -225,7 +229,12 @@ namespace Sayl.Core.Services
 
                 bool hasCustomer = await _dbContext.Customers.AnyAsync(c => c.PartyId == party.PartyId);
                 if (!hasCustomer)
-                    _dbContext.Customers.Add(new Customer { PartyId = party.PartyId, Balance = 0, CreditLimit = 0 });
+                {
+                    // إنشاء سجل العميل الناقص = إنشاء عميل بكل معنى الكلمة —
+                    // يأخذ حد الائتمان الافتراضي من الإعدادات مثل أي عميل جديد.
+                    decimal defaultCreditLimit = await new clsSettingsService(_dbContext).GetDefaultCreditLimitAsync();
+                    _dbContext.Customers.Add(new Customer { PartyId = party.PartyId, Balance = 0, CreditLimit = defaultCreditLimit });
+                }
             }
 
             await _dbContext.SaveChangesAsync();

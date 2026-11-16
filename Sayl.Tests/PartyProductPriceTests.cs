@@ -83,7 +83,9 @@ public class PartyProductPriceTests
         var customer = await db.Customers.FindAsync(seed.SupplierId);
         Assert.NotNull(customer);
         Assert.Equal(0m, customer!.Balance ?? 0m);
-        Assert.Equal(0m, customer.CreditLimit ?? 0m);
+        // Task-1: سجل العميل الناقص (تحويل S→B) = إنشاء عميل — يأخذ الحد
+        // الافتراضي من الإعدادات (1000 عند غياب الصف) لا 0 كما كان م hardcoded.
+        Assert.Equal(clsSettingsService.DefaultCreditLimitValue, customer.CreditLimit ?? 0m);
 
         var supAfter = await db.Suppliers.FindAsync(seed.SupplierId);
         Assert.NotNull(supAfter);
