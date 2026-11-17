@@ -229,6 +229,16 @@ END";
 
                 return Result<int>.Ok(invoice.InvoiceId, suspend ? "تم تعليق الفاتورة وحجز المخزون." : "تمت عملية البيع بنجاح.");
             }
+            catch (CreditApprovalRequiredException ex)
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                // تدقيق الرفض + نتيجة منظمة قابلة للتمييز آليًا (موافقة المدير مطلوبة)
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutRejected",
+                    $"{(suspend ? "تعليق" : "بيع")} فاشل: {ex.Message} " +
+                    $"(العميل #{ex.Info.CustomerId}: الحالي {ex.Info.CurrentOutstanding:N2} + جديد {ex.Info.NewCreditAmount:N2} = {ex.Info.ProjectedOutstanding:N2} > الحد {ex.Info.CreditLimit:N2})");
+                return CreditApprovalRequiredResult<int>.Fail(ex.Info, ex.Message);
+            }
             catch (InvalidOperationException ex)
             {
                 await transaction.RollbackAsync();
@@ -411,6 +421,16 @@ END";
                 await transaction.CommitAsync();
                 return Result.Ok("تم إكمال الفاتورة بنجاح.");
             }
+            catch (CreditApprovalRequiredException ex)
+            {
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                // تدقيق الرفض + نتيجة منظمة قابلة للتمييز آليًا (موافقة المدير مطلوبة)
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
+                    $"إكمال فاتورة معلقة #{invoiceId} فاشل: {ex.Message} " +
+                    $"(العميل #{ex.Info.CustomerId}: الحالي {ex.Info.CurrentOutstanding:N2} + جديد {ex.Info.NewCreditAmount:N2} = {ex.Info.ProjectedOutstanding:N2} > الحد {ex.Info.CreditLimit:N2})");
+                return CreditApprovalRequiredResult.Fail(ex.Info, ex.Message);
+            }
             catch (InvalidOperationException ex)
             {
                 await transaction.RollbackAsync();
@@ -516,7 +536,7 @@ END";
             if (request.DiscountAmount < 0 || request.DiscountAmount > total)
                 throw new InvalidOperationException("مبلغ الخصم لا يمكن أن يتجاوز إجمالي الفاتورة أو يكون سالبًا.");
             // الضريبة: نسبة فقط وضمن سقف عقلاني — النسب الجنونية تنتج ديونًا
-            // وهمية تفوق المبيعات (خصوصًا مع CreditLimit=0 أي «غير محدود»).
+            // وهمية تفوق المبيعات (خصوصًا مع حد ائتمان ضخم).
             if (request.TaxPercent < 0 || request.TaxPercent > 100)
                 throw new InvalidOperationException("نسبة الضريبة يجب أن تكون بين 0 و 100.");
 
@@ -860,18 +880,70 @@ END";
             if (paid < net && !invoice.PartyId.HasValue)
                 throw new InvalidOperationException("البيع بالدين أو الدفع الجزئي يتطلب اختيار عميل.");
 
-            // إذا كان البيع بالدين (أو جزئي) لعميل مسجل
+            // ══ سياسة حد الائتمان — نقطة الإنفاذ المركزية الوحيدة ══
+            // كل مسارات إحداث دَين عميل (بيع مباشر وإكمال فاتورة معلقة) تمر من هنا
+            // حصريًا، فالسياسة تُطبَّق مرة واحدة ولا يمكن لطريق بيع بديل تخطّيها.
+            // البيع النقدي كليًا (paid >= net) لا يمس هذا المسار أصلًا.
             if (invoice.PartyId.HasValue && paid < net)
             {
-                var customer = await _dbContext.Customers.FindAsync(invoice.PartyId.Value);
-                if (customer == null) return;
-
                 decimal debitAmount = net - paid;
-                if (customer.CreditLimit > 0 && (customer.Balance + debitAmount > customer.CreditLimit))
-                    throw new InvalidOperationException("تجاوز حد الائتمان للعميل.");
 
-                customer.Balance += debitAmount;
+                // قراءة حيّة للرصيد والحد داخل المعاملة القابلة للتسلسل مع UPDLOCK
+                // على صف العميل — لا ثقة أبدًا برصيد حسبته الواجهة أو قرأناه قبل
+                // المعاملة. UPDLOCK يحوّل سباق البيعين المتوازيين لانتظار: العملية
+                // الثانية تقرأ الرصيد بعد التزام الأولى (نفس نمط تحصيل العميل
+                // في clsPaymentService) — فلا يتجاوز الحد بصمت على رصيد قديم،
+                // ولا deadlock (لا تحوّل S→X على الصف نفسه).
+                CustomerCreditSnapshot? snapRow = await _dbContext.Database.SqlQuery<CustomerCreditSnapshot>(@$"
+                        SELECT ISNULL(Balance, 0) AS [Balance], ISNULL(CreditLimit, 0) AS [CreditLimit]
+                        FROM Customers WITH (UPDLOCK)
+                        WHERE PartyId = {invoice.PartyId.Value}")
+                        .FirstOrDefaultAsync();
+
+                decimal balance = snapRow?.Balance ?? 0m;
+                decimal creditLimit = snapRow?.CreditLimit ?? 0m;
+
+                // القيم الفاسدة تُرفض رفض تحقق صريحًا لا تتجاوز بصمت.
+                // دفتر Customers.Balance هو المصدر المعتمد لإجمالي الدَّين: يُحدَّث
+                // معاملاتيًا هنا (+) وفي السداد والمرتجعات (− مقصوص عند 0) — لا
+                // معادلة رصيد ثانية (تسوية clsPaymentAllocation خاصة مستحق فاتورة
+                // بعينه وتبقى كما هي).
+                if (creditLimit < 0)
+                    throw new InvalidOperationException("حد ائتمان العميل قيمة غير صالحة (سالب) — صحّح بيانات العميل أولًا.");
+
+                // دلالة الحد: 0 = الشراء بالدين ممنوع كليًا (لا وضع «ائتمان غير
+                // محدود» بعد اليوم) — القيمة الموجبة تسمح ضمن الحد فقط، والبيع
+                // يُسمح به دون اعتماد المدير فقط حين لا يتجاوز المشروع الحد.
+                if (balance + debitAmount > creditLimit)
+                {
+                    var info = new CreditApprovalRequiredInfo
+                    {
+                        CustomerId = invoice.PartyId.Value,
+                        CurrentOutstanding = balance,
+                        CreditLimit = creditLimit,
+                        NewCreditAmount = debitAmount,
+                        ProjectedOutstanding = balance + debitAmount,
+                        ExcessAmount = balance + debitAmount - creditLimit
+                    };
+                    throw new CreditApprovalRequiredException(info,
+                        "تجاوز حد الائتمان للعميل — يتطلب موافقة المدير.");
+                }
+
+                // القيد الجديد يُكتب بتحديث ذري مباشر (نفس نمط clsPaymentService):
+                // يضمن atomicity مع القراءة الحيّة أعلاه ولا يكتب قيمة كيان متتبع
+                // قديم فوق خصم/تعديل التزم بعد تحميل الكيان.
+                await _dbContext.Customers
+                    .Where(c => c.PartyId == invoice.PartyId.Value)
+                    .ExecuteUpdateAsync(setter => setter
+                        .SetProperty(c => c.Balance, c => (c.Balance ?? 0m) + debitAmount));
             }
+        }
+
+        /// <summary>لقطة رصيد/حد ائتمان العميل للقراءة الحيّة بلا تتبع (SqlQuery).</summary>
+        private sealed class CustomerCreditSnapshot
+        {
+            public decimal Balance { get; set; }
+            public decimal CreditLimit { get; set; }
         }
     }
 }

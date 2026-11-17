@@ -40,6 +40,10 @@ public sealed class TestSeed
         return role;
     }
 
+    /// <summary>حد ائتمان العميل المشترك في البذر (موجب سخي — لا يقيّد الاختبارات
+    /// غير المقصودة للاختبار على الحد؛ انظر التعليق في SeedAsync).</summary>
+    public const decimal TestCustomerCreditLimit = 10_000m;
+
     public static async Task<TestSeed> SeedAsync(SaylDbContext db, string marker)
     {
         // Roles.RoleId عمود TINYINT IDENTITY (حد 255 صفًا): بذر دور لكل اختبار
@@ -75,7 +79,15 @@ public sealed class TestSeed
 
         await db.SaveChangesAsync();
 
-        db.Customers.Add(new Customer { PartyId = customerParty.PartyId, Balance = 0, CreditLimit = 0 });
+        // ══ حد الائتمان في البذر ══
+        // الدلالة التصحيحية: CreditLimit = 0 يعني «الشراء بالدين ممنوع» (لا وضع
+        // ائتمان غير محدود). الاختبارات القائمة تبيع بالدين على العميل المشترك
+        // بلا قصد اختبار الحد (ديون محدودة بعشرات الشلالات)، فالبذر بحد 0
+        // كان سيمنعها جميعًا بعد الإصلاح. البذر بقيمة موجبة سخية (10000 —
+        // أفخم مستحق تخلقه الاختبارات بأضعاف) يجعل الاختبارات القائمة تختبر
+        // مسار الائتمان المعتاد، بينما تختبر اختبارات حد الائتمان الجديدة
+        // الحدود فعليًا بضبط حد العميل لكل اختبار على حدة.
+        db.Customers.Add(new Customer { PartyId = customerParty.PartyId, Balance = 0, CreditLimit = TestCustomerCreditLimit });
         db.Suppliers.Add(new Supplier { PartyId = supplierParty.PartyId, Balance = 0 });
         await db.SaveChangesAsync();
 

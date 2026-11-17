@@ -90,6 +90,13 @@ All backend services are implemented. Remaining work is listed in TASK.md.
 - **Payments:** outstanding per invoice is always computed through
   `clsPaymentAllocation` (`Net + Returns − LinkedPaid − AllocatedGeneral`, oldest-first
   general-payment allocation). Do not invent alternate balance math.
+- **Credit limits:** enforcement is centralized in `clsCheckoutService.ProcessPaymentAsync`
+  (the single funnel for direct sales and suspended-invoice completion). Semantics:
+  `CreditLimit = 0` means credit purchases are prohibited; a positive limit permits
+  credit within it. The projected balance (`Customers.Balance` ledger read fresh with
+  `UPDLOCK` inside the Serializable transaction + atomic `ExecuteUpdateAsync` write) must
+  stay within the limit; over-limit credit sales fail with a structured
+  `CreditApprovalRequiredResult` (manager approval required — no invoice/debt persisted).
 
 ## 6. Implemented services (all of them)
 - `clsPartyService`, `clsEmployeeService`, `clsCustomerService`, `clsSupplierService`
