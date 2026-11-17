@@ -3,7 +3,9 @@ using Common.DTOs;
 using Common.DTOs.RequestModels;
 using Common.DTOs.ViewModel;
 using Common.Results;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Sayl.Core.Data;
 using Sayl.Core.Services;
 using Sayl.UI.Controls;
 using Sayl.UI.Infrastructure;
@@ -1579,6 +1581,24 @@ namespace Sayl.UI.Forms
                 result = await checkoutService.ProcessCheckoutAsync(request, suspend);
             }
 
+            // ══ Task-3: تجاوز حد الائتمان — سير اعتماد المدير ══
+            // الخدمة رفضت البيع بنتيجة منظمة «يتطلب موافقة المدير» (لا أثر قُيِّد):
+            // نافذة الاعتماد تعرض موقف العميل وتجمع السبب + بيانات المدير،
+            // الخدمة تتحقق من المدير على الخادم وتسجل الاعتماد، ثم إعادة محاولة
+            // واحدة بمعرف الاعتماد — استهلاكه داخل معاملة البيع نفسها.
+            if (result is CreditApprovalRequiredResult<int> approvalRequired)
+            {
+                var retried = await RunCreditApprovalFlowAsync(request, approvalRequired);
+                if (retried == null)
+                {
+                    // أُلغي الاعتماد أو فشل: لا بيع — شاشة الزبون تعود للعرض العادي
+                    NotifyCustomerDisplay(checkoutRequested: false);
+                    _txtSearch.Focus();
+                    return;
+                }
+                result = retried;
+            }
+
             if (!result.IsSuccess)
             {
                 UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Pos.Msg.SaleFailed") : result.Message);
@@ -1608,6 +1628,74 @@ namespace Sayl.UI.Forms
             ClearCart();
             await RefreshStockAsync(soldIdsForSale);
             _txtSearch.Focus(); // الجلسة التالية: الماسح جاهز فورًا
+        }
+
+        // ───────── سير اعتماد المدير لتجاوز حد الائتمان (Task 3) ─────────
+        // (أ) الخدمة رفضت البيع بنتيجة منظمة «يتطلب موافقة المدير» — لا فاتورة
+        //     ولا دَين قُيِّدا (المعاملة تراجعت كاملة داخل clsCheckoutService).
+        // (ب) نافذة الاعتماد تعرض موقف العميل الائتماني وتجمع سببًا إلزاميًا
+        //     + بيانات مدير (اسم + كلمة مرور).
+        // (ج) الخدمة (clsCreditApprovalService) تتحقق من المدير على الخادم
+        //     (دخول SaylPOS نفسه + فحص دور مدير النظام) وتسجل الاعتماد granted.
+        // (د) إعادة محاولة واحدة للبيع بمعرف الاعتماد — الاستهلاك (granted ->
+        //     consumed) داخل معاملة البيع بعد إعادة فحص الربط: نفس العميل،
+        //     نفس المبلغ، نفس لقطة الرصيد/الحد. أي انحراف = رفض واضح.
+        // null = لا يوجد بيع لإتمامه (أُلغي أو فشل والرسالة عُرضت داخليًا).
+        private async Task<Result<int>?> RunCreditApprovalFlowAsync(
+            DtoCheckoutRequest request, CreditApprovalRequiredResult<int> approvalRequired)
+        {
+            var info = approvalRequired.ApprovalInfo;
+            if (info == null)
+                return null;
+
+            // اسم العميل للعرض — القراءة قبل فتح النافذة (فحص تنسيق لا قرار)
+            string customerName = $"#{info.CustomerId}";
+            using (var scope = Program.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SaylDbContext>();
+                var name = await db.Parties.AsNoTracking()
+                    .Where(p => p.PartyId == info.CustomerId)
+                    .Select(p => p.Name)
+                    .FirstOrDefaultAsync();
+                if (!string.IsNullOrWhiteSpace(name))
+                    customerName = name;
+            }
+
+            using var approvalForm = new CreditApprovalForm(customerName, info);
+            if (approvalForm.ShowDialog(this) != DialogResult.OK)
+                return null; // أُلغي الاعتماد — يُلغى البيع بلا أي أثر
+
+            Result<int> retryResult;
+            using (var scope = Program.Services.CreateScope())
+            {
+                // التحقق من المدير + منح الاعتماد — القواعد كلها على الخادم
+                var approvalService = scope.ServiceProvider.GetRequiredService<clsCreditApprovalService>();
+                var grant = await approvalService.ApproveCreditSaleAsync(
+                    info, approvalForm.ManagerUsername, approvalForm.ManagerPassword, approvalForm.Reason);
+
+                if (!grant.IsSuccess || grant.Data <= 0)
+                {
+                    // فشل مصادقة / حساب غير مصرَّح / سبب مرفوض — رسالة الخدمة نفسها
+                    UiHelpers.ShowError(this, grant.Message);
+                    return null;
+                }
+
+                // إعادة محاولة واحدة بمعرف الاعتماد — الاستهلاك داخل معاملة البيع
+                request.CreditApprovalId = grant.Data;
+                var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
+                retryResult = await checkoutService.ProcessCheckoutAsync(request, suspend: false);
+            }
+
+            if (retryResult.IsSuccess)
+                return retryResult;
+
+            // فشل بعد الاعتماد: الاعتماد أُحرق خدميًا ولا دَين قُيِّد — تمايز الرسالة:
+            // «الاعتماد لم يعد صالحًا» (ربط اعتماد لم يعد مطابقًا) مقابل فشل بيع عام.
+            UiHelpers.ShowError(this,
+                retryResult is CreditApprovalRequiredResult<int>
+                    ? AppLang.T("CreditApproval.Msg.NotValid")
+                    : $"{AppLang.T("CreditApproval.Msg.SaleFailed")}\n{retryResult.Message}");
+            return null;
         }
 
         // ───────────────── فواتير اليوم ─────────────────

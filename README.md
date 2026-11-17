@@ -167,12 +167,13 @@ All scripts live in the repository root and run with `sqlcmd`, for example:
 | `Upgrade_13_StockCountPostedMovementId.sql` | Older databases: posting idempotency column and filtered movement index. |
 | `Upgrade_15_UtcDefaults.sql` | Older databases: technical timestamp column defaults become UTC. **Not applied automatically at startup** — run it manually (see below). |
 | `Upgrade_16_DefaultCreditLimit.sql` | Older databases: one-time customer credit-limit backfill (`CreditLimit` 0/NULL → 1000), guarded by a `CreditLimitMigrationV1` marker in `Settings` — also applied automatically at startup. |
+| `Upgrade_17_CreditApprovals.sql` | Older databases: `CreditApprovals` table (manager approval for over-limit credit sales) — also applied automatically at startup. |
 
 In addition, the application applies idempotent schema upgrades automatically at
 startup (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so a database created by an older `SaylDB.sql` is brought
 forward on first launch — these cover `Upgrade_10` through `Upgrade_14` plus the
-`Upgrade_16` credit-limit backfill
+`Upgrade_16` credit-limit backfill and the `Upgrade_17` credit-approvals table
 (`Upgrade_14_SystemLogsUserIdNullable.sql` has no manual step). On a database with
 zero active users, the app creates the default `admin` account and forces a password
 change at first sign-in.

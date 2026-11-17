@@ -26,6 +26,7 @@ namespace DependencyInjection
             services.AddScoped<clsSupplierService>();
             services.AddScoped<clsUsersService>();
             services.AddScoped<clsCheckoutService>();
+            services.AddScoped<clsCreditApprovalService>();
             services.AddScoped<clsProductService>();
             services.AddScoped<clsRoleService>();
             services.AddScoped<clsExpenseService>();

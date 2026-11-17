@@ -90,7 +90,8 @@ $sqlSources = @(
     (Join-Path $repoRoot "Upgrade_13_StockCountPostedMovementId.sql"),
     (Join-Path $repoRoot "Upgrade_14_SystemLogsUserIdNullable.sql"),
     (Join-Path $repoRoot "Upgrade_15_UtcDefaults.sql"),
-    (Join-Path $repoRoot "Upgrade_16_DefaultCreditLimit.sql")
+    (Join-Path $repoRoot "Upgrade_16_DefaultCreditLimit.sql"),
+    (Join-Path $repoRoot "Upgrade_17_CreditApprovals.sql")
 )
 $stagingXml = Join-Path $stagingDb "xml"
 New-Item -ItemType Directory -Path $stagingXml -Force | Out-Null

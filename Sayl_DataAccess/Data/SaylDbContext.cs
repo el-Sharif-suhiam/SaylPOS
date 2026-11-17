@@ -21,6 +21,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<CashMovement> CashMovements { get; set; }
 
+    public virtual DbSet<CreditApproval> CreditApprovals { get; set; }
+
     public virtual DbSet<Customer> Customers { get; set; }
 
     public virtual DbSet<Employee> Employees { get; set; }
@@ -126,6 +128,48 @@ public partial class SaylDbContext : DbContext
                 .HasForeignKey(d => d.ProductId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Batches_ProductId");
+        });
+
+        modelBuilder.Entity<CreditApproval>(entity =>
+        {
+            // اعتماد المدير لتجاوز حد الائتمان: سجل دائم — الاستهلاك مرة واحدة
+            // (CAS داخل معاملة البيع) والفهرس الفريد المُرشَّح يمنع ربط صفين
+            // بفاتورة واحدة (لا استهلاك مزدوج على مستوى المحرك).
+            entity.HasKey(e => e.ApprovalId).HasName("PK_CreditApprovals");
+
+            entity.HasIndex(e => e.CustomerId, "IX_CreditApprovals_CustomerId");
+
+            entity.HasIndex(e => e.Status, "IX_CreditApprovals_Status");
+
+            entity.HasIndex(e => e.ManagerUserId, "IX_CreditApprovals_ManagerUserId");
+
+            entity.HasIndex(e => e.ConsumedByInvoiceId, "UQ_CreditApprovals_ConsumedByInvoice")
+                .IsUnique()
+                .HasFilter("[ConsumedByInvoiceId] IS NOT NULL");
+
+            entity.Property(e => e.CurrentOutstanding).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.CreditLimit).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.NewCreditAmount).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.ProjectedOutstanding).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.ExcessAmount).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.Property(e => e.Status).HasMaxLength(10);
+            entity.Property(e => e.ApprovedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Customer).WithMany()
+                .HasForeignKey(d => d.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CreditApprovals_CustomerId");
+
+            entity.HasOne(d => d.Manager).WithMany()
+                .HasForeignKey(d => d.ManagerUserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_CreditApprovals_ManagerUserId");
+
+            entity.HasOne(d => d.ConsumedByInvoice).WithMany()
+                .HasForeignKey(d => d.ConsumedByInvoiceId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_CreditApprovals_ConsumedByInvoiceId");
         });
 
         modelBuilder.Entity<Customer>(entity =>

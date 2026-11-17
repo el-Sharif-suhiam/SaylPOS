@@ -20,6 +20,13 @@ namespace Common.DTOs.RequestModels
         public List<DtoPaymentInfo>? Payments { get; set; }
 
         public string? Notes { get; set; }
+
+        /// <summary>Task-3: معرف اعتماد المدير لتجاوز حد الائتمان (اختياري).
+        /// يُستهلك داخل معاملة البيع نفسها بعد إعادة فحص الربط الصارم (نفس
+        /// العميل + نفس المبلغ + نفس لقطة الرصيد/الحد + حالة granted) —
+        /// استهلاك واحد بالضبط؛ الواجهة لا تستطيع التزييف: الربط يُتحقق
+        /// مقابل سجل CreditApprovals على الخادم.</summary>
+        public int? CreditApprovalId { get; set; }
     }
 
     public class DtoCheckoutItem

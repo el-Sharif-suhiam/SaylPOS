@@ -62,6 +62,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade15Script());
             // حد الائتمان الافتراضي: ترحيل العملاء 0/NULL -> 1000 (محروس بصف Settings)
             ExecuteBatches(LoadUpgrade16Script());
+            // اعتمادات المدير لتجاوز الحد: جدول CreditApprovals (Task-3)
+            ExecuteBatches(LoadUpgrade17Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -152,6 +154,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade16Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_16_DefaultCreditLimit.sql"));
+
+    private static string LoadUpgrade17Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_17_CreditApprovals.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

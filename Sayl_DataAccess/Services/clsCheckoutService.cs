@@ -11,8 +11,13 @@ namespace Sayl.Core.Services
     public class clsCheckoutService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsCreditApprovalService? _creditApprovalService;
 
-       public clsCheckoutService(SaylDbContext dbContext) => _dbContext = dbContext;
+        public clsCheckoutService(SaylDbContext dbContext, clsCreditApprovalService? creditApprovalService = null)
+        {
+            _dbContext = dbContext;
+            _creditApprovalService = creditApprovalService;
+        }
 
         // ═══ ترقية مخطط حجوزات الفواتير (idempotent) ═══
         // جدول StockReservations يمنح كل فاتورة معلقة ملكية حجز صريحة (صف لكل
@@ -233,6 +238,9 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                // اعتماد حملته المحاولة وفشلت: يُحرق (granted -> burned) فلا يستفاد
+                // منه لمحاولة أخرى — رفض تحقق الربط أعلاه يقتضي اعتمادًا جديدًا.
+                await BurnCarriedApprovalAsync(request.CreditApprovalId);
                 // تدقيق الرفض + نتيجة منظمة قابلة للتمييز آليًا (موافقة المدير مطلوبة)
                 await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "CheckoutRejected",
                     $"{(suspend ? "تعليق" : "بيع")} فاشل: {ex.Message} " +
@@ -244,6 +252,10 @@ END";
                 await transaction.RollbackAsync();
                 // إزالة الكيانات المتتبعة حتى لا تُحقن في العملية القادمة على نفس السياق
                 _dbContext.ChangeTracker.Clear();
+                // فشل البيع بعد استهلاك الاعتماد داخل معاملة تراجعت: الاستهلاك نفسه
+                // تراجع (الاعتماد عاد granted) — الحرق هنا ينهي صلاحيته للأبد ويبقي
+                // سجل «مُنح ولم يُستهلك» (granted -> burned) للعملية الفاشلة.
+                await BurnCarriedApprovalAsync(request.CreditApprovalId);
                 // تدقيق الرفض: رفض تحقق أعمال أثناء المعاملة (دفع زائد، مخزون غير
                 // كافٍ، خصم سالب، حد ائتمان…) — كتابة مستقلة بعد التراجع فتنجو منه.
                 // InvalidOperationException هنا = رفض أعمال مقصود؛ الأعطال التقنية
@@ -262,6 +274,7 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                await BurnCarriedApprovalAsync(request.CreditApprovalId);
                 string details = ex.Message;
                 var inner = ex.InnerException;
                 while (inner != null)
@@ -326,7 +339,7 @@ END";
         // وغيره يحتاج صلاحية محاسب فأعلى. (كان الإكمال بلا أي فحص ملكية
         // بينما الإلغاء مشدد — سجل: الإكمال يحرك مالًا ومخزونًا نهائيًا.)
         // ─────────────────────────────────────────────────
-        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments, int actorUserId, int? actorSessionId = null)
+        public async Task<Result> CompleteSuspendedInvoiceAsync(int invoiceId, List<DtoPaymentInfo> payments, int actorUserId, int? actorSessionId = null, int? creditApprovalId = null)
         {
             if (payments == null || !payments.Any(p => p != null && p.Amount > 0))
                 return Result.Fail("يجب إدخال مبلغ دفعة واحد على الأقل.");
@@ -408,7 +421,9 @@ END";
                     Payments = payments,
                     SessionId = paymentSessionId,
                     DiscountPercent = 0, // يمكنك إضافة حقول للخصم في الفاتورة المعلقة
-                    TaxPercent = 0
+                    TaxPercent = 0,
+                    // Task-3: اعتماد المدير للتجاوز — يُستهلك داخل معاملة الإكمال
+                    CreditApprovalId = creditApprovalId
                 };
                 await ProcessPaymentAsync(invoice, request, paymentSessionId);
 
@@ -425,6 +440,8 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                // اعتماد حملته عملية الإكمال وفشلت: يُحرق — لا صلاحية لمحاولة أخرى
+                await BurnCarriedApprovalAsync(creditApprovalId);
                 // تدقيق الرفض + نتيجة منظمة قابلة للتمييز آليًا (موافقة المدير مطلوبة)
                 await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
                     $"إكمال فاتورة معلقة #{invoiceId} فاشل: {ex.Message} " +
@@ -435,6 +452,8 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                // فشل الإكمال بعد استهلاك الاعتماد داخل معاملة تراجعت: يُحرق
+                await BurnCarriedApprovalAsync(creditApprovalId);
                 // تدقيق الرفض: فشل تحقق أعمال أثناء إكمال الفاتورة (دفع زائد/مخزون…)
                 await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
                     $"إكمال فاتورة معلقة #{invoiceId} فاشل: {ex.Message}");
@@ -444,6 +463,7 @@ END";
             {
                 await transaction.RollbackAsync();
                 _dbContext.ChangeTracker.Clear();
+                await BurnCarriedApprovalAsync(creditApprovalId);
                 return Result.Fail("فشل إكمال الفاتورة المعلقة.");
             }
         }
@@ -925,8 +945,37 @@ END";
                         ProjectedOutstanding = balance + debitAmount,
                         ExcessAmount = balance + debitAmount - creditLimit
                     };
-                    throw new CreditApprovalRequiredException(info,
-                        "تجاوز حد الائتمان للعميل — يتطلب موافقة المدير.");
+
+                    // ══ اعتماد المدير: استهلاك واحد بالضبط داخل معاملة البيع ══
+                    // بلا معرف اعتماد: رفض منظوم «يتطلب موافقة المدير» — لا مسار
+                    // بديل ولا ثقة بما زعَمته الواجهة. بمعرف: إعادة فحص الربط كاملًا
+                    // هنا (نفس العميل + نفس المبلغ + نفس لقطة الرصيد/الحد + granted)
+                    // والانتقال الذري granted -> consumed — CAS يضمن فوز مستهلك
+                    // واحد بالضبط تحت التوازي (الصف منحَصَر UPDLOCK على عميل واحد
+                    // يرتّب المتسابقين قبل لمس صف الاعتماد). أي انحراف (عميل آخر،
+                    // مبلغ آخر، رصيد تغيّر بعد الاعتماد، استهلاك سابق، حرق) = صفر
+                    // صفوف = رفض «الاعتماد لم يعد صالحًا — اعتماد جديد مطلوب».
+                    if (!request.CreditApprovalId.HasValue)
+                        throw new CreditApprovalRequiredException(info,
+                            "تجاوز حد الائتمان للعميل — يتطلب موافقة المدير.");
+
+                    int consumed = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE CreditApprovals
+SET Status = N'consumed', ConsumedAtUtc = SYSUTCDATETIME(), ConsumedByInvoiceId = {invoice.InvoiceId}
+WHERE ApprovalId = {request.CreditApprovalId.Value}
+  AND Status = N'granted'
+  AND CustomerId = {invoice.PartyId.Value}
+  AND NewCreditAmount = {debitAmount}
+  AND CurrentOutstanding = {balance}
+  AND CreditLimit = {creditLimit}");
+
+                    if (consumed == 0)
+                        throw new CreditApprovalRequiredException(info,
+                            "اعتماد تجاوز حد الائتمان لم يعد صالحًا (مستهلك أو غير مطابق للعملية الحالية) — يلزم موافقة مدير جديدة.");
+
+                    clsAudit.Log(_dbContext, request.UserId, "CreditApprovalConsumed",
+                        $"استهلاك اعتماد ائتمان #{request.CreditApprovalId.Value} بفاتورة #{invoice.InvoiceId} " +
+                        $"— العميل #{invoice.PartyId.Value} — آجل {debitAmount:N2} (مشروع {balance + debitAmount:N2} فوق الحد {creditLimit:N2}).");
                 }
 
                 // القيد الجديد يُكتب بتحديث ذري مباشر (نفس نمط clsPaymentService):
@@ -944,6 +993,41 @@ END";
         {
             public decimal Balance { get; set; }
             public decimal CreditLimit { get; set; }
+        }
+
+        // ═══ Task-3: إحراق اعتماد حملته عملية فاشلة (بعد تراجع معاملتها) ═══
+        // انتقال CAS granted -> burned خارج المعاملة التراجعت: سجل «مُنح ولم
+        // يُستهلك» يبقى للمراجعة، والصلاحية تنتهي — الاعتماد لا يعود صالحًا
+        // لأي عملية مستقبلية. الاعتماد غير الموجود/غير granted يُترك كما هو
+        // (قد يكون استُهلك وحُرِق في مسار سابق). أفضل جهد: فشل الحرق لا يخفي
+        // فشل البيع الأصلي — والاعتماد المتبقي granted يظل مُحكمًا بربطه الصارم
+        // (نفس العميل/المبلغ/اللقطة) بحيث لا يستفاد منه لعملية مغايرة.
+        private async Task BurnCarriedApprovalAsync(int? approvalId)
+        {
+            if (!approvalId.HasValue)
+                return;
+
+            if (_creditApprovalService != null)
+            {
+                await _creditApprovalService.BurnApprovalAsync(approvalId.Value,
+                    "فشلت عملية البيع المرتبطة بعد منح الاعتماد.");
+                return;
+            }
+
+            // بلا خدمة محقونة (مستدعون أقدم يبنون الخدمة يدويًا) — نفس الانتقال
+            try
+            {
+                int burned = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE CreditApprovals SET Status = N'burned'
+WHERE ApprovalId = {approvalId.Value} AND Status = N'granted'");
+                if (burned > 0)
+                    await clsAudit.LogRejectedAsync(_dbContext, null, "CreditApprovalBurned",
+                        $"اعتماد ائتمان #{approvalId.Value} أُحرق بلا استهلاك: فشلت عملية البيع بعد المنح.");
+            }
+            catch
+            {
+                // تحصين لا يكسر معالجة الفشل الأصلية
+            }
         }
     }
 }

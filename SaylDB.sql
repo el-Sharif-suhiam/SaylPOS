@@ -327,6 +327,56 @@ CREATE INDEX IX_StockReservations_ProductId
 GO
 
 -----------------------------------------------------------
+-- 13c) Create CreditApprovals
+--      Durable record of one manager approval for a credit sale
+--      that exceeds the customer's limit. Consumed exactly once
+--      (CAS transition granted -> consumed) inside the checkout
+--      transaction; burned = approval granted but checkout failed
+--      (kept as audit, never reusable). Does NOT change the
+--      customer's permanent CreditLimit.
+-----------------------------------------------------------
+CREATE TABLE CreditApprovals
+(
+    ApprovalId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    CustomerId INT NOT NULL,
+    ManagerUserId INT NOT NULL,
+    ConsumedByInvoiceId INT NULL,
+    CurrentOutstanding DECIMAL(10,2) NOT NULL,
+    CreditLimit DECIMAL(10,2) NOT NULL,
+    NewCreditAmount DECIMAL(10,2) NOT NULL,
+    ProjectedOutstanding DECIMAL(10,2) NOT NULL,
+    ExcessAmount DECIMAL(10,2) NOT NULL,
+    Reason NVARCHAR(500) NOT NULL,
+    Status NVARCHAR(10) NOT NULL DEFAULT (N'granted'),
+    ApprovedAtUtc DATETIME2 DEFAULT (SYSUTCDATETIME()),
+    ConsumedAtUtc DATETIME2 NULL,
+
+    CONSTRAINT CK_CreditApprovals_Status CHECK (Status IN (N'granted', N'consumed', N'burned')),
+    CONSTRAINT CK_CreditApprovals_Reason CHECK (LEN(Reason) >= 2),
+    CONSTRAINT CK_CreditApprovals_Amounts CHECK (
+        NewCreditAmount > 0 AND ExcessAmount > 0
+        AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount),
+    CONSTRAINT FK_CreditApprovals_CustomerId FOREIGN KEY (CustomerId) REFERENCES Customers(PartyId),
+    CONSTRAINT FK_CreditApprovals_ManagerUserId FOREIGN KEY (ManagerUserId) REFERENCES Users(UserId),
+    CONSTRAINT FK_CreditApprovals_ConsumedByInvoiceId FOREIGN KEY (ConsumedByInvoiceId) REFERENCES Invoices(InvoiceId)
+);
+GO
+
+CREATE INDEX IX_CreditApprovals_CustomerId ON CreditApprovals(CustomerId);
+GO
+
+CREATE INDEX IX_CreditApprovals_Status ON CreditApprovals(Status);
+GO
+
+CREATE INDEX IX_CreditApprovals_ManagerUserId ON CreditApprovals(ManagerUserId);
+GO
+
+-- One consumption per invoice: engine-level barrier above the CAS transition
+CREATE UNIQUE INDEX UQ_CreditApprovals_ConsumedByInvoice
+    ON CreditApprovals(ConsumedByInvoiceId) WHERE ConsumedByInvoiceId IS NOT NULL;
+GO
+
+-----------------------------------------------------------
 -- 14) Create Payments
 --     Records incoming/outgoing payments; links to invoice or party
 -----------------------------------------------------------
