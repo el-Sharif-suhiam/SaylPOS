@@ -168,12 +168,14 @@ All scripts live in the repository root and run with `sqlcmd`, for example:
 | `Upgrade_15_UtcDefaults.sql` | Older databases: technical timestamp column defaults become UTC. **Not applied automatically at startup** — run it manually (see below). |
 | `Upgrade_16_DefaultCreditLimit.sql` | Older databases: one-time customer credit-limit backfill (`CreditLimit` 0/NULL → 1000), guarded by a `CreditLimitMigrationV1` marker in `Settings` — also applied automatically at startup. |
 | `Upgrade_17_CreditApprovals.sql` | Older databases: `CreditApprovals` table (manager approval for over-limit credit sales) — also applied automatically at startup. |
+| `Upgrade_18_CreditApprovalGrantPolicy.sql` | Older databases: strict grant policy for credit approvals — CHECK constraint that a granted approval must represent a real overrun of a **positive** limit (zero-limit prohibitions are never approvable); legacy violating `granted` rows transition to `burned` with audit records, no history deleted — also applied automatically at startup. |
 
 In addition, the application applies idempotent schema upgrades automatically at
 startup (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,
 `EnsureCountSchemaAsync`), so a database created by an older `SaylDB.sql` is brought
 forward on first launch — these cover `Upgrade_10` through `Upgrade_14` plus the
-`Upgrade_16` credit-limit backfill and the `Upgrade_17` credit-approvals table
+`Upgrade_16` credit-limit backfill, the `Upgrade_17` credit-approvals table, and
+the `Upgrade_18` credit-approval grant-policy constraint
 (`Upgrade_14_SystemLogsUserIdNullable.sql` has no manual step). On a database with
 zero active users, the app creates the default `admin` account and forces a password
 change at first sign-in.

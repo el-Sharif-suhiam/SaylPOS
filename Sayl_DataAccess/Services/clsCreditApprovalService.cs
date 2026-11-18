@@ -39,7 +39,10 @@ namespace Sayl.Core.Services
         /// يسجّل اعتمادًا granted مرتبطًا بالعميل والمبلغ ولقطة الموقف الائتماني.
         /// يُنادى من الواجهة بعد ظهور نتيجة CreditApprovalRequiredResult — قبل
         /// إعادة محاولة البيع بمعرف الاعتماد (يُستهلك داخل معاملة البيع).
-        /// الفشل (اعتماد/كلمة/دور/سبب) نتيجة منظمة + تدقيق رفض على اتصال مستقل.</summary>
+        /// القيم المُقدَّمة (الرصيد/الحد) تُعاد مطابقتها مع دفتر Customers.Balance
+        /// قبل المنح: أي تزوير أو قِدم (تغيّر الرصيد/الحد) = رفض صريح — ويُخزَّن
+        /// الموقف المعاد حسابه من القاعدة وحده. الحد الصفري/السالب مرفوض دائمًا.
+        /// الفشل (اعتماد/كلمة/دور/سبب/بيانات) نتيجة منظمة + تدقيق رفض على اتصال مستقل.</summary>
         public async Task<Result<int>> ApproveCreditSaleAsync(
             CreditApprovalRequiredInfo info, string managerUsername, string managerPassword, string reason)
         {
@@ -53,8 +56,6 @@ namespace Sayl.Core.Services
             if (reason.Length > ReasonMaxLength)
                 return Result<int>.Fail($"سبب الاعتماد طويل جدًا — الحد الأقصى {ReasonMaxLength} حرفًا.");
 
-            if (info.NewCreditAmount <= 0)
-                return Result<int>.Fail("مبلغ ائتمان غير صالح للاعتماد.");
             if (info.CustomerId <= 0)
                 return Result<int>.Fail("العميل غير محدد للاعتماد.");
 
@@ -80,20 +81,66 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("هذا الحساب غير مصرَّح له باعتماد تجاوز حد الائتمان — يلزم مدير نظام.");
             }
 
-            // العميل موجود؟ (الاعتماد بلا عميل حقيقي لا معنى له)
-            bool customerExists = await _dbContext.Customers.AnyAsync(c => c.PartyId == info.CustomerId);
-            if (!customerExists)
+            // العميل موجود؟ + القيم الفعلية — تُقرأ معًا من دفتر Customers.Balance أدناه
+            // (الاعتماد بلا عميل حقيقي لا معنى له: رفض عند غياب صف العميل).
+
+            // ══ إعادة التحقق الخدمي الكامل: لا ثقة أبدًا ببيانات الواجهة/الطلب ══
+            // تُقرأ القيم من دفتر Customers.Balance (المصدر المعتمد نفسه الذي يقرأه
+            // إنفاذ البيع UPDLOCK) — أي فجوة بين المُقدَّم والفعلي (تزوير/قِدم:
+            // تغيّر الرصيد أو الحد بين رفض البيع والاعتماد) = رفض صريح يقتضي
+            // تقييم بيع جديد. يُخزَّن الخادم القيم المعاد حسابها وحدها لا المُقدَّمة.
+            // مع UPDLOCK على صف العميل: لا سباق مع سداد/تعديل حد متوازٍ.
+            CustomerCreditSnapshot? snap = await _dbContext.Database.SqlQuery<CustomerCreditSnapshot>(@$"
+                    SELECT ISNULL(Balance, 0) AS [Balance], ISNULL(CreditLimit, 0) AS [CreditLimit]
+                    FROM Customers WITH (UPDLOCK)
+                    WHERE PartyId = {info.CustomerId}")
+                .FirstOrDefaultAsync();
+
+            if (snap == null)
                 return Result<int>.Fail("العميل غير موجود.");
+
+            decimal dbBalance = snap.Balance;
+            decimal dbLimit = snap.CreditLimit;
+
+            // الحد الصفري: منع مطلق لا يعتمده مدير إطلاقًا (قيد أعمال صارم)
+            if (dbLimit == 0)
+                return Result<int>.Fail(
+                    "الشراء بالدين ممنوع لهذا العميل: حد الائتمان صفر — لا يمكن اعتماد هذا المنع. " +
+                    "لتتمكين الائتمان، عدّل حد الائتمان الدائم للعميل إلى قيمة موجبة أولًا.");
+            // الحد السالب: بيانات فاسدة — رفض تحقق صريح لا يُعامل كصفر
+            if (dbLimit < 0)
+                return Result<int>.Fail("حد ائتمان العميل قيمة غير صالحة (سالب) — صحّح بيانات العميل أولًا.");
+
+            // مطابقة لقطة الموقف المُقدَّمة مع الوضع الفعلي: أي انحراف = معلومات
+            // مزوّرة أو قديمة (تغيّر الرصيد/الحد بين رفض البيع والاعتماد) — الاعتماد
+            // مرفوض ويُعاد تقييم البيع من جديد (نتيجة بيع جديدة ثم اعتماد جديد).
+            if (info.CurrentOutstanding != dbBalance)
+                return Result<int>.Fail(
+                    $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: الرصيد الحالي بالدفتر {dbBalance:N2} " +
+                    $"لا {info.CurrentOutstanding:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
+            if (info.CreditLimit != dbLimit)
+                return Result<int>.Fail(
+                    $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: حد العميل بالدفتر {dbLimit:N2} " +
+                    $"لا {info.CreditLimit:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
+
+            // مبلغ جديد موجب + تجاوز فعلي للحد الموجب: لا بيع ضمن الحد من مسار الاعتماد
+            if (info.NewCreditAmount <= 0)
+                return Result<int>.Fail("مبلغ ائتمان غير صالح للاعتماد.");
+            decimal projected = dbBalance + info.NewCreditAmount;
+            if (projected <= dbLimit)
+                return Result<int>.Fail(
+                    $"هذه العملية لا تتجاوز حد الائتمان (المشروع {projected:N2} ≤ الحد {dbLimit:N2}) — " +
+                    "لا اعتماد مطلوب: أعد تقييم البيع.");
 
             var approval = new CreditApproval
             {
                 CustomerId = info.CustomerId,
                 ManagerUserId = login.Data.UserId,
-                CurrentOutstanding = info.CurrentOutstanding,
-                CreditLimit = info.CreditLimit,
+                CurrentOutstanding = dbBalance,
+                CreditLimit = dbLimit,
                 NewCreditAmount = info.NewCreditAmount,
-                ProjectedOutstanding = info.ProjectedOutstanding,
-                ExcessAmount = info.ExcessAmount,
+                ProjectedOutstanding = projected,
+                ExcessAmount = projected - dbLimit,
                 Reason = reason,
                 Status = "granted",
                 ApprovedAtUtc = DateTime.UtcNow
@@ -102,14 +149,22 @@ namespace Sayl.Core.Services
             _dbContext.CreditApprovals.Add(approval);
             await _dbContext.SaveChangesAsync();
 
-            // تدقيق المنح: هوية المدير + السبب + الأرقام — لا أسرار أبدًا
+            // تدقيق المنح: هوية المدير + السبب + الأرقام المعاد حسابها — لا أسرار أبدًا
             clsAudit.Log(_dbContext, login.Data.UserId, "CreditApprovalGranted",
                 $"اعتماد تجاوز حد ائتمان #{approval.ApprovalId} — العميل #{info.CustomerId}: " +
-                $"الحالي {info.CurrentOutstanding:N2} + جديد {info.NewCreditAmount:N2} = {info.ProjectedOutstanding:N2} " +
-                $"(الحد {info.CreditLimit:N2} — الفائض {info.ExcessAmount:N2}) — السبب: {reason}");
+                $"الحالي {dbBalance:N2} + جديد {info.NewCreditAmount:N2} = {projected:N2} " +
+                $"(الحد {dbLimit:N2} — الفائض {approval.ExcessAmount:N2}) — السبب: {reason}");
             await _dbContext.SaveChangesAsync();
 
             return Result<int>.Ok(approval.ApprovalId, "تم اعتماد تجاوز حد الائتمان — أعد إتمام البيع.");
+        }
+
+        /// <summary>لقطة رصيد/حد ائتمان العميل للقراءة الحيّة بلا تتبع (نفس نمط
+        /// clsCheckoutService — UPDLOCK على صف العميل).</summary>
+        private sealed class CustomerCreditSnapshot
+        {
+            public decimal Balance { get; set; }
+            public decimal CreditLimit { get; set; }
         }
 
         // ═══════════════════════════════════════════════════════════════

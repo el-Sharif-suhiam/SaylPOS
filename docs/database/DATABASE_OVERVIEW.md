@@ -167,6 +167,7 @@ line's adjustment commits in its own transaction, and the
 | `Upgrade_12_StockCountCountedAt.sql` | `StockCounts.CountedAt`, `BookQuantityAtCount`, open-product unique index |
 | `Upgrade_13_StockCountPostedMovementId.sql` | `StockCounts.PostedMovementId` + `IX_StockMovements_ManualAdjustmentSource` |
 | `Upgrade_16_DefaultCreditLimit.sql` | One-time customer credit-limit backfill: `Customers.CreditLimit` 0/NULL → 1000, non-zero limits preserved; guarded by a `CreditLimitMigrationV1` marker row in `Settings` (also runs at startup via `EnsureSchemaUpgradesAsync`) |
+| `Upgrade_18_CreditApprovalGrantPolicy.sql` | Strict grant policy on `CreditApprovals`: `CK_CreditApprovals_GrantPolicy` requires every `granted` row to represent a real overrun of a **positive** limit (`CreditLimit > 0`, `NewCreditAmount > 0`, `ProjectedOutstanding = CurrentOutstanding + NewCreditAmount`, `ProjectedOutstanding > CreditLimit`, `ExcessAmount = ProjectedOutstanding − CreditLimit`). Status-conditional: historical `consumed`/`burned` audit rows are never rewritten; legacy violating `granted` rows transition to `burned` with a `SystemLogs` audit record (also runs at startup via `EnsureSchemaUpgradesAsync`) |
 
 The application also applies idempotent schema upgrades at startup
 (`EnsureSchemaUpgradesAsync`, `EnsureReservationSchemaAsync`,

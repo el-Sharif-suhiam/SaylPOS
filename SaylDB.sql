@@ -356,6 +356,17 @@ CREATE TABLE CreditApprovals
     CONSTRAINT CK_CreditApprovals_Amounts CHECK (
         NewCreditAmount > 0 AND ExcessAmount > 0
         AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount),
+    -- Upgrade_18: grant policy — a granted approval MUST represent a real
+    -- overrun of a POSITIVE limit (zero limit = absolute prohibition a
+    -- manager can never override; negative = invalid data). Status-conditional
+    -- on purpose: historical consumed/burned audit rows are never rewritten.
+    CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
+        Status <> N'granted'
+        OR (CreditLimit > 0
+            AND NewCreditAmount > 0
+            AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+            AND ProjectedOutstanding > CreditLimit
+            AND ExcessAmount = ProjectedOutstanding - CreditLimit)),
     CONSTRAINT FK_CreditApprovals_CustomerId FOREIGN KEY (CustomerId) REFERENCES Customers(PartyId),
     CONSTRAINT FK_CreditApprovals_ManagerUserId FOREIGN KEY (ManagerUserId) REFERENCES Users(UserId),
     CONSTRAINT FK_CreditApprovals_ConsumedByInvoiceId FOREIGN KEY (ConsumedByInvoiceId) REFERENCES Invoices(InvoiceId)

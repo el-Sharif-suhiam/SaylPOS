@@ -285,21 +285,71 @@ public class CreditLimitPolicyTests
         }
     }
 
-    // ══ 10) حد صفري: أي بيع بالدين يتطلب موافقة المدير ══
+    // ══ 10) حد صفري: منع مطلق — رفض أعمال صريح لا مسار اعتماد له إطلاقًا ══
     [Fact]
-    public async Task ZeroCreditLimit_AnyCreditSale_RequiresApproval()
+    public async Task ZeroCreditLimit_CreditSale_IsHardRejection_NotApprovalRequired()
     {
         var seed = await SeedWithStockAsync($"cl10-{Guid.NewGuid():N}"[..12]);
         await using var db = _fx.CreateContext();
         await SetLimitAsync(db, seed.CustomerId, 0m);
+        decimal inventoryBefore = await db.Inventories.AsNoTracking()
+            .Where(v => v.ProductId == seed.ProductId).Select(v => v.QuantityAvailable ?? 0).SingleAsync();
+        int invoicesBefore = await db.Invoices.CountAsync(i => i.UserId == seed.UserId && i.Type == enInvoicesType.sale);
+        int movementsBefore = await db.StockMovements.CountAsync(m => m.ProductId == seed.ProductId && m.MovementType == enStockMovementType.sale);
 
         var r = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 1m, 0m));
-        AssertApprovalRequired(r, seed.CustomerId, current: 0m, limit: 0m, newCredit: 1m);
 
-        // ومع ذلك: البيع النقدي الكلي لنفس العميل يمر بلا اعتماد
+        // رفض أعمال عادي صريح — ليست نتيجة «يتطلب موافقة المدير»: الواجهة لا تفتح
+        // نافذة الاعتماد لهذا الرفض أصلًا (التمييز آليًا بنوع النتيجة).
+        Assert.False(r.IsSuccess);
+        Assert.IsNotType<CreditApprovalRequiredResult<int>>(r);
+        Assert.Contains("ممنوع", r.Message); // الشراء بالدين ممنوع — حد الائتمان صفر
+
+        // لا سجل اعتماد أصلًا (المنع الصفري لا يُعتمد مهما كانت صلاحيات طالب البيع)
+        Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
+
+        // ولا أي أثر جزئي: لا فاتورة بيع ولا دفعات ولا حركات مخزون ولا دَين
+        await AssertNoTraceAsync(db, seed, seed.UserId, inventoryBefore, balanceBefore: 0m, invoicesBefore, movementsBefore);
+    }
+
+    // ══ 10-ب) البيع النقدي الكلي لعميل الحد الصفري يبقى مسموحًا ══
+    [Fact]
+    public async Task ZeroCreditLimit_CashOnlySale_StillAllowed()
+    {
+        var seed = await SeedWithStockAsync($"cl10b-{Guid.NewGuid():N}"[..12]);
+        await using var db = _fx.CreateContext();
+        await SetLimitAsync(db, seed.CustomerId, 0m);
+
         var cash = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 1m, 1m));
         Assert.True(cash.IsSuccess, cash.Message);
         Assert.Equal(0m, await BalanceOfAsync(db, seed.CustomerId));
+        Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
+    }
+
+    // ══ 10-ج) رفع الحد الدائم إلى موجب يعيد تفعيل تقييم السياسة العادي ══
+    // (الطريق الوحيد لتمكين الائتمان: تعديل المدير للحد الدائم — لا اعتماد تجاوز)
+    [Fact]
+    public async Task ZeroLimitRaisedToPositive_NormalPolicyEvaluationResumes()
+    {
+        var seed = await SeedWithStockAsync($"cl10c-{Guid.NewGuid():N}"[..12]);
+        await using var db = _fx.CreateContext();
+        await SetLimitAsync(db, seed.CustomerId, 0m);
+
+        // داخل المنع: أي آجل مرفوض رفضًا صريحًا
+        var blocked = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 1m, 0m));
+        Assert.False(blocked.IsSuccess);
+        Assert.IsNotType<CreditApprovalRequiredResult<int>>(blocked);
+
+        // المدير يعدّل الحد الدائم إلى 50 (خدمة تعديل الحد الحقيقية)
+        bool raise = await new clsCustomerService(db).UpdateCustomerCreditLimitAsync(seed.CustomerId, 50m);
+        Assert.True(raise);
+
+        // بعدها: سياسة الحد الموجب المعتادة — ضمن الحد نجاح، وفوقه نتيجة اعتماد
+        var within = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 30m, 0m));
+        Assert.True(within.IsSuccess, within.Message);
+
+        var over = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 30m, 0m));
+        AssertApprovalRequired(over, seed.CustomerId, current: 30m, limit: 50m, newCredit: 30m);
     }
 
     // ══ 11) حد ائتماني سالب: بيانات فاسدة — رفض تحقق صريح لا اعتماد ══

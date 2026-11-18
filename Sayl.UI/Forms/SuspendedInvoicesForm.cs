@@ -1,7 +1,9 @@
 using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Sayl.Core.Data;
 using Sayl.Core.Services;
 using Sayl.UI.Controls;
 using Sayl.UI.Infrastructure;
@@ -267,6 +269,19 @@ namespace Sayl.UI.Forms
                     actorSessionId: _activeSessionId); // VULN-05: درج اليوم
             }
 
+            // ══ سير اعتماد المدير (نفس نمط البيع المباشر في PosForm) ══
+            // الخدمة رفضت الإكمال بنتيجة «يتطلب موافقة المدير» (تجاوز حد موجب فقط —
+            // لا أثر قُيِّد والفاتورة عادت معلقة): نافذة الاعتماد ثم إعادة محاولة
+            // واحدة لنفس الإكمال بمعرف الاعتماد — استهلاكه داخل معاملة الإكمال نفسها.
+            // رفض الحد الصفري يأتي فشلًا عاديًا فلا تُفتح نافذة الاعتماد أصلًا.
+            if (result is CreditApprovalRequiredResult approvalRequired)
+            {
+                var retried = await RunCreditApprovalFlowAsync(invoice, payment.PaymentsList, approvalRequired);
+                if (retried == null)
+                    return; // أُلغي الاعتماد أو فشل — الرسالة عُرضت والفاتورة بقيت معلقة
+                result = retried;
+            }
+
             if (!result.IsSuccess)
             {
                 UiHelpers.ShowError(this, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Suspended.Resume.Failed") : result.Message);
@@ -282,6 +297,77 @@ namespace Sayl.UI.Forms
                 await InvoicePrintHelper.PrintAsync(invoice.InvoiceId, this, printFormat.Value);
 
             await LoadInvoicesAsync();
+        }
+
+        // ───────── سير اعتماد المدير لإكمال فاتورة معلقة متجاوزة للحد ─────────
+        // (أ) الخدمة رفضت الإكمال بنتيجة «يتطلب موافقة المدير» — المعاملة تراجعت
+        //     كاملة: الفاتورة ما زالت suspended وحجزها ومخزونها كما كانا.
+        // (ب) نافذة الاعتماد (CreditApprovalForm نفسها) تعرض موقف العميل وتجمع
+        //     سببًا إلزاميًا + بيانات مدير (اسم + كلمة مرور — إعادة مصادقة دائمًا).
+        // (ج) الخدمة (clsCreditApprovalService) تتحقق من المدير على الخادم وتعيد
+        //     مطابقة اللقطة مع دفتر Customers.Balance ثم تسجل الاعتماد granted.
+        // (د) إعادة محاولة واحدة لنفس الإكمال بمعرف الاعتماد — الاستهلاك (granted →
+        //     consumed) داخل معاملة الإكمال بعد CAS انتقال الحالة: لا دفعات ولا
+        //     بنود ولا حركات مخزون مكررة (فشل المحاولة الأولى تراجع كل شيء).
+        // null = لا يوجد إكمال (أُلغي أو فشل والرسالة عُرضت داخليًا).
+        private async Task<Result?> RunCreditApprovalFlowAsync(
+            Common.DTOs.ViewModel.InvoiceVM invoice, List<DtoPaymentInfo> payments,
+            CreditApprovalRequiredResult approvalRequired)
+        {
+            var info = approvalRequired.ApprovalInfo;
+            if (info == null)
+                return null;
+
+            // اسم العميل للعرض — القراءة قبل فتح النافذة (فحص تنسيق لا قرار)
+            string customerName = $"#{info.CustomerId}";
+            using (var scope = Program.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SaylDbContext>();
+                var name = await db.Parties.AsNoTracking()
+                    .Where(p => p.PartyId == info.CustomerId)
+                    .Select(p => p.Name)
+                    .FirstOrDefaultAsync();
+                if (!string.IsNullOrWhiteSpace(name))
+                    customerName = name;
+            }
+
+            using var approvalForm = new CreditApprovalForm(customerName, info);
+            if (approvalForm.ShowDialog(this) != DialogResult.OK)
+                return null; // أُلغي الاعتماد — الإكمال يُترك بلا أي أثر (الفاتورة معلقة)
+
+            Result retryResult;
+            using (var scope = Program.Services.CreateScope())
+            {
+                // التحقق من المدير + منح الاعتماد — القواعد كلها على الخادم
+                var approvalService = scope.ServiceProvider.GetRequiredService<clsCreditApprovalService>();
+                var grant = await approvalService.ApproveCreditSaleAsync(
+                    info, approvalForm.ManagerUsername, approvalForm.ManagerPassword, approvalForm.Reason);
+
+                if (!grant.IsSuccess || grant.Data <= 0)
+                {
+                    // فشل مصادقة / حساب غير مصرَّح / سبب مرفوض / بيانات غير مطابقة — رسالة الخدمة نفسها
+                    UiHelpers.ShowError(this, grant.Message);
+                    return null;
+                }
+
+                // إعادة محاولة واحدة لنفس الإكمال بمعرف الاعتماد — الاستهلاك داخل معاملته
+                var checkoutService = scope.ServiceProvider.GetRequiredService<clsCheckoutService>();
+                retryResult = await checkoutService.CompleteSuspendedInvoiceAsync(invoice.InvoiceId, payments,
+                    actorUserId: SessionState.CurrentUser?.UserId ?? 0,
+                    actorSessionId: _activeSessionId,
+                    creditApprovalId: grant.Data);
+            }
+
+            if (retryResult.IsSuccess)
+                return retryResult;
+
+            // فشل بعد الاعتماد: الاعتماد أُحرق خدميًا ولا دَين قُيِّد — تمايز الرسالة:
+            // «الاعتماد لم يعد صالحًا» (ربط اعتماد لم يعد مطابقًا) مقابل فشل إكمال عام.
+            UiHelpers.ShowError(this,
+                retryResult is CreditApprovalRequiredResult
+                    ? AppLang.T("CreditApproval.Msg.NotValid")
+                    : $"{AppLang.T("CreditApproval.Msg.SaleFailed")}\n{retryResult.Message}");
+            return null;
         }
 
         private async Task CancelInvoiceAsync()

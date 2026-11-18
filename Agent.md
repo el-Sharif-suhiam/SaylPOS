@@ -65,9 +65,12 @@ All backend services are implemented. Remaining work is listed in TASK.md.
 - `Expenses`, `POSSessions`, `CashMovements`, `Settings` (key/value, incl.
   `FiscalYearStart`/`FiscalYearClosedOn`/`TaxPercent`/`DefaultCreditLimit`),
   `SystemLogs` (audit), `CreditApprovals` (one manager approval per over-limit
-  credit sale; consumed exactly once via CAS inside the checkout transaction).
+  credit sale; consumed exactly once via CAS inside the checkout transaction;
+  `CK_CreditApprovals_GrantPolicy` from Upgrade_18 enforces that a granted row
+  represents a real overrun of a POSITIVE limit — legacy violating rows were
+  transitioned to `burned`, never deleted).
 - Schema source of truth: `SaylDB.sql` (fresh installs only — safety gate aborts if any
-  table exists; no DROP statements). Idempotent `Upgrade_09..17` scripts migrate older
+  table exists; no DROP statements). Idempotent `Upgrade_09..18` scripts migrate older
   databases; the app also runs idempotent schema upgrades at startup (incl. the
   one-time `Upgrade_16` credit-limit backfill guarded by a `Settings` marker).
 - Documentation: `docs/database/` (overview, ER model, stored-procedure status).
@@ -93,19 +96,29 @@ All backend services are implemented. Remaining work is listed in TASK.md.
   general-payment allocation). Do not invent alternate balance math.
 - **Credit limits:** enforcement is centralized in `clsCheckoutService.ProcessPaymentAsync`
   (the single funnel for direct sales and suspended-invoice completion). Semantics:
-  `CreditLimit = 0` means credit purchases are prohibited; a positive limit permits
-  credit within it. The projected balance (`Customers.Balance` ledger read fresh with
-  `UPDLOCK` inside the Serializable transaction + atomic `ExecuteUpdateAsync` write) must
-  stay within the limit; over-limit credit sales fail with a structured
-  `CreditApprovalRequiredResult` (manager approval required — no invoice/debt persisted).
+  `CreditLimit = 0` means credit purchases are prohibited — a HARD non-overridable
+  rejection (plain failed Result, never `CreditApprovalRequiredResult`, no approval
+  dialog, no `CreditApprovals` record; the only remedy is a manager permanently
+  raising the customer's limit). A positive limit permits credit within it. Negative
+  limits are invalid data and reject with a clear message. The projected balance
+  (`Customers.Balance` ledger read fresh with `UPDLOCK` inside the Serializable
+  transaction + atomic `ExecuteUpdateAsync` write) must stay within the limit;
+  over-limit credit sales fail with a structured `CreditApprovalRequiredResult`
+  (manager approval required — no invoice/debt persisted).
 - **Credit approval (manager-only override):** `clsCreditApprovalService` re-authenticates
   the approver through the real login (`clsUsersService.LoginAsync` BCrypt) and requires
-  the Admin role (`AppPermissions.IsAdmin`); a mandatory reason is stored. The granted
+  the Admin role (`AppPermissions.IsAdmin`); a mandatory reason is stored. Before
+  granting, the service re-validates the caller-supplied snapshot against the database
+  (customer exists; zero/negative limit rejected; supplied balance and limit must match
+  `Customers.Balance`/`CreditLimit` read with UPDLOCK; projected outstanding recomputed
+  and must actually exceed the positive limit; excess recomputed) and persists ONLY the
+  server-validated values — forged or stale approval info is rejected. The granted
   `CreditApprovals` row is bound to customer + exact credit amount + balance/limit
   snapshot, and is consumed exactly once (CAS `granted→consumed`) inside the checkout
   transaction after re-checking the binding; a checkout that fails after approval burns
   the approval (`granted→burned`, audit-recorded, never reusable). Approvals never modify
-  the customer's permanent `CreditLimit`. UI: `CreditApprovalForm` opened from `PosForm`.
+  the customer's permanent `CreditLimit`. UI: `CreditApprovalForm` opened from `PosForm`
+  (direct sale) and `SuspendedInvoicesForm` (suspended-invoice completion).
 
 ## 6. Implemented services (all of them)
 - `clsPartyService`, `clsEmployeeService`, `clsCustomerService`, `clsSupplierService`

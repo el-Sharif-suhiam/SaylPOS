@@ -64,6 +64,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade16Script());
             // اعتمادات المدير لتجاوز الحد: جدول CreditApprovals (Task-3)
             ExecuteBatches(LoadUpgrade17Script());
+            // سياسة المنح الصارمة للاعتمادات: القيد + ترحيل صفوف granted المخالفة (Task-4)
+            ExecuteBatches(LoadUpgrade18Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -157,6 +159,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade17Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_17_CreditApprovals.sql"));
+
+    private static string LoadUpgrade18Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_18_CreditApprovalGrantPolicy.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

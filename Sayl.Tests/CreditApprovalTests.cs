@@ -224,26 +224,28 @@ public class CreditApprovalTests
         var manager = await CreateUserAsync(db, "ca6", AppPermissions.AdminRoleValue);
 
         var before = DateTime.UtcNow.AddSeconds(-1);
+        // القيم المُقدَّمة يجب أن تطابق وضع العميل الفعلي (رصيد 0، حد 100) —
+        // الخدمة ترفض أي انحراف وتعيد حساب المشروع والفائض من القاعدة.
         var grant = await ApprovalService(db).ApproveCreditSaleAsync(
             new CreditApprovalRequiredInfo
             {
                 CustomerId = seed.CustomerId,
-                CurrentOutstanding = 40m,
+                CurrentOutstanding = 0m,
                 CreditLimit = 100m,
-                NewCreditAmount = 90m,
-                ProjectedOutstanding = 130m,
-                ExcessAmount = 30m
+                NewCreditAmount = 150m,
+                ProjectedOutstanding = 150m,
+                ExcessAmount = 50m
             }, manager.Username, ManagerPassword, Reason);
         Assert.True(grant.IsSuccess, grant.Message);
 
         var row = await ApprovalMustExistAsync(db, grant.Data);
         Assert.Equal(seed.CustomerId, row.CustomerId);
         Assert.Equal(manager.UserId, row.ManagerUserId);
-        Assert.Equal(40m, row.CurrentOutstanding);
+        Assert.Equal(0m, row.CurrentOutstanding);
         Assert.Equal(100m, row.CreditLimit);
-        Assert.Equal(90m, row.NewCreditAmount);
-        Assert.Equal(130m, row.ProjectedOutstanding);
-        Assert.Equal(30m, row.ExcessAmount);
+        Assert.Equal(150m, row.NewCreditAmount);
+        Assert.Equal(150m, row.ProjectedOutstanding);
+        Assert.Equal(50m, row.ExcessAmount);
         Assert.Equal(Reason, row.Reason);
         Assert.Equal("granted", row.Status);
         Assert.Null(row.ConsumedByInvoiceId);
@@ -252,6 +254,74 @@ public class CreditApprovalTests
 
         // تدقيق المنح: هوية المدير + السبب (بلا أسرار أبدًا)
         Assert.Equal(1, await db.SystemLogs.CountAsync(l => l.Action == "CreditApprovalGranted" && l.UserId == manager.UserId));
+    }
+
+    // ══ 6-ب) تزوير الرصيد أو الحد في معلومات الاعتماد: مرفوض على الخادم ══
+    // (كانت الخدمة تثق بقيم الواجهة وتخزنها كما هي — الآن تُطابقها مع دفتر
+    // Customers.Balance وتخزن القيم المعاد حسابها وحدها)
+    [Fact]
+    public async Task ForgedBalanceOrLimit_InApprovalInfo_IsRejected()
+    {
+        var seed = await SeedWithStockAsync($"ca6b-{Guid.NewGuid():N}"[..12]);
+        await using var db = _fx.CreateContext();
+        await SetLimitAsync(db, seed.CustomerId, 100m);
+        var manager = await CreateUserAsync(db, "ca6b", AppPermissions.AdminRoleValue);
+        var svc = ApprovalService(db);
+
+        // رصيد مزوّر (30 بدل 0)
+        var forgedBalance = new CreditApprovalRequiredInfo
+        {
+            CustomerId = seed.CustomerId, CurrentOutstanding = 30m, CreditLimit = 100m,
+            NewCreditAmount = 150m, ProjectedOutstanding = 180m, ExcessAmount = 80m
+        };
+        var g1 = await svc.ApproveCreditSaleAsync(forgedBalance, manager.Username, ManagerPassword, Reason);
+        Assert.False(g1.IsSuccess);
+        Assert.Contains("لم تعد مطابقة", g1.Message);
+
+        // حد مزوّر (200 بدل 100)
+        var forgedLimit = new CreditApprovalRequiredInfo
+        {
+            CustomerId = seed.CustomerId, CurrentOutstanding = 0m, CreditLimit = 200m,
+            NewCreditAmount = 150m, ProjectedOutstanding = 150m, ExcessAmount = -50m
+        };
+        var g2 = await svc.ApproveCreditSaleAsync(forgedLimit, manager.Username, ManagerPassword, Reason);
+        Assert.False(g2.IsSuccess);
+        Assert.Contains("لم تعد مطابقة", g2.Message);
+
+        // عميل بحد سالب (بيانات فاسدة): لا اعتماد حتى بمعلومات مطابقة للسالب
+        await SetLimitAsync(db, seed.CustomerId, -5m);
+        var negativeLimit = new CreditApprovalRequiredInfo
+        {
+            CustomerId = seed.CustomerId, CurrentOutstanding = 0m, CreditLimit = -5m,
+            NewCreditAmount = 10m, ProjectedOutstanding = 10m, ExcessAmount = 15m
+        };
+        var g3 = await svc.ApproveCreditSaleAsync(negativeLimit, manager.Username, ManagerPassword, Reason);
+        Assert.False(g3.IsSuccess);
+        Assert.Contains("غير صالحة", g3.Message);
+
+        // لا سجل اعتماد أُنشئ في أي محاولة من الثلاث
+        Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
+    }
+
+    // ══ 6-ج) عملية لا تتجاوز الحد أصلًا: لا اعتماد (ليست عملية تجاوز) ══
+    [Fact]
+    public async Task NonOverLimitOperation_IsRejectedByApprovalService()
+    {
+        var seed = await SeedWithStockAsync($"ca6c-{Guid.NewGuid():N}"[..12]);
+        await using var db = _fx.CreateContext();
+        await SetLimitAsync(db, seed.CustomerId, 100m);
+        var manager = await CreateUserAsync(db, "ca6c", AppPermissions.AdminRoleValue);
+
+        // آجل 50 ضمن الحد 100 — المشروع 50 ≤ 100: لا تجاوز فلا اعتماد
+        var withinLimit = new CreditApprovalRequiredInfo
+        {
+            CustomerId = seed.CustomerId, CurrentOutstanding = 0m, CreditLimit = 100m,
+            NewCreditAmount = 50m, ProjectedOutstanding = 50m, ExcessAmount = -50m
+        };
+        var g = await ApprovalService(db).ApproveCreditSaleAsync(withinLimit, manager.Username, ManagerPassword, Reason);
+        Assert.False(g.IsSuccess);
+        Assert.Contains("لا تتجاوز حد الائتمان", g.Message);
+        Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
     }
 
     // ══ 7) الاعتماد يصرّح بعملية بيع واحدة بالضبط ══
@@ -445,21 +515,62 @@ public class CreditApprovalTests
         Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
     }
 
-    // ══ 15) حد صفري: بيع الائتمان يتطلب الاعتماد — ومعه ينجح ══
+    // ══ 15) حد صفري: منع مطلق — لا اعتماد إطلاقًا حتى ببيانات مدير صحيحة ══
+    // (كان الاختبار القديم يُصرّح بتجاوز المنع الصفري عبر الاعتماد — سياسة خاطئة
+    // أُصلحت: المنع الصفري قيد أعمال صارم لا يعتمده مدير النظام أبدًا)
     [Fact]
-    public async Task ZeroLimitCustomer_RequiresApproval_ThenSucceedsWithIt()
+    public async Task ZeroLimitCustomer_ApprovalService_RejectsEvenWithValidManagerCredentials()
     {
         var seed = await SeedWithStockAsync($"ca15-{Guid.NewGuid():N}"[..12]);
         await using var db = _fx.CreateContext();
         await SetLimitAsync(db, seed.CustomerId, 0m);
         var manager = await CreateUserAsync(db, "ca15", AppPermissions.AdminRoleValue);
 
-        var first = AssertApprovalRequired(await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 1m)));
+        // البيع نفسه مرفوض رفضًا صريحًا — لا نتيجة اعتماد (لا نافذة ولا سجل ممكن)
+        var first = await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 1m));
+        Assert.False(first.IsSuccess);
+        Assert.IsNotType<CreditApprovalRequiredResult<int>>(first);
+
+        // تزوير معلومات اعتماد لعميل حده صفر (بأوراق اعتماد مدير حقيقية): مرفوض
+        var forged = new CreditApprovalRequiredInfo
+        {
+            CustomerId = seed.CustomerId,
+            CurrentOutstanding = 0m,
+            CreditLimit = 0m,
+            NewCreditAmount = 1m,
+            ProjectedOutstanding = 1m,
+            ExcessAmount = 1m
+        };
+        var grant = await ApprovalService(db).ApproveCreditSaleAsync(forged, manager.Username, ManagerPassword, Reason);
+
+        Assert.False(grant.IsSuccess);
+        Assert.Contains("صفر", grant.Message);
+        Assert.Equal(0, await db.CreditApprovals.CountAsync(a => a.CustomerId == seed.CustomerId));
+        Assert.Equal(0m, await BalanceOfAsync(db, seed.CustomerId)); // لا دَين قُيِّد أصلًا
+    }
+
+    // ══ 15-ب) رفع الحد الدائم بعد المنع الصفري يعيد السياسة المعتادة ══
+    [Fact]
+    public async Task ZeroLimitCustomer_RaisedToPositive_NormalApprovalPolicyApplies()
+    {
+        var seed = await SeedWithStockAsync($"ca15b-{Guid.NewGuid():N}"[..12]);
+        await using var db = _fx.CreateContext();
+        await SetLimitAsync(db, seed.CustomerId, 0m);
+        var manager = await CreateUserAsync(db, "ca15b", AppPermissions.AdminRoleValue);
+
+        // رفع الحد الدائم إلى 100 (تعديل مدير مصرَّح به — ليس اعتماد تجاوز)
+        bool raise = await new clsCustomerService(db).UpdateCustomerCreditLimitAsync(seed.CustomerId, 100m);
+        Assert.True(raise);
+
+        // بعدها السياسة المعتادة: تجاوز الحد الموجب → نتيجة اعتماد → منح → نجاح
+        var first = AssertApprovalRequired(await new clsCheckoutService(db).ProcessCheckoutAsync(SaleRequest(seed, seed.CustomerId, 150m)));
         var (retry, approvalId) = await GrantAndRetryAsync(db, seed, first, manager.Username, ManagerPassword, Reason);
 
         Assert.True(retry.IsSuccess, retry.Message);
-        Assert.Equal(1m, await BalanceOfAsync(db, seed.CustomerId));
+        Assert.Equal(150m, await BalanceOfAsync(db, seed.CustomerId));
         Assert.Equal("consumed", (await ApprovalMustExistAsync(db, approvalId)).Status);
+        Assert.Equal(100m, await db.Customers.AsNoTracking()
+            .Where(c => c.PartyId == seed.CustomerId).Select(c => c.CreditLimit ?? 0m).SingleAsync()); // الحد الدائم لم يتغير
     }
 
     // ══ 16) الاعتماد لا يعدّل حد العميل الدائم أبدًا ══

@@ -425,6 +425,51 @@ BEGIN
     CREATE INDEX IX_CreditApprovals_ManagerUserId ON dbo.CreditApprovals(ManagerUserId);
     EXEC(N'CREATE UNIQUE INDEX UQ_CreditApprovals_ConsumedByInvoice
            ON dbo.CreditApprovals(ConsumedByInvoiceId) WHERE ConsumedByInvoiceId IS NOT NULL');
+END;
+/* Task-4: سياسة المنح الصارمة لاعتمادات تجاوز حد الائتمان (Upgrade_18).
+   أي اعتماد granted جديد يجب أن يمثل تجاوزًا فعليًا لحدٍّ موجب (الصفر
+   منع مطلق لا يعتمده مدير، السالب بيانات فاسدة). صفوف granted التاريخية
+   المخالفة تنتقل burned (انتقال الحرق نفسه — سجل تدقيق يبقى، لا حذف)،
+   ولكل صف سجل SystemLogs. القيد مشروط بالحالة granted عمدًا: صفوف
+   consumed/burned القديمة سجل تدقيق لا يُمس. نفس منطق
+   Upgrade_18_CreditApprovalGrantPolicy.sql وSaylDB.sql تمامًا —
+   والمسارات الثلاثة متطابقة النتيجة. Idempotent: بالقيد الموجود لا يفعل شيئًا. */
+IF OBJECT_ID(N'dbo.CreditApprovals', N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.SystemLogs', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.check_constraints
+                   WHERE name = N'CK_CreditApprovals_GrantPolicy'
+                     AND parent_object_id = OBJECT_ID(N'dbo.CreditApprovals'))
+BEGIN
+    DECLARE @violatingApprovals TABLE (ApprovalId INT NOT NULL);
+    BEGIN TRAN;
+    INSERT INTO @violatingApprovals (ApprovalId)
+    SELECT ApprovalId
+    FROM dbo.CreditApprovals WITH (UPDLOCK)
+    WHERE Status = N'granted'
+      AND NOT (CreditLimit > 0
+               AND NewCreditAmount > 0
+               AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+               AND ProjectedOutstanding > CreditLimit
+               AND ExcessAmount = ProjectedOutstanding - CreditLimit);
+    UPDATE a SET a.Status = N'burned'
+    FROM dbo.CreditApprovals a
+    JOIN @violatingApprovals v ON v.ApprovalId = a.ApprovalId;
+    INSERT INTO dbo.SystemLogs (UserId, Action, Details, CreatedAt)
+    SELECT NULL, N'CreditApprovalBurned',
+           N'اعتماد ائتمان #' + CONVERT(NVARCHAR(20), v.ApprovalId)
+             + N' أُحرق بترحيل Upgrade_18: صف granted مخالف لسياسة المنح الصارمة'
+             + N' (حد ائتماني غير موجب أو مشروع لا يتجاوز الحد أو فائض محسوب خطأ)'
+             + N' — سجل تدقيق يبقى محفوظًا ولا صلاحية للاعتماد مستقبلًا.',
+           GETUTCDATE()
+    FROM @violatingApprovals v;
+    COMMIT TRAN;
+    EXEC(N'ALTER TABLE dbo.CreditApprovals ADD CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
+        Status <> N''granted''
+        OR (CreditLimit > 0
+            AND NewCreditAmount > 0
+            AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+            AND ProjectedOutstanding > CreditLimit
+            AND ExcessAmount = ProjectedOutstanding - CreditLimit))');
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
