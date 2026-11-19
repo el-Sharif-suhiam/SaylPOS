@@ -33,8 +33,11 @@
      ولا صف consumed يُمس (تاريخ استهلاك حقيقي).
    • لكل صف أُحرق سجل SystemLogs (Action = CreditApprovalBurned)
      يذكر معرف الاعتماد وسبب الترحيل — بنمط حرق الخدمة الحي.
-   • التحديث + سجلات التدقيق داخل معاملة واحدة — لا نافذة نصفة-
-     ترحيل عند انقطاع التشغيل.
+   • التحديث + سجلات التدقيق + إنشاء القيد داخل معاملة واحدة واحدة —
+     لا نافذة نصفة-ترحيل عند انقطاع التشغيل، وفشل أي خطوة يتراجع كل شيء.
+   • تسلسل بين تطبيقات متوازية: قفل تطبيقي مسمّى (sp_getapplock Exclusive
+     بمالك المعاملة) يُقسط عليه المنفّذ وحده قبل إعادة فحص القيد — من تنتهي
+     مهلته يتخطى تخطيًّا غير فادح (الإقلاع/التشغيل اللاحق يعيد التطبيق).
 
    Idempotent: بالقيد الموجود لا يفعل شيئًا — إعادة التشغيل آمنة.
    التطبيق نفسه (EnsureSchemaUpgradesAsync عند الإقلاع) ينفذ نفس
@@ -58,56 +61,86 @@ SET NOCOUNT ON;
 IF OBJECT_ID(N'dbo.CreditApprovals', N'U') IS NOT NULL
    AND OBJECT_ID(N'dbo.SystemLogs', N'U') IS NOT NULL
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.check_constraints
-                   WHERE name = N'CK_CreditApprovals_GrantPolicy'
-                     AND parent_object_id = OBJECT_ID(N'dbo.CreditApprovals'))
+    /* ── 0) قفل تطبيقي مسمّى: تسلسل الترقية بين تطبيقات متوازية ──
+       الترقية نفسها تعمل عند إقلاع كل طرفية (EnsureSchemaUpgradesAsync) —
+       قفل sp_getapplock Exclusive بمالك المعاملة (نمط clsPayrollService)
+       يُسلسِل المنفّذين. من تنتهي مهلته يتخطى تخطيًّا غير فادح (المحاولة
+       القادمة تعيد التطبيق — الترقية idempotent). */
+    DECLARE @u18Lock int;
+    BEGIN TRAN;
+    EXEC @u18Lock = sys.sp_getapplock
+         @Resource = N'Upgrade18GrantPolicy',
+         @LockMode = 'Exclusive',
+         @LockOwner = 'Transaction',
+         @LockTimeout = 10000;
+    IF @u18Lock >= 0
     BEGIN
-        /* ── 1) ترحيل صفوف granted المخالفة إلى burned (مع تدقيق) ── */
-        DECLARE @violating TABLE (ApprovalId INT NOT NULL);
+        BEGIN TRY
+            /* ── إعادة فحص حالة الترقية بعد القسط على القفل — لا قبله ── */
+            IF NOT EXISTS (SELECT 1 FROM sys.check_constraints
+                           WHERE name = N'CK_CreditApprovals_GrantPolicy'
+                             AND parent_object_id = OBJECT_ID(N'dbo.CreditApprovals'))
+            BEGIN
+                /* ── 1) ترحيل صفوف granted المخالفة إلى burned (مع تدقيق) ── */
+                DECLARE @violating TABLE (ApprovalId INT NOT NULL);
 
-        BEGIN TRAN;
-        INSERT INTO @violating (ApprovalId)
-        SELECT ApprovalId
-        FROM dbo.CreditApprovals WITH (UPDLOCK)
-        WHERE Status = N'granted'
-          AND NOT (CreditLimit > 0
-                   AND NewCreditAmount > 0
-                   AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
-                   AND ProjectedOutstanding > CreditLimit
-                   AND ExcessAmount = ProjectedOutstanding - CreditLimit);
+                INSERT INTO @violating (ApprovalId)
+                SELECT ApprovalId
+                FROM dbo.CreditApprovals WITH (UPDLOCK)
+                WHERE Status = N'granted'
+                  AND NOT (CreditLimit > 0
+                           AND NewCreditAmount > 0
+                           AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+                           AND ProjectedOutstanding > CreditLimit
+                           AND ExcessAmount = ProjectedOutstanding - CreditLimit);
 
-        UPDATE a
-        SET a.Status = N'burned'
-        FROM dbo.CreditApprovals a
-        JOIN @violating v ON v.ApprovalId = a.ApprovalId;
+                UPDATE a
+                SET a.Status = N'burned'
+                FROM dbo.CreditApprovals a
+                JOIN @violating v ON v.ApprovalId = a.ApprovalId;
 
-        INSERT INTO dbo.SystemLogs (UserId, Action, Details, CreatedAt)
-        SELECT NULL, N'CreditApprovalBurned',
-               N'اعتماد ائتمان #' + CONVERT(NVARCHAR(20), v.ApprovalId)
-                 + N' أُحرق بترحيل Upgrade_18: صف granted مخالف لسياسة المنح الصارمة'
-                 + N' (حد ائتماني غير موجب أو مشروع لا يتجاوز الحد أو فائض محسوب خطأ)'
-                 + N' — سجل تدقيق يبقى محفوظًا ولا صلاحية للاعتماد مستقبلًا.',
-               GETUTCDATE()
-        FROM @violating v;
-        COMMIT TRAN;
+                INSERT INTO dbo.SystemLogs (UserId, Action, Details, CreatedAt)
+                SELECT NULL, N'CreditApprovalBurned',
+                       N'اعتماد ائتمان #' + CONVERT(NVARCHAR(20), v.ApprovalId)
+                         + N' أُحرق بترحيل Upgrade_18: صف granted مخالف لسياسة المنح الصارمة'
+                         + N' (حد ائتماني غير موجب أو مشروع لا يتجاوز الحد أو فائض محسوب خطأ)'
+                         + N' — سجل تدقيق يبقى محفوظًا ولا صلاحية للاعتماد مستقبلًا.',
+                       GETUTCDATE()
+                FROM @violating v;
 
-        /* ── 2) قيد سياسة المنح — مشروط بالحالة granted (انظر الرأس) ── */
-        ALTER TABLE dbo.CreditApprovals ADD CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
-            Status <> N'granted'
-            OR (CreditLimit > 0
-                AND NewCreditAmount > 0
-                AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
-                AND ProjectedOutstanding > CreditLimit
-                AND ExcessAmount = ProjectedOutstanding - CreditLimit));
+                /* ── 2) قيد سياسة المنح — مشروط بالحالة granted (انظر الرأس) ──
+                   داخل المعاملة نفسها: الحرق والتدقيق والقيد يُالتزمان معًا —
+                   فشل أي خطوة يتراجع الترقية كلها (لا حالة نصف مُرحّلة). */
+                ALTER TABLE dbo.CreditApprovals ADD CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
+                    Status <> N'granted'
+                    OR (CreditLimit > 0
+                        AND NewCreditAmount > 0
+                        AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+                        AND ProjectedOutstanding > CreditLimit
+                        AND ExcessAmount = ProjectedOutstanding - CreditLimit));
 
-        DECLARE @burnedCount INT = (SELECT COUNT(*) FROM @violating);
+                DECLARE @burnedCount INT = (SELECT COUNT(*) FROM @violating);
 
-        PRINT 'Upgrade_18: grant-policy constraint added'
-            + ' (legacy violating granted rows transitioned to burned: '
-            + CONVERT(NVARCHAR(20), @burnedCount) + ')';
+                PRINT 'Upgrade_18: grant-policy constraint added'
+                    + ' (legacy violating granted rows transitioned to burned: '
+                    + CONVERT(NVARCHAR(20), @burnedCount) + ')';
+            END
+            ELSE
+                PRINT 'Upgrade_18: CK_CreditApprovals_GrantPolicy already present — skipped';
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH;
     END
     ELSE
-        PRINT 'Upgrade_18: CK_CreditApprovals_GrantPolicy already present — skipped';
+    BEGIN
+        /* مهلة القفل/ازدحام: تخطٍّ غير فادح — إقلاع/تشغيل لاحق يعيد التطبيق */
+        ROLLBACK TRAN;
+        PRINT 'Upgrade_18: another instance holds the upgrade lock — skipped (will be applied by the next run)';
+    END
 END
 ELSE
     PRINT 'Upgrade_18: required tables not present — skipped (unexpected for a Sayl database)';

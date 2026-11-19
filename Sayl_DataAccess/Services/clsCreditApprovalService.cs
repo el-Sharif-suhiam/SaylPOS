@@ -81,82 +81,129 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("هذا الحساب غير مصرَّح له باعتماد تجاوز حد الائتمان — يلزم مدير نظام.");
             }
 
-            // العميل موجود؟ + القيم الفعلية — تُقرأ معًا من دفتر Customers.Balance أدناه
-            // (الاعتماد بلا عميل حقيقي لا معنى له: رفض عند غياب صف العميل).
-
-            // ══ إعادة التحقق الخدمي الكامل: لا ثقة أبدًا ببيانات الواجهة/الطلب ══
-            // تُقرأ القيم من دفتر Customers.Balance (المصدر المعتمد نفسه الذي يقرأه
-            // إنفاذ البيع UPDLOCK) — أي فجوة بين المُقدَّم والفعلي (تزوير/قِدم:
-            // تغيّر الرصيد أو الحد بين رفض البيع والاعتماد) = رفض صريح يقتضي
-            // تقييم بيع جديد. يُخزَّن الخادم القيم المعاد حسابها وحدها لا المُقدَّمة.
-            // مع UPDLOCK على صف العميل: لا سباق مع سداد/تعديل حد متوازٍ.
-            CustomerCreditSnapshot? snap = await _dbContext.Database.SqlQuery<CustomerCreditSnapshot>(@$"
-                    SELECT ISNULL(Balance, 0) AS [Balance], ISNULL(CreditLimit, 0) AS [CreditLimit]
-                    FROM Customers WITH (UPDLOCK)
-                    WHERE PartyId = {info.CustomerId}")
-                .FirstOrDefaultAsync();
-
-            if (snap == null)
-                return Result<int>.Fail("العميل غير موجود.");
-
-            decimal dbBalance = snap.Balance;
-            decimal dbLimit = snap.CreditLimit;
-
-            // الحد الصفري: منع مطلق لا يعتمده مدير إطلاقًا (قيد أعمال صارم)
-            if (dbLimit == 0)
-                return Result<int>.Fail(
-                    "الشراء بالدين ممنوع لهذا العميل: حد الائتمان صفر — لا يمكن اعتماد هذا المنع. " +
-                    "لتتمكين الائتمان، عدّل حد الائتمان الدائم للعميل إلى قيمة موجبة أولًا.");
-            // الحد السالب: بيانات فاسدة — رفض تحقق صريح لا يُعامل كصفر
-            if (dbLimit < 0)
-                return Result<int>.Fail("حد ائتمان العميل قيمة غير صالحة (سالب) — صحّح بيانات العميل أولًا.");
-
-            // مطابقة لقطة الموقف المُقدَّمة مع الوضع الفعلي: أي انحراف = معلومات
-            // مزوّرة أو قديمة (تغيّر الرصيد/الحد بين رفض البيع والاعتماد) — الاعتماد
-            // مرفوض ويُعاد تقييم البيع من جديد (نتيجة بيع جديدة ثم اعتماد جديد).
-            if (info.CurrentOutstanding != dbBalance)
-                return Result<int>.Fail(
-                    $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: الرصيد الحالي بالدفتر {dbBalance:N2} " +
-                    $"لا {info.CurrentOutstanding:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
-            if (info.CreditLimit != dbLimit)
-                return Result<int>.Fail(
-                    $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: حد العميل بالدفتر {dbLimit:N2} " +
-                    $"لا {info.CreditLimit:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
-
-            // مبلغ جديد موجب + تجاوز فعلي للحد الموجب: لا بيع ضمن الحد من مسار الاعتماد
-            if (info.NewCreditAmount <= 0)
-                return Result<int>.Fail("مبلغ ائتمان غير صالح للاعتماد.");
-            decimal projected = dbBalance + info.NewCreditAmount;
-            if (projected <= dbLimit)
-                return Result<int>.Fail(
-                    $"هذه العملية لا تتجاوز حد الائتمان (المشروع {projected:N2} ≤ الحد {dbLimit:N2}) — " +
-                    "لا اعتماد مطلوب: أعد تقييم البيع.");
-
-            var approval = new CreditApproval
+            // ══ المعاملة الصريحة الواحدة: لقطة UPDLOCK + كل التحقق + الإدراج + تدقيق المنح ══
+            // (كانت اللقطة تُقرأ بأمر autocommit منفصل — قفل UPDLOCK يسقط بنهاية
+            // الأمر فيبقى فجوة غير محمية بين القراءة والإدراج، وكان الاعتماد يُحفظ
+            // autocommit أولًا ثم تدقيق المنح autocommit ثانيًا — فشل الثاني يترك
+            // اعتمادًا محفوظًا بلا سجل تدقيق. الآن: Serializable + معاملة واحدة —
+            // قفل صف العميل يبقى حتى الالتزام، وكل شيء يُالتزام معًا أو يتراجع كل
+            // شيء: لا اعتماد بلا تدقيق ولا تدقيق بلا اعتماد أبدًا.
+            // تدقيق الرفض أعلاه (CreditApprovalDenied) بقي خارج المعاملة عمدًا —
+            // كتابة مستقلة على اتصال مستقل تنجو من تراجع المعاملة.)
+            using var transaction =
+                await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
             {
-                CustomerId = info.CustomerId,
-                ManagerUserId = login.Data.UserId,
-                CurrentOutstanding = dbBalance,
-                CreditLimit = dbLimit,
-                NewCreditAmount = info.NewCreditAmount,
-                ProjectedOutstanding = projected,
-                ExcessAmount = projected - dbLimit,
-                Reason = reason,
-                Status = "granted",
-                ApprovedAtUtc = DateTime.UtcNow
-            };
+                // العميل موجود؟ + القيم الفعلية — تُقرأ معًا من دفتر Customers.Balance أدناه
+                // (الاعتماد بلا عميل حقيقي لا معنى له: رفض عند غياب صف العميل).
 
-            _dbContext.CreditApprovals.Add(approval);
-            await _dbContext.SaveChangesAsync();
+                // ══ إعادة التحقق الخدمي الكامل: لا ثقة أبدًا ببيانات الواجهة/الطلب ══
+                // تُقرأ القيم من دفتر Customers.Balance (المصدر المعتمد نفسه الذي يقرأه
+                // إنفاذ البيع UPDLOCK) — أي فجوة بين المُقدَّم والفعلي (تزوير/قِدم:
+                // تغيّر الرصيد أو الحد بين رفض البيع والاعتماد) = رفض صريح يقتضي
+                // تقييم بيع جديد. يُخزَّن الخادم القيم المعاد حسابها وحدها لا المُقدَّمة.
+                // مع UPDLOCK على صف العميل داخل المعاملة: لا سباق مع سداد/تعديل حد متوازٍ.
+                CustomerCreditSnapshot? snap = await _dbContext.Database.SqlQuery<CustomerCreditSnapshot>(@$"
+                        SELECT ISNULL(Balance, 0) AS [Balance], ISNULL(CreditLimit, 0) AS [CreditLimit]
+                        FROM Customers WITH (UPDLOCK)
+                        WHERE PartyId = {info.CustomerId}")
+                    .FirstOrDefaultAsync();
 
-            // تدقيق المنح: هوية المدير + السبب + الأرقام المعاد حسابها — لا أسرار أبدًا
-            clsAudit.Log(_dbContext, login.Data.UserId, "CreditApprovalGranted",
-                $"اعتماد تجاوز حد ائتمان #{approval.ApprovalId} — العميل #{info.CustomerId}: " +
-                $"الحالي {dbBalance:N2} + جديد {info.NewCreditAmount:N2} = {projected:N2} " +
-                $"(الحد {dbLimit:N2} — الفائض {approval.ExcessAmount:N2}) — السبب: {reason}");
-            await _dbContext.SaveChangesAsync();
+                if (snap == null)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail("العميل غير موجود.");
+                }
 
-            return Result<int>.Ok(approval.ApprovalId, "تم اعتماد تجاوز حد الائتمان — أعد إتمام البيع.");
+                decimal dbBalance = snap.Balance;
+                decimal dbLimit = snap.CreditLimit;
+
+                // الحد الصفري: منع مطلق لا يعتمده مدير إطلاقًا (قيد أعمال صارم)
+                if (dbLimit == 0)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail(
+                        "الشراء بالدين ممنوع لهذا العميل: حد الائتمان صفر — لا يمكن اعتماد هذا المنع. " +
+                        "لتتمكين الائتمان، عدّل حد الائتمان الدائم للعميل إلى قيمة موجبة أولًا.");
+                }
+                // الحد السالب: بيانات فاسدة — رفض تحقق صريح لا يُعامل كصفر
+                if (dbLimit < 0)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail("حد ائتمان العميل قيمة غير صالحة (سالب) — صحّح بيانات العميل أولًا.");
+                }
+
+                // مطابقة لقطة الموقف المُقدَّمة مع الوضع الفعلي: أي انحراف = معلومات
+                // مزوّرة أو قديمة (تغيّر الرصيد/الحد بين رفض البيع والاعتماد) — الاعتماد
+                // مرفوض ويُعاد تقييم البيع من جديد (نتيجة بيع جديدة ثم اعتماد جديد).
+                if (info.CurrentOutstanding != dbBalance)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail(
+                        $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: الرصيد الحالي بالدفتر {dbBalance:N2} " +
+                        $"لا {info.CurrentOutstanding:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
+                }
+                if (info.CreditLimit != dbLimit)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail(
+                        $"معلومات الاعتماد لم تعد مطابقة للوضع الفعلي: حد العميل بالدفتر {dbLimit:N2} " +
+                        $"لا {info.CreditLimit:N2} — أعد تقييم البيع ثم اطلب اعتمادًا جديدًا.");
+                }
+
+                // مبلغ جديد موجب + تجاوز فعلي للحد الموجب: لا بيع ضمن الحد من مسار الاعتماد
+                if (info.NewCreditAmount <= 0)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail("مبلغ ائتمان غير صالح للاعتماد.");
+                }
+                decimal projected = dbBalance + info.NewCreditAmount;
+                if (projected <= dbLimit)
+                {
+                    await transaction.RollbackAsync();
+                    return Result<int>.Fail(
+                        $"هذه العملية لا تتجاوز حد الائتمان (المشروع {projected:N2} ≤ الحد {dbLimit:N2}) — " +
+                        "لا اعتماد مطلوب: أعد تقييم البيع.");
+                }
+
+                var approval = new CreditApproval
+                {
+                    CustomerId = info.CustomerId,
+                    ManagerUserId = login.Data.UserId,
+                    CurrentOutstanding = dbBalance,
+                    CreditLimit = dbLimit,
+                    NewCreditAmount = info.NewCreditAmount,
+                    ProjectedOutstanding = projected,
+                    ExcessAmount = projected - dbLimit,
+                    Reason = reason,
+                    Status = "granted",
+                    ApprovedAtUtc = DateTime.UtcNow
+                };
+
+                _dbContext.CreditApprovals.Add(approval);
+                await _dbContext.SaveChangesAsync();
+
+                // تدقيق المنح: هوية المدير + السبب + الأرقام المعاد حسابها — لا أسرار أبدًا
+                // (بنفس المعاملة: الاعتماد وسجل تدقيقه يُالتزمان معًا أو يتراجعان معًا)
+                clsAudit.Log(_dbContext, login.Data.UserId, "CreditApprovalGranted",
+                    $"اعتماد تجاوز حد ائتمان #{approval.ApprovalId} — العميل #{info.CustomerId}: " +
+                    $"الحالي {dbBalance:N2} + جديد {info.NewCreditAmount:N2} = {projected:N2} " +
+                    $"(الحد {dbLimit:N2} — الفائض {approval.ExcessAmount:N2}) — السبب: {reason}");
+                await _dbContext.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                return Result<int>.Ok(approval.ApprovalId, "تم اعتماد تجاوز حد الائتمان — أعد إتمام البيع.");
+            }
+            catch
+            {
+                // فشل تقني (قيد/اتصال/حقن اختبار): تراجع كامل — لا اعتماد بلا تدقيق
+                // ولا بقايا متتبعة على السياق. الرفض التقني ليس رفضًا أعمالًا فيُعاد
+                // إلقاؤه كما هو (نمط مسار البيع).
+                await transaction.RollbackAsync();
+                _dbContext.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         /// <summary>لقطة رصيد/حد ائتمان العميل للقراءة الحيّة بلا تتبع (نفس نمط

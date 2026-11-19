@@ -433,43 +433,74 @@ END;
    ولكل صف سجل SystemLogs. القيد مشروط بالحالة granted عمدًا: صفوف
    consumed/burned القديمة سجل تدقيق لا يُمس. نفس منطق
    Upgrade_18_CreditApprovalGrantPolicy.sql وSaylDB.sql تمامًا —
-   والمسارات الثلاثة متطابقة النتيجة. Idempotent: بالقيد الموجود لا يفعل شيئًا. */
+   والمسارات الثلاثة متطابقة النتيجة. Idempotent: بالقيد الموجود لا يفعل شيئًا.
+   التزامن: هذه الكتلة تعمل عند إقلاع كل طرفية على الشبكة — قفل تطبيقي مسمّى
+   (sp_getapplock Exclusive بمالك المعاملة، نمط clsPayrollService) يُسلسِل
+   الترقية بين الطرفيات: من يفوز بالقفل يُله المعاملة الواحدة (حرق + تدقيق +
+   إنشاء القيد معًا)، ومن تنتهي مهلته يتخطى الترقية تخطيًّا غير فادح —
+   الإقلاع يكمل والإقلاع اللاحق يعيد المحاولة (idempotent). فحص وجود القيد
+   يُعاد بعد القسط على القفل لا قبله — لا سباق قيد مزدوج. فشل ترقية حقيقي
+   يتراجع كليًا (لا حرق نصف مُرتحل ولا قيد بلا حرق) ثم يُرمى ليفشل الإقلاع
+   بصوت عالٍ. */
 IF OBJECT_ID(N'dbo.CreditApprovals', N'U') IS NOT NULL
    AND OBJECT_ID(N'dbo.SystemLogs', N'U') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM sys.check_constraints
-                   WHERE name = N'CK_CreditApprovals_GrantPolicy'
-                     AND parent_object_id = OBJECT_ID(N'dbo.CreditApprovals'))
 BEGIN
-    DECLARE @violatingApprovals TABLE (ApprovalId INT NOT NULL);
+    DECLARE @u18Lock int;
     BEGIN TRAN;
-    INSERT INTO @violatingApprovals (ApprovalId)
-    SELECT ApprovalId
-    FROM dbo.CreditApprovals WITH (UPDLOCK)
-    WHERE Status = N'granted'
-      AND NOT (CreditLimit > 0
-               AND NewCreditAmount > 0
-               AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
-               AND ProjectedOutstanding > CreditLimit
-               AND ExcessAmount = ProjectedOutstanding - CreditLimit);
-    UPDATE a SET a.Status = N'burned'
-    FROM dbo.CreditApprovals a
-    JOIN @violatingApprovals v ON v.ApprovalId = a.ApprovalId;
-    INSERT INTO dbo.SystemLogs (UserId, Action, Details, CreatedAt)
-    SELECT NULL, N'CreditApprovalBurned',
-           N'اعتماد ائتمان #' + CONVERT(NVARCHAR(20), v.ApprovalId)
-             + N' أُحرق بترحيل Upgrade_18: صف granted مخالف لسياسة المنح الصارمة'
-             + N' (حد ائتماني غير موجب أو مشروع لا يتجاوز الحد أو فائض محسوب خطأ)'
-             + N' — سجل تدقيق يبقى محفوظًا ولا صلاحية للاعتماد مستقبلًا.',
-           GETUTCDATE()
-    FROM @violatingApprovals v;
-    COMMIT TRAN;
-    EXEC(N'ALTER TABLE dbo.CreditApprovals ADD CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
-        Status <> N''granted''
-        OR (CreditLimit > 0
-            AND NewCreditAmount > 0
-            AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
-            AND ProjectedOutstanding > CreditLimit
-            AND ExcessAmount = ProjectedOutstanding - CreditLimit))');
+    EXEC @u18Lock = sys.sp_getapplock
+         @Resource = N'Upgrade18GrantPolicy',
+         @LockMode = 'Exclusive',
+         @LockOwner = 'Transaction',
+         @LockTimeout = 10000;
+    IF @u18Lock >= 0
+    BEGIN
+        BEGIN TRY
+            /* إعادة فحص حالة الترقية بعد القسط على القفل — لا قبله */
+            IF NOT EXISTS (SELECT 1 FROM sys.check_constraints
+                           WHERE name = N'CK_CreditApprovals_GrantPolicy'
+                             AND parent_object_id = OBJECT_ID(N'dbo.CreditApprovals'))
+            BEGIN
+                DECLARE @u18Violating TABLE (ApprovalId INT NOT NULL);
+                INSERT INTO @u18Violating (ApprovalId)
+                SELECT ApprovalId
+                FROM dbo.CreditApprovals WITH (UPDLOCK)
+                WHERE Status = N'granted'
+                  AND NOT (CreditLimit > 0
+                           AND NewCreditAmount > 0
+                           AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+                           AND ProjectedOutstanding > CreditLimit
+                           AND ExcessAmount = ProjectedOutstanding - CreditLimit);
+                UPDATE a SET a.Status = N'burned'
+                FROM dbo.CreditApprovals a
+                JOIN @u18Violating v ON v.ApprovalId = a.ApprovalId;
+                INSERT INTO dbo.SystemLogs (UserId, Action, Details, CreatedAt)
+                SELECT NULL, N'CreditApprovalBurned',
+                       N'اعتماد ائتمان #' + CONVERT(NVARCHAR(20), v.ApprovalId)
+                         + N' أُحرق بترحيل Upgrade_18: صف granted مخالف لسياسة المنح الصارمة'
+                         + N' (حد ائتماني غير موجب أو مشروع لا يتجاوز الحد أو فائض محسوب خطأ)'
+                         + N' — سجل تدقيق يبقى محفوظًا ولا صلاحية للاعتماد مستقبلًا.',
+                       GETUTCDATE()
+                FROM @u18Violating v;
+                ALTER TABLE dbo.CreditApprovals ADD CONSTRAINT CK_CreditApprovals_GrantPolicy CHECK (
+                    Status <> N'granted'
+                    OR (CreditLimit > 0
+                        AND NewCreditAmount > 0
+                        AND ProjectedOutstanding = CurrentOutstanding + NewCreditAmount
+                        AND ProjectedOutstanding > CreditLimit
+                        AND ExcessAmount = ProjectedOutstanding - CreditLimit));
+            END;
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH;
+    END
+    ELSE
+    BEGIN
+        /* مهلة القفل/ازدحام: تخطٍّ غير فادح للإقلاع — إقلاع لاحق يعيد التطبيق */
+        ROLLBACK TRAN;
+    END
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>
