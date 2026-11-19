@@ -1868,6 +1868,11 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             var readBack = await settings.GetAsync("HarnessTestKey");
             Check("settings round-trip", readBack.StartsWith("hello-"));
 
+            /* التخزين الخام هنا مقصود: هذا قيد تحقق QA تطويري (وليس مسار إنتاج) —
+               لا يُوزَّع مع المُثبِّت (installer/setup.iss يعبّئ staging\app وحده)،
+               وهو يفحص مفتاح TaxPercent كما تخزنه البوابة الخدمية SetTaxPercentAsync
+               (نفس الصيغة "0.##"). كل مسارات الإنتاج تمر بالبوابة الخدمية المصرّفة
+               (بت الإعدادات 2048 + تدقيق TaxPercentChanged) — لا تجاوز إنتاجي هنا. */
             await settings.SetAsync(clsSettingsService.KeyTaxPercent, "15");
             var tax = await settings.GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
             Check("tax percent persisted", tax == 15m);

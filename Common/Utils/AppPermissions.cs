@@ -52,8 +52,11 @@ namespace Common.Utils
         /// <summary>أقصى بت مستخدم حاليًا — الشاشة الجديدة تأخذ أول بت حر بعده.</summary>
         public const int HighestUsedBit = Settings;
 
-        /// <summary>فحص القناع: هل يملك الدور صلاحية الشاشة المعطاة؟</summary>
-        public static bool Has(int roleValue, int screenBit) => (roleValue & screenBit) != 0;
+        /// <summary>فحص القناع: هل يملك الدور صلاحية الشاشة المعطاة؟
+        /// ⚠️ يُلزم دور المستخدم أن يكون قيمة صالحة (≥ 0): GetUserRoleValueAsync تعيد -1
+        /// للمجهول/غير النشط، و(-1 & أي بت) ≠ 0 بمتممة الاثنين كان يمرر المجهولين —
+        /// أُغلق الثغر ليتطابق الفحص مع العقد الموثق: -1 لا يملك أي بت → رفض دائمًا.</summary>
+        public static bool Has(int roleValue, int screenBit) => roleValue >= 0 && (roleValue & screenBit) != 0;
 
         /// <summary>هل الدور كاشير؟ (فحص هوية لا بت — شاشة الكاشير تُفتح به وحده).</summary>
         public static bool IsCashier(int roleValue) => roleValue == CashierRoleValue;

@@ -247,10 +247,26 @@ namespace Sayl.UI.UserControls
 
                 await settings.SetAsync(clsSettingsService.KeyStoreName, _txtStoreName.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyStorePhone, _txtStorePhone.Text?.Trim() ?? "");
-                await settings.SetAsync(clsSettingsService.KeyVatNumber, _txtVat.Text?.Trim() ?? "");
+                // الرقم الضريبي عبر بوابة الخدمة (صلاحية + ذرّية تغيير وتدقيق) —
+                // هوية الفاتورة ضريبيًا فسياسة الإعداد الضريبي موحّدة له.
+                var vatResult = await settings.SetVatNumberAsync(_txtVat.Text, SessionState.CurrentUser?.UserId ?? 0);
+                if (!vatResult.IsSuccess)
+                {
+                    _lblStatus.ForeColor = AppTheme.Danger;
+                    _lblStatus.Text = vatResult.Message;
+                    return;
+                }
                 await settings.SetAsync(clsSettingsService.KeyReceiptFooter, _txtFooter.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyWelcomeMessage, _txtWelcome.Text?.Trim() ?? "");
-                await settings.SetAsync(clsSettingsService.KeyTaxPercent, tax.ToString("0.##"));
+                // الضريبة عبر بوابة الخدمة (صلاحية + ذرّية تغيير وتدقيق) — الهوية من
+                // الجلسة، وفشلها يعود برسالته قبل بقية الإعدادات (نمط حد الائتمان فوقه).
+                var taxResult = await settings.SetTaxPercentAsync(tax, SessionState.CurrentUser?.UserId ?? 0);
+                if (!taxResult.IsSuccess)
+                {
+                    _lblStatus.ForeColor = AppTheme.Danger;
+                    _lblStatus.Text = taxResult.Message;
+                    return;
+                }
                 await settings.SetAsync(clsSettingsService.KeyBackupFolder, _txtBackupFolder.Text?.Trim() ?? "");
                 await settings.SetAsync(clsSettingsService.KeyAutoPrintReceipt, _chkAutoPrint.Checked.ToString());
                 await settings.SetAsync(clsSettingsService.KeyReceiptPrinter, _cmbPrinter.SelectedItem?.ToString() ?? "");

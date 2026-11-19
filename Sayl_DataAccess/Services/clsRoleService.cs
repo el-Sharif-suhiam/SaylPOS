@@ -176,6 +176,13 @@ namespace Sayl.Core.Services
             if (AppPermissions.Has(dtoRole.RoleValue, AppPermissions.Roles))
                 return Result.Fail("شاشة الأدوار والصلاحيات لمدير النظام وحده — لا تُضمَّ لأي دور آخر.");
 
+            // ══ لا-تغيير: الاسم كما هو (أو غير مُرسل) والقيمة مطابقة → نجاح بلا حفظ ══
+            // (كان التعديل يكتب سجل «من X إلى X» لعملية لم تغيّر شيئًا — تدقيق زائف
+            // يلوث الدفتر؛ لا حفظ ولا تدقيق ما لم يطرأ تغيير فعلي.)
+            if (role.RoleValue == dtoRole.RoleValue &&
+                (string.IsNullOrWhiteSpace(dtoRole.Name) || dtoRole.Name.Trim() == role.Name))
+                return Result.Ok("لا تغيير في الدور — الاسم والصلاحيات كما هما.");
+
             if (!string.IsNullOrWhiteSpace(dtoRole.Name) && dtoRole.Name.Trim() != role.Name)
             {
                 bool nameExists = await _dbContext.Roles
