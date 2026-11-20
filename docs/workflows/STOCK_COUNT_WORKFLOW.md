@@ -98,12 +98,16 @@ cost of differences, and surplus/shortage/matched counts.
 
 ```mermaid
 flowchart TB
-    L["Count line: diff = counted - bookAtCount"] --> EXIST{"StockMovement exists?<br/>SourceType=ManualAdjustment<br/>AND SourceId=CountId"}
-    EXIST -->|Yes| SKIP["Skip: restore PostedMovementId, IsPosted=true<br/>(no double adjustment, ever)"]
+    L["Count line: diff = counted - book<br/>(legacy line: book + net movements since start,<br/>own committed adjustment movements excluded)"] --> EXIST{"Line movement set exists?<br/>SourceType=ManualAdjustment<br/>AND SourceId=CountId"}
+    EXIST -->|Yes| VALID{"every row same product AND<br/>aggregate = expected diff?"}
+    VALID -->|No| FAIL1["Fail: manual investigation required<br/>(no re-apply, no posted mark)"]
+    VALID -->|Yes| SKIP["Skip: PostedMovementId = first row (representative),<br/>IsPosted=true — no double adjustment, ever"]
     EXIST -->|No| ZERO{"diff = 0?"}
     ZERO -->|Yes| CLOSE["IsPosted=true, no movement"]
     ZERO -->|No| ADJ["AdjustStockAsync: increase for surplus /<br/>FEFO decrease for shortage, SourceId=CountId"]
-    ADJ --> LINK["Link PostedMovementId from the created movement<br/>+ IsPosted=true (in memory)"]
+    ADJ --> VERIFY{"movement set re-read:<br/>found, same product, aggregate = diff?"}
+    VERIFY -->|No| FAIL2["Fail: manual investigation required<br/>(line NOT marked posted — retry after repair)"]
+    VERIFY -->|Yes| LINK["PostedMovementId = first row + IsPosted=true (in memory)"]
     SKIP --> SAVE
     CLOSE --> SAVE
     LINK --> SAVE["ONE SaveChangesAsync for all flags (atomic save)"]
@@ -116,14 +120,28 @@ Idempotency contract:
    (commit b6e5993). A shortage line may produce several movements (one per FEFO
    batch), which is why the support index
    `IX_StockMovements_ManualAdjustmentSource` is filtered and non-unique.
-2. **Database-backed check:** before posting a line the service queries the database
-   (not memory) for an existing movement with that key — safe across retries and app
-   restarts.
-3. **Durable link:** `StockCounts.PostedMovementId` records the movement created for
-   each line, set immediately after a successful adjustment and before the save.
-4. **Atomic flag save:** all `IsPosted` / `PostedMovementId` values are written in a
+2. **Database-backed validation (full set, not mere existence):** before posting a
+   line the service queries the database (not memory) for ALL movements with that
+   key and validates the whole set — every row for the same product and aggregate
+   quantity equal to the expected diff. A valid set → the line is skipped as
+   posted. An inconsistent set (wrong product, partial or poisoned aggregate) →
+   failure demanding manual investigation: nothing is re-applied and the line is
+   not marked.
+3. **Durable link:** `StockCounts.PostedMovementId` records a representative (first)
+   movement id per line — a single INT column; the no-double-application guarantee
+   comes from validating the full movement set by `SourceId = CountId`, not from
+   the single id.
+4. **Verified before posted:** after a successful `AdjustStockAsync` the movement
+   set is re-read and validated the same way; if it cannot be verified, the line
+   is never marked posted (a clear failure names the product and asks for manual
+   investigation — retry is possible after repair).
+5. **Atomic flag save:** all `IsPosted` / `PostedMovementId` values are written in a
    single `SaveChangesAsync`; if a later line fails, earlier lines are already marked
    and the retry skips them.
+6. **Legacy lines** (`BookQuantityAtCount = null`): book = session snapshot + net
+   movements since session start, EXCLUDING the line's own committed adjustment
+   movements — so a retry after a mid-post failure recomputes the same diff and
+   skips the line instead of raising a false conflict.
 
 Failure behavior: the first failing line stops the run with a per-product message;
 posted lines keep their markers, and re-invoking `PostSessionAsync` resumes safely.

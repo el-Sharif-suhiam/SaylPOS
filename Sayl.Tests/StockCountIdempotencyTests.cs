@@ -1,7 +1,9 @@
 using Common.DTOs.RequestModels;
 using Common.Enums;
 using Common.Results;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Sayl.Core.Data;
 using Sayl.Core.Models;
 using Sayl.Core.Services;
@@ -427,5 +429,267 @@ public class StockCountIdempotencyTests
         var again = await TryPostAsync(seed.UserId);
         Assert.False(again.IsSuccess);
         Assert.Equal(movements.Count, (await LineMovementsAsync(map[pid])).Count);
+    }
+
+    // ══ 8) حركة موجودة بمنتج خطأ (نفس SourceType/SourceId) — فشل تحقيق يدوي: ══
+    //        لا إعادة تطبيق، لا وسم «مرحّل»، ولا حركة جديدة (Defect B)
+
+    [Fact]
+    public async Task ExistingMovement_WrongProduct_FailsManualInvestigation_NoReapplyNoPost()
+    {
+        string m = $"id8-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(m);
+        int pid = await SeedProductAsync(m, "wrong-prod");
+        int other = await SeedProductAsync(m, "other-prod");
+        await ReceiveAsync(seed, pid, 10, $"B1-{m}");  // دفتري 10
+
+        var (sessionId, map) = await StartAndCountAsync(seed.UserId, new() { [pid] = 13 }); // فائض +3
+        try
+        {
+            // حركة موجودة بمفتاح السطر لكن لمنتج آخر — قبل الإصلاح كانت تُؤخذ دليل ترحيل
+            int seededMovementId = await InsertRawAdjustmentMovementAsync(other, map[pid], quantity: 3);
+
+            var r = await TryPostAsync(seed.UserId);
+            Assert.False(r.IsSuccess);
+            Assert.Contains("تحقيق يدوي", r.Message);
+
+            // لا إعادة تطبيق: رصيد المنتج كما هو
+            Assert.Equal(10, await AvailableAsync(pid));
+
+            // السطر غير مرحّل — إعادة المحاولة مسموحة بعد إصلاح البيانات
+            var line = (await LineAsync(map[pid]))!;
+            Assert.False(line.IsPosted);
+            Assert.Null(line.PostedMovementId);
+
+            // لا حركة جديدة: حركة السطر الوحيدة هي المزروعة (بمنتج آخر)
+            var lineMovements = await LineMovementsAsync(map[pid]);
+            var single = Assert.Single(lineMovements);
+            Assert.Equal(seededMovementId, single.MovementId);
+            Assert.Equal(other, single.ProductId);
+        }
+        finally { await DeleteSessionLinesAsync(sessionId); }
+    }
+
+    // ══ 9) حركات موجودة مجموعها لا يطابق فرق الجرد (عجز متعدد الدفعات ناقص حركة) — ══
+    //        فشل تحقيق يدوي: لا إعادة تطبيق، لا حركة جديدة (Defect B — تحقق تجميعي)
+
+    [Fact]
+    public async Task ExistingMovements_AggregateMismatch_FailsManualInvestigation_NoNewMovement()
+    {
+        string m = $"id9-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(m);
+        int pid = await SeedProductAsync(m, "partial");
+        await ReceiveAsync(seed, pid, 2, $"B1-{m}");
+        await ReceiveAsync(seed, pid, 5, $"B2-{m}");   // دفتري 10 عبر دفعتين
+
+        var (sessionId, map) = await StartAndCountAsync(seed.UserId, new() { [pid] = 4 }); // عجز −3 (يتوقع {−2, −1})
+        try
+        {
+            // محاكاة التزام جزئي: حركة الدفعة الأولى فقط (−2) التزمت والثانية ضاعت —
+            // المجموع −2 ≠ −3 ⇒ لا يُعاد التطبيق ولا يُوسم السطر مرحّلًا
+            int seededMovementId = await InsertRawAdjustmentMovementAsync(pid, map[pid], quantity: -2);
+
+            var r = await TryPostAsync(seed.UserId);
+            Assert.False(r.IsSuccess);
+            Assert.Contains("تحقيق يدوي", r.Message);
+
+            // لا إعادة تطبيق ولا حركة جديدة: رصيد كما هو وحركة واحدة فقط للسطر
+            Assert.Equal(7, await AvailableAsync(pid));
+            var lineMovements = await LineMovementsAsync(map[pid]);
+            var single = Assert.Single(lineMovements);
+            Assert.Equal(seededMovementId, single.MovementId);
+
+            // السطر غير مرحّل
+            var line = (await LineAsync(map[pid]))!;
+            Assert.False(line.IsPosted);
+            Assert.Null(line.PostedMovementId);
+        }
+        finally { await DeleteSessionLinesAsync(sessionId); }
+    }
+
+    // ══ 10) مجموعة حركات موجودة سليمة (منتج مطابق + مجموع = الفرق عبر دفعتين) — ══
+    //         السطر يُتخطى مرحّلًا بلا أي حركة جديدة (إعادة ربط idempotent — Defect C)
+
+    [Fact]
+    public async Task ExistingMovementSet_Valid_MultiBatch_SkipsLineWithNoNewMovement()
+    {
+        string m = $"id10-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(m);
+        int pid = await SeedProductAsync(m, "validset");
+        await ReceiveAsync(seed, pid, 2, $"B1-{m}");
+        await ReceiveAsync(seed, pid, 5, $"B2-{m}");   // دفتري 10 عبر دفعتين
+
+        var (sessionId, map) = await StartAndCountAsync(seed.UserId, new() { [pid] = 4 }); // عجز −3
+        try
+        {
+            // محاكاة الانهيار بعد التزام: التسوية كاملة التزمت عبر دفعتين (حركتان) والحالة لم تُحفظ
+            await CommitLineAdjustmentOnlyAsync(seed.UserId, map[pid], pid, diff: -3);
+            Assert.Equal(4, await AvailableAsync(pid));
+            var committed = await LineMovementsAsync(map[pid]);
+            Assert.True(committed.Count >= 2, $"عجز عبر دفعتين يجب أن يولّد حركتين، وُجد {committed.Count}");
+            Assert.Equal(-3, committed.Sum(x => x.Quantity));
+
+            // إعادة الترحيل: المجموعة سليمة ⇒ تخطٍّ بلا أي حركة جديدة
+            var r = await TryPostAsync(seed.UserId);
+            Assert.True(r.IsSuccess, r.Message);
+
+            Assert.Equal(4, await AvailableAsync(pid)); // لا −3 ثانية
+            var after = await LineMovementsAsync(map[pid]);
+            Assert.Equal(committed.Count, after.Count); // بلا حركة مكررة
+
+            // الحالة المحفوظة: مرحّل مع معرّف تمثيلي (أول حركة — مرجع، الضمان من المجموعة)
+            var line = (await LineAsync(map[pid]))!;
+            Assert.True(line.IsPosted);
+            Assert.Equal(committed[0].MovementId, line.PostedMovementId);
+        }
+        finally { await DeleteSessionLinesAsync(sessionId); }
+    }
+
+    // ══ 11) فشل التحقق من الحركة بعد نجاح التسوية — السطر لا يُوسم مرحّلًا ══
+    //         وإعادة المحاولة تتخطاه (الحركة التزمت فعليًا) بلا تطبيق مزدوج (Defect A)
+
+    [Fact]
+    public async Task MovementVerificationFailureAfterAdjustment_LineNotPosted_RetryIdempotent()
+    {
+        string m = $"id11-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(m);
+        int pid = await SeedProductAsync(m, "noverify");
+        await ReceiveAsync(seed, pid, 10, $"B1-{m}");  // دفتري 10
+
+        var (sessionId, map) = await StartAndCountAsync(seed.UserId, new() { [pid] = 13 }); // فائض +3
+        try
+        {
+            // التسوية نجحت لكن التحقق فشل: اعتراض استعلام التحقق (ManualAdjustment/SourceId)
+            // ليساوي صفر صفوف — محاكاة فشل التحقق بعد نجاح AdjustStockAsync
+            var interceptor = new HideManualAdjustmentMovementInterceptor();
+            await using (var db = new SaylDbContext(new DbContextOptionsBuilder<SaylDbContext>()
+                .UseSqlServer(DatabaseFixture.ConnectionString)
+                .AddInterceptors(interceptor)
+                .Options))
+            {
+                var svc = new clsStockCountService(db);
+                interceptor.Enabled = true;
+                var fail = await svc.PostSessionAsync(seed.UserId);
+                interceptor.Enabled = false;
+
+                Assert.False(fail.IsSuccess);
+                Assert.Contains("تعذّر التحقق", fail.Message);
+            }
+
+            // التسوية التزمت (حركة واحدة) لكن السطر لم يُوسم مرحّلًا
+            Assert.Equal(13, await AvailableAsync(pid));
+            Assert.False((await LineAsync(map[pid]))!.IsPosted);
+            var single = Assert.Single(await LineMovementsAsync(map[pid]));
+            Assert.Equal(3, single.Quantity);
+
+            // إعادة المحاولة (سياق جديد بلا اعتراض): الحركة موجودة سليمة ⇒ تخطٍّ بلا تكرار
+            var retry = await TryPostAsync(seed.UserId);
+            Assert.True(retry.IsSuccess, retry.Message);
+
+            Assert.Equal(13, await AvailableAsync(pid)); // لا +6
+            var after = await LineMovementsAsync(map[pid]);
+            var one = Assert.Single(after);
+            Assert.Equal(single.MovementId, one.MovementId);
+
+            var line = (await LineAsync(map[pid]))!;
+            Assert.True(line.IsPosted);
+            Assert.Equal(one.MovementId, line.PostedMovementId);
+        }
+        finally { await DeleteSessionLinesAsync(sessionId); }
+    }
+
+    // ══ 12) سطر خلفي (BookQuantityAtCount = null) التزمت تسويته في محاولة فاشلة — ══
+    //         إعادة الترحيل تتخطاه بلا إنذار «تحقيق يدوي» زائف: الفرق يعاد حسابه
+    //         بخصم التزام السطر من صافي الحركات (كان يُمتص فيصير 0 ≠ −3)
+
+    [Fact]
+    public async Task LegacyLine_CommittedAdjustment_RetrySkipsWithoutFalseManualInvestigationAlarm()
+    {
+        string m = $"id12-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(m);
+        int pid = await SeedProductAsync(m, "legacy");
+        await ReceiveAsync(seed, pid, 10, $"B1-{m}");  // دفتري 10
+
+        var (sessionId, map) = await StartAndCountAsync(seed.UserId, new() { [pid] = 7 }); // عجز −3
+        try
+        {
+            // سطر خلفي (Upgrade_12 قديم): بلا لقطة BookQuantityAtCount —
+            // الفرق يُحسب من الكتيب الحي + صافي الحركات منذ بدء الجلسة
+            await MakeLineLegacyAsync(map[pid]);
+
+            // التسوية التزمت في محاولة سابقة (−3) وحُفظت الحركة دون حالة السطر
+            await CommitLineAdjustmentOnlyAsync(seed.UserId, map[pid], pid, diff: -3);
+            Assert.Equal(7, await AvailableAsync(pid));
+
+            // إعادة الترحيل: بدون إصلاح كان صافي الحركات يمتص الالتزام السابق
+            // (فرق 0 ≠ مجموع −3 ⇒ إنذار زائف) — مع الإصلاح: تخطٍّ سليم
+            var retry = await TryPostAsync(seed.UserId);
+            Assert.True(retry.IsSuccess, retry.Message);
+            Assert.DoesNotContain("تحقيق يدوي", retry.Message);
+
+            // لا تطبيق ثانٍ ولا حركة جديدة — الرصيد كما هو
+            Assert.Equal(7, await AvailableAsync(pid));
+            var single = Assert.Single(await LineMovementsAsync(map[pid]));
+            Assert.Equal(-3, single.Quantity);
+
+            var line = (await LineAsync(map[pid]))!;
+            Assert.True(line.IsPosted);
+            Assert.Equal(single.MovementId, line.PostedMovementId);
+        }
+        finally { await DeleteSessionLinesAsync(sessionId); }
+    }
+
+    /// <summary>تحويل سطر إلى سجل خلفي (Upgrade_12 قديم): حذف لقطة BookQuantityAtCount.</summary>
+    private async Task MakeLineLegacyAsync(int countId)
+    {
+        await using var db = _fx.CreateContext();
+        var line = await db.StockCounts.SingleAsync(c => c.CountId == countId);
+        line.BookQuantityAtCount = null;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>حذف سطور جلسة اختبار (تنظيف أخير — القاعدة مشتركة بين اختبارات المجموعة).</summary>
+    private async Task DeleteSessionLinesAsync(int sessionId)
+    {
+        await using var db = _fx.CreateContext();
+        await db.StockCounts.Where(sc => sc.CountSessionId == sessionId).ExecuteDeleteAsync();
+    }
+
+    /// <summary>حركة تسوية مزروعة مباشرة (محاكاة بقايا قديمة/التزام جزئي) بمفتاح سطر الجرد.</summary>
+    private async Task<int> InsertRawAdjustmentMovementAsync(int productId, int countId, int quantity)
+    {
+        await using var db = _fx.CreateContext();
+        var mv = new StockMovement
+        {
+            ProductId = productId,
+            MovementType = quantity > 0 ? enStockMovementType.adjustment_in : enStockMovementType.adjustment_out,
+            Quantity = quantity,
+            SourceType = "ManualAdjustment",
+            SourceId = countId,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.StockMovements.Add(mv);
+        await db.SaveChangesAsync();
+        return mv.MovementId;
+    }
+
+    /// <summary>اعتراض EF: يُخفي استعلامات حركات التسوية (ManualAdjustment + SourceId) —
+    /// ليساوي صفر صفوف — لمحاكاة فشل التحقق من الحركة بعد نجاح التسوية (Defect A).</summary>
+    private sealed class HideManualAdjustmentMovementInterceptor : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled
+                && command.CommandText.Contains("ManualAdjustment")
+                && command.CommandText.Contains("SourceId"))
+            {
+                command.CommandText = "SELECT 1 WHERE 1 = 0";
+            }
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }

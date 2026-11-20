@@ -551,22 +551,27 @@ END";
 
                 foreach (var line in lines)
                 {
-                    // IDEMPOTENCY (durable, DB-backed): حركة تسوية مرتبطة بهذا السطر
+                    // IDEMPOTENCY (durable, DB-backed): حركات التسوية المرتبطة بهذا السطر
                     // (SourceType = ManualAdjustment + SourceId = CountId) موجودة بالفعل
-                    // ⇒ نجحت في محاولة سابقة فشلت قبل حفظ IsPosted — اتخطاه وأصلح السجل الدائم.
+                    // ⇒ نجحت في محاولة سابقة فشلت قبل حفظ IsPosted — لا تُعاد التسوية.
                     // الفحص من القاعدة لا من الذاكرة ⇒ محصّن بعد إعادة تشغيل التطبيق أيضًا.
+                    // (يُجلب قبل حساب effectiveBook/diff — مجموعها يُخصم من صافي الحركات
+                    // في المسار الخلفي كي لا يمتص التزام السطر السابق ويزحزح الفرق.)
                     var existing = await _dbContext.StockMovements
                         .AsNoTracking()
                         .Where(m => m.SourceType == "ManualAdjustment" && m.SourceId == line.CountId)
-                        .OrderByDescending(m => m.MovementId)
-                        .FirstOrDefaultAsync();
+                        .OrderBy(m => m.MovementId)
+                        .ToListAsync();
 
-                    if (existing != null)
-                    {
-                        line.PostedMovementId = existing.MovementId;
-                        line.IsPosted = true;
-                        continue;
-                    }
+                    // FIX (IDEMPOTENCY VALIDATION — Defect B/C): لا يُكتفى بوجود حركة
+                    // (أو أخذ آخر صف فقط) — تُجلب كل حركات السطر ويُتحقق من المجموعة كاملة:
+                    // كل صف لنفس المنتج، ومجموع الكميات = الفرق المتوقع. عجز FEFO عبر
+                    // دفعات عدة يولّد حركة لكل دفعة — الصحة من مجموع المجموعة لا من آخر صف.
+                    // PostedMovementId = عمود INT واحد ⇒ يُحفظ كمعرّف تمثيلي (مرجع للعرض
+                    // والتتبع فقط)؛ ضمان عدم التكرار يأتي من التحقق من مجموعة الحركات
+                    // كاملةً بمفتاح SourceId = CountId — لا من العمود المفرد.
+                    // عند التعارض: لا إعادة تطبيق ولا وسم «مرحّل» — فشل واضح يطلب تحقيقًا يدويًا.
+                    int thisLineAggregate = existing.Sum(m => m.Quantity);
 
                     // BookQuantityAtCount = snapshot لحظة العد الفعلي — الدفتري الصحيح للمقارنة
                     // null = توافق خلفي: استخدم الكتيب الحي عند بدء الجلسة
@@ -577,12 +582,36 @@ END";
                     }
                     else
                     {
-                        // سلوك قديم للتوافق: دفتري = لقطة الجلسة + صافي حركات منذ بدئها
+                        // سلوك قديم للتوافق: دفتري = لقطة الجلسة + صافي حركات منذ بدئها.
+                        // FIX (إعادة محاولة السطر الخلفي): movementNet يشمل حركات هذا السطر
+                        // نفسه الملتزمة في محاولة سابقة (SourceId = CountId) — تُخصم من الصافي
+                        // كي يبقى الفرق = فرق العد الأصلي ويقابله مجموع حركات السطر الملتزمة.
+                        // (SourceId لكل سطر على حدة — حركات سطور أخرى لا تمس هذا السطر.)
                         effectiveBook = line.BookQuantity
-                            + (movementNet.TryGetValue(line.ProductId, out int net) ? net : 0);
+                            + ((movementNet.TryGetValue(line.ProductId, out int net) ? net : 0) - thisLineAggregate);
                     }
 
                     int diff = line.CountedQuantity!.Value - effectiveBook;
+
+                    if (existing.Count > 0)
+                    {
+                        bool sameProduct = existing.All(m => m.ProductId == line.ProductId);
+                        if (!sameProduct || thisLineAggregate != diff)
+                        {
+                            string why = !sameProduct
+                                ? "حركة تسوية لمنتج آخر مرتبطة بهذا السطر"
+                                : $"مجموع حركات التسوية ({thisLineAggregate}) لا يطابق فرق الجرد ({diff})";
+                            return Result.Fail(
+                                $"تعارض تسوية سطر الجرد '{line.ProductName}': {why} — يلزم تحقيق يدوي في حركات المخزون (SourceId = {line.CountId}) قبل إعادة الترحيل؛ لم تُطبَّق أي تسوية جديدة لهذا السطر.");
+                        }
+
+                        // مجموعة حركات سليمة — تخطَّ السطر (مرحّل) دون أي حركة جديدة.
+                        // PostedMovementId معرّف تمثيلي (أول حركة) — الضمان من المجموعة كاملة (انظر أعلاه).
+                        line.PostedMovementId = existing[0].MovementId;
+                        line.IsPosted = true;
+                        continue;
+                    }
+
                     if (diff == 0)
                     {
                         // فرق صفري: لا حركة تسوية — لكن الخط يُقفل كمرحّل
@@ -607,16 +636,33 @@ END";
                     if (!r.IsSuccess)
                         return Result.Fail($"فشل ترحيل فرق '{line.ProductName}': {r.Message} — توقف عند هذا المنتج.");
 
-                    // IDEMPOTENCY: اربط السطر بحركة التسوية المُنشأة واحفظ PostedMovementId
-                    // قبل أي حفظ. إذا فشل SaveChangesAsync لاحقًا، الحركة محفوظة في القاعدة
-                    // والفحص المسبق في أعلى الحلقة يتخطى السطر ⇒ لا حركة مزدوجة أبدًا.
-                    var movement = await _dbContext.StockMovements
+                    // IDEMPOTENCY: اربط السطر بحركات التسوية المُنشأة واحفظ الحالة
+                    // قبل أي حفظ. إذا فشل SaveChangesAsync لاحقًا، الحركات محفوظة في
+                    // القاعدة والفحص المسبق في أعلى الحلقة يتخطى السطر ⇒ لا حركة مزدوجة أبدًا.
+                    //
+                    // FIX (VERIFICATION — Defect A): نجاح AdjustStockAsync لا يكفي —
+                    // تُتحقق الحركة(ات) من القاعدة فعليًا. إن لم توجد حركة بمفتاح السطر
+                    // بعد نجاح التسوية ⇒ لا يُوسم السطر مرحّلًا إطلاقًا: فشل واضح
+                    // يطلب تحقيقًا يدويًا (التسوية قد تكون التزمت بلا أثر قابل للتحقق).
+                    // (تناظر الفحص المسبق: نفس التحقق — المنتج والمجموع. صفوف هذه
+                    // الجولة ولّدها AdjustStockAsync للتو — طبقة دفاع رخيصة الثمن.)
+                    var movements = await _dbContext.StockMovements
                         .AsNoTracking()
                         .Where(m => m.SourceType == "ManualAdjustment" && m.SourceId == line.CountId)
-                        .OrderByDescending(m => m.MovementId)
-                        .FirstOrDefaultAsync();
+                        .OrderBy(m => m.MovementId)
+                        .ToListAsync();
 
-                    line.PostedMovementId = movement?.MovementId;
+                    if (movements.Count == 0
+                        || movements.Any(m => m.ProductId != line.ProductId)
+                        || movements.Sum(m => m.Quantity) != diff)
+                    {
+                        return Result.Fail(
+                            $"تعذّر التحقق من حركة تسوية سطر الجرد '{line.ProductName}' بعد تطبيق التسوية (SourceId = {line.CountId}) — لا يمكن وسم السطر مرحّلًا دون تحقق. يلزم تحقيق يدوي في حركات المخزون؛ لم تُحفظ حالة الترحيل ويمكن إعادة المحاولة بعد التحقق.");
+                    }
+
+                    // PostedMovementId معرّف تمثيلي (أول حركة) — عجز FEFO متعدد الدفعات
+                    // يولّد عدة حركات، والضمان من التحقق من المجموعة كاملةً بمفتاح السطر.
+                    line.PostedMovementId = movements[0].MovementId;
                     line.IsPosted = true;
                     adjustments++;
                 }

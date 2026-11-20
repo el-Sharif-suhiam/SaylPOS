@@ -121,13 +121,20 @@ sequenceDiagram
     U->>SC: PostSessionAsync(userId)
     SC->>DB: permission gate + "StockCountPost" lock
     loop per unposted line
-        SC->>DB: any StockMovement with SourceType=ManualAdjustment AND SourceId=CountId?
-        alt movement exists (previous partial failure)
-            SC->>SC: skip line, restore PostedMovementId
+        SC->>DB: ALL StockMovements with SourceType=ManualAdjustment AND SourceId=CountId
+        alt set exists and valid (same product, aggregate = diff)
+            SC->>SC: skip line, PostedMovementId = representative row
+        else if set exists but inconsistent (wrong product / aggregate mismatch)
+            SC->>SC: fail - manual investigation (no re-apply, no posted mark)
         else
             SC->>ST: AdjustStockAsync(diff, SourceId=CountId)
             ST->>DB: per-line Serializable transaction (FEFO deduction or auto batch)
-            SC->>DB: set PostedMovementId + IsPosted in memory
+            SC->>DB: re-read movement set (existence + product + aggregate)
+            alt verification passes
+                SC->>SC: set PostedMovementId (representative) + IsPosted in memory
+            else
+                SC->>SC: fail - line NOT marked posted (retriable after repair)
+            end
         end
     end
     SC->>DB: one SaveChangesAsync (all flags atomic)
@@ -140,9 +147,16 @@ Idempotency contract:
   with `SourceId = CountId` — a permanent idempotency key (multiple movements per
   line are legitimate for FEFO shortages, hence a filtered non-unique index,
   `IX_StockMovements_ManualAdjustmentSource`, not a unique constraint).
-- Before posting a line, the service checks the database (not memory) for an
-  existing movement with that key; found movements are linked into
-  `StockCounts.PostedMovementId` and the line is skipped.
+- Before posting a line, the service fetches ALL movements with that key from the
+  database (not memory) and validates the full set: every row for the same product
+  and aggregate quantity equal to the expected diff. A valid set is linked into
+  `StockCounts.PostedMovementId` (a representative row) and the line is skipped; an
+  inconsistent set stops posting with a manual-investigation failure — nothing is
+  re-applied. After a successful adjustment the set is re-read and validated the
+  same way; a line whose movements cannot be verified is never marked posted.
+- Legacy lines (`BookQuantityAtCount = null`) exclude the line's own committed
+  adjustment movements from the net-movement fallback, so a retry after a mid-post
+  failure recomputes the original diff and skips the line cleanly.
 - All `IsPosted` / `PostedMovementId` flags are saved in one `SaveChangesAsync`,
   so a mid-run failure leaves recovered lines marked and retriable without any
   double adjustment.
