@@ -112,6 +112,11 @@ quantity and reason.
 `clsStockService.TransferBatchAsync` moves quantity between two batches of the same
 product (Serializable transaction):
 
+- Authorization gate FIRST, before any read, transaction, or batch creation:
+  `DtoBatchTransferRequest.UserId` must resolve to an active user whose role carries
+  the Inventory bit; otherwise a `StockTransferDenied` audit row is written (best
+  effort for unknown identities — `SystemLogs.UserId` FK) and the call fails with no
+  batch, no movement, and no quantity change.
 - Source quantity guarded by a conditional atomic decrement
   (`AND BatchQuantity >= @qty`) — parallel transfers cannot oversell the source.
 - Target find-or-create with the same unique-index catch-and-merge pattern.

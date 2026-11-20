@@ -187,6 +187,15 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         // بيع مخزون: خصم تلقائي حسب FEFO
         // ─────────────────────────────────────────────────
+        /// <summary>
+        /// ⚠️ نقطة خصم مخزون للاختبار/الجودة حصرًا (QA/test-only) — لا يمر عبرها الإنتاج.
+        /// بلا هوية فاعل ولا بوابة صلاحيات عمدًا: مسار البيع الحقيقي يخصم المخزون عبر
+        /// clsCheckoutService.DeductStockAndCreateMovementsAsync داخل معاملة الخروج
+        /// المخوّلة (ProcessCheckoutAsync تتحقق من هوية/صلاحيات الكاشير بنفسها).
+        /// المنادون الوحيدون اليوم: أداة الجودة (consol app) واختبارات Sayl.Tests.
+        /// لا تستدعِها من كود إنتاجي جديد — وأي بوابة هنا تكسر اختبارات الجودة القائمة
+        /// دون حماية إضافية (الخروج الحقيقي مقيّد سلفًا في clsCheckoutService).
+        /// </summary>
         public async Task<Result> SellStockAsync(int productId, int quantity, int? invoiceId = null)
         {
             if (quantity <= 0)
@@ -272,9 +281,12 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(request.Reason))
                 return Result.Fail("سبب التسوية مطلوب.");
 
-            // التسوية اليدوية للمخزون تتطلب شاشة المخزون (بت 2)
+            // التسوية اليدوية للمخزون تتطلب شاشة المخزون (بت 2).
+            // فحص صريح للهوية الفاشلة (actorRole < 0) بنفس شكل بوابة ReceiveStockAsync —
+            // تحصين إضافي: Has(-1, x) = false بعد إغلاق ثغر متممة الاثنين، والفحص الصريح
+            // يوثّق النية ويظل صحيحًا وإن تغيّر Has مستقبلًا.
             int actorRole = await GetUserRoleValueAsync(request.UserId);
-            if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
             {
                 await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "StockAdjustmentDenied",
                     "تسوية مخزون مرفوضة: تتطلب صلاحية شاشة المخزون.");
@@ -526,6 +538,20 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         public async Task<Result> TransferBatchAsync(DtoBatchTransferRequest request)
         {
+            // بوابة الصلاحية أولاً — قبل أي قراءة-كتابة وأي معاملة أو إنشاء دفعة:
+            // نقل الكمية بين الدفعات عملية مخزنية تتطلب شاشة المخزون (بت 2)،
+            // والواجهة تخفي الزر تجميلًا فقط — البوابة الحقيقية هنا.
+            // فشل الهوية (مجهول/غير نشط/دور غير نشط) يُرفض دائمًا: GetUserRoleValueAsync
+            // تعيد -1 و(-1 لا يملك أي بت) — ومحاولة الرفض تُدقَّق بلا أي أثر على البيانات
+            // (لا دفعة، لا حركة، لا تغيير كميات — التدقيق يُكتب على اتصال مستقل).
+            int actorRole = await GetUserRoleValueAsync(request.UserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Inventory))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, request.UserId, "StockTransferDenied",
+                    "نقل بين الدفعات مرفوض: يتطلب صلاحية شاشة المخزون.");
+                return Result.Fail("نقل الكمية بين الدفعات يتطلب صلاحية شاشة المخزون.");
+            }
+
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
 

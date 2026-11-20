@@ -28,7 +28,7 @@ flowchart LR
     R --> G["clsPermissions.GetUserRoleValueAsync<br/>(service gate, per call)"]
     G --> P{"AppPermissions.Has(roleValue, screenBit)"}
     P -->|yes| OP["operation proceeds"]
-    P -->|no| DENY["Result.Fail - returned,<br/>not audited (known gap)"]
+    P -->|no| DENY["Result.Fail + clsAudit.LogRejectedAsync<br/>(denial audited: XxxDenied action)"]
 ```
 
 ## 2. Screen Permission Bits (`Common.Utils.AppPermissions`)
