@@ -31,6 +31,10 @@ namespace Sayl.Core.Services
         public const string KeyReceiptPrinter = "ReceiptPrinter";
         public const string KeyDefaultCreditLimit = "DefaultCreditLimit";
 
+        /// <summary>معرّف توقيت ويندوز للجهاز المركزي (المصدر الموثوق لتوقيت المتجر) —
+        /// يكتبه جهاز الخادم وحده عند كل إقلاع وتقرأه أجهزة البيع (clsStoreClockService).</summary>
+        public const string KeyStoreTimeZoneId = "StoreTimeZoneId";
+
         /// <summary>حد الائتمان الافتراضي للعملاء الجدد عند غياب صف الإعداد —
         /// 1000 بعملة المتجر (متطلب Task 1: قيمة ابتدائية معتمدة).</summary>
         public const decimal DefaultCreditLimitValue = 1000m;

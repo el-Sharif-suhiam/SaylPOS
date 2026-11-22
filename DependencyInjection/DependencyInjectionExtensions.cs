@@ -44,6 +44,8 @@ namespace DependencyInjection
             services.AddScoped<clsPayrollService>();
             services.AddScoped<clsStockCountService>();
             services.AddScoped<clsFiscalYearService>();
+            // ساعة المتجر المركزية: Singleton يعيش أطول من النطاقات — يفتح نطاقًا لكل عملية قاعدة
+            services.AddSingleton<clsStoreClockService>();
             return services;
         }
 

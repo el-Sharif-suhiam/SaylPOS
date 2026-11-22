@@ -182,6 +182,32 @@ namespace Sayl.UI
                         scope.ServiceProvider.GetRequiredService<Core.Services.clsStockCountService>()
                             .EnsureCountSchemaAsync().GetAwaiter().GetResult();
 
+                        // ساعة المتجر المركزية: المضيف يسجّل توقيته، والطرفي يقرأه —
+                        // فشل الساعة ليس حرجًا: رسالة واضحة + استمرار (الإقلاع التالي يعيد المحاولة)
+                        try
+                        {
+                            scope.ServiceProvider.GetRequiredService<Core.Services.clsStoreClockService>()
+                                .InitializeAsync().GetAwaiter().GetResult();
+                        }
+                        catch (Core.Services.clsStoreClockService.StoreClockInitializationException scEx)
+                        {
+                            LogError("STORE_CLOCK", scEx);
+                            MessageBox.Show(
+                                scEx.Message + "\n" + AppLang.T("Startup.DbRetryHint"),
+                                AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
+                                MessageBoxDefaultButton.Button1,
+                                MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                        }
+                        catch (Exception clockEx)
+                        {
+                            LogError("STORE_CLOCK", clockEx);
+                            MessageBox.Show(
+                                "تعذّر تهيئة ساعة المتجر — ستُعاد المحاولة عند الإقلاع التالي.\n" + clockEx.Message,
+                                AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
+                                MessageBoxDefaultButton.Button1,
+                                MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                        }
+
                         // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
                         if (usersService.HasActiveUsersAsync().GetAwaiter().GetResult())
                             return true;

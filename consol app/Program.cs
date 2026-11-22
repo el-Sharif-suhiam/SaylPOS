@@ -94,6 +94,16 @@ namespace consol_app
                     await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
                     // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
                     await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
+                    // ساعة المتجر المركزية: فشلها تحذير فقط — الهارنس يكمل
+                    try
+                    {
+                        await Svc<clsStoreClockService>(ws).InitializeAsync();
+                    }
+                    catch (Exception clockEx)
+                    {
+                        Console.WriteLine($"⚠️  STORE CLOCK: {clockEx.Message} (المتابعة — تُعاد المحاولة عند الإقلاع التالي)");
+                    }
+
                     var admin = await db.Users
                         .FirstOrDefaultAsync(u => u.Username == "admin" && u.IsActive);
                     await stock.ReceiveStockAsync(new DtoStockReceiveRequest
