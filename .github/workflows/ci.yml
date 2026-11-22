@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:            # all branches
+  pull_request:    # all branches
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-installer:
+    name: Build, test, installer (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install SQL Server LocalDB (skip if already present)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command sqllocaldb -ErrorAction SilentlyContinue) {
+            Write-Host 'sqllocaldb already on PATH; skipping LocalDB install.'
+            exit 0
+          }
+          # GitHub windows-latest runners do not ship LocalDB preinstalled.
+          # Install it silently via VS Build Tools with the LocalDB component.
+          $bootstrapper = "$env:TEMP\vs_BuildTools.exe"
+          $vsUrl = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
+          Invoke-WebRequest -Uri $vsUrl -OutFile $bootstrapper -UseBasicParsing
+          $installArgs = @(
+            '--quiet', '--norestart', '--nocache', '--wait',
+            '--add', 'Microsoft.VisualStudio.Workload.DataBuildTools',
+            '--add', 'Microsoft.VisualStudio.Component.SQL.LocalDB.Runtime',
+            '--includeRecommended'
+          )
+          $proc = Start-Process -FilePath $bootstrapper -ArgumentList $installArgs -PassThru -Wait
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "VS Build Tools installer exited with code $($proc.ExitCode)"
+          }
+
+      - name: Start LocalDB instance (MSSQLLocalDB)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # sqllocaldb.exe may not be on PATH after install - resolve it defensively.
+          $sqllocaldb = (Get-Command sqllocaldb -ErrorAction SilentlyContinue).Source
+          if (-not $sqllocaldb) {
+            $sqllocaldb = Get-ChildItem 'C:\Program Files\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe' |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $sqllocaldb) { throw 'SqlLocalDB.exe not found after LocalDB install.' }
+          Write-Host "Using sqllocaldb: $sqllocaldb"
+          # create-if-missing: Start-Process bypasses PowerShell's stderr error
+          # stream entirely (2>$null with EAP=Stop can throw NativeCommandError
+          # in Windows PowerShell 5.1 when the instance already exists).
+          Start-Process -FilePath $sqllocaldb -ArgumentList 'create','MSSQLLocalDB' -Wait -NoNewWindow | Out-Null
+          & $sqllocaldb start 'MSSQLLocalDB'
+          & $sqllocaldb info 'MSSQLLocalDB'
+
+      - name: Smoke-test LocalDB connection
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assembly = [System.Reflection.Assembly]::LoadWithPartialName('System.Data')
+          $conn = New-Object System.Data.SqlClient.SqlConnection
+          $conn.ConnectionString = 'Server=(localdb)\MSSQLLocalDB;Integrated Security=true;Connection Timeout=60'
+          $conn.Open()
+          $cmd = $conn.CreateCommand()
+          $cmd.CommandText = 'SELECT @@VERSION'
+          Write-Host ('LocalDB OK: ' + $cmd.ExecuteScalar().Split("`n")[0])
+          $conn.Close()
+
+      - name: Build solution (Release)
+        shell: powershell
+        run: dotnet build Sayl_POS.slnx -c Release --nologo
+
+      - name: Run full test suite
+        shell: powershell
+        run: dotnet test Sayl.Tests -c Release --no-build --nologo
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-installer.ps1
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaylPOS-Setup
+          path: installer/output/*.exe
+          retention-days: 7
