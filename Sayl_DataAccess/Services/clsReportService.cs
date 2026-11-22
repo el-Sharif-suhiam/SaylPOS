@@ -280,6 +280,7 @@ namespace Sayl.Core.Services
                 .Select(i => new
                 {
                     i.InvoiceId,
+                    i.InvoiceNumber,
                     i.Type,
                     i.NetAmount,
                     i.CreatedAt,
@@ -295,6 +296,7 @@ namespace Sayl.Core.Services
                 .Select(x => new
                 {
                     x.InvoiceId,
+                    x.InvoiceNumber,
                     x.Type,
                     x.NetAmount,
                     Day = ProgramDay(x.CreatedAt!.Value),
@@ -429,6 +431,7 @@ namespace Sayl.Core.Services
                         var detail = new InvoicePrintVM
                         {
                             InvoiceId = inv.InvoiceId,
+                            InvoiceNumber = inv.InvoiceNumber,
                             Type = inv.Type.ToString(),
                             Status = "completed",
                             PaymentStatus = "",

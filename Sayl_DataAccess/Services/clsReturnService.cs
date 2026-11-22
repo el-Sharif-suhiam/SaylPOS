@@ -209,6 +209,13 @@ namespace Sayl.Core.Services
                     NetAmount = -total
                 };
 
+                // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة المرتجع نفسها
+                // قبل الإدراج — فشل الإسناد يفشل المرتجع وتراجع العدّاد معه.
+                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                if (!invoiceNumber.IsSuccess)
+                    throw new InvalidOperationException(invoiceNumber.Message);
+                returnInvoice.InvoiceNumber = invoiceNumber.Data;
+
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();
 
@@ -369,6 +376,13 @@ namespace Sayl.Core.Services
                     TaxAmount = -returnedTaxSup,
                     NetAmount = -total
                 };
+
+                // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة المرتجع نفسها
+                // قبل الإدراج — فشل الإسناد يفشل المرتجع وتراجع العدّاد معه.
+                var invoiceNumberSup = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                if (!invoiceNumberSup.IsSuccess)
+                    throw new InvalidOperationException(invoiceNumberSup.Message);
+                returnInvoice.InvoiceNumber = invoiceNumberSup.Data;
 
                 _dbContext.Invoices.Add(returnInvoice);
                 await _dbContext.SaveChangesAsync();

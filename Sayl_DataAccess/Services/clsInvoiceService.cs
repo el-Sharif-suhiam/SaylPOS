@@ -63,6 +63,7 @@ namespace Sayl.Core.Services
                 .Select(i => new InvoiceVM
                 {
                     InvoiceId = i.InvoiceId,
+                    InvoiceNumber = i.InvoiceNumber,
                     Type = i.Type.ToString(),
                     Status = i.Status.ToString(),
                     PaymentStatus = i.PaymentStatus.ToString(),
@@ -71,6 +72,7 @@ namespace Sayl.Core.Services
                     UserName = i.User.Username,
                     SessionId = i.SessionId,
                     OriginalInvoiceId = i.OriginalInvoiceId,
+                    OriginalInvoiceNumber = i.OriginalInvoice != null ? i.OriginalInvoice.InvoiceNumber : null,
                     TotalAmount = i.TotalAmount,
                     DiscountAmount = i.DiscountAmount,
                     TaxAmount = i.TaxAmount,
@@ -147,6 +149,7 @@ namespace Sayl.Core.Services
                 .Select(i => new InvoiceVM
                 {
                     InvoiceId = i.InvoiceId,
+                    InvoiceNumber = i.InvoiceNumber,
                     Type = i.Type.ToString(),
                     Status = i.Status.ToString(),
                     PaymentStatus = i.PaymentStatus.ToString(),
@@ -155,6 +158,7 @@ namespace Sayl.Core.Services
                     UserName = i.User.Username,
                     SessionId = i.SessionId,
                     OriginalInvoiceId = i.OriginalInvoiceId,
+                    OriginalInvoiceNumber = i.OriginalInvoice != null ? i.OriginalInvoice.InvoiceNumber : null,
                     TotalAmount = i.TotalAmount,
                     DiscountAmount = i.DiscountAmount,
                     TaxAmount = i.TaxAmount,
@@ -179,6 +183,7 @@ namespace Sayl.Core.Services
             var invoice = await _dbContext.Invoices
                 .Include(i => i.Party)
                 .Include(i => i.User)
+                .Include(i => i.OriginalInvoice)
                 .Include(i => i.InvoiceItems)
                     .ThenInclude(ii => ii.Product)
                 .Include(i => i.InvoiceItems)
@@ -191,6 +196,7 @@ namespace Sayl.Core.Services
             var vm = new InvoiceVM
             {
                 InvoiceId = invoice.InvoiceId,
+                InvoiceNumber = invoice.InvoiceNumber,
                 Type = invoice.Type.ToString(),
                 Status = invoice.Status.ToString(),
                 PaymentStatus = invoice.PaymentStatus.ToString(),
@@ -199,6 +205,7 @@ namespace Sayl.Core.Services
                 UserName = invoice.User?.Username,
                 SessionId = invoice.SessionId,
                 OriginalInvoiceId = invoice.OriginalInvoiceId,
+                OriginalInvoiceNumber = invoice.OriginalInvoice != null ? invoice.OriginalInvoice.InvoiceNumber : null,
                 TotalAmount = invoice.TotalAmount,
                 DiscountAmount = invoice.DiscountAmount,
                 TaxAmount = invoice.TaxAmount,
@@ -231,6 +238,7 @@ namespace Sayl.Core.Services
                 .Include(i => i.Party)
                 .Include(i => i.User)
                     .ThenInclude(u => u.Employee)
+                .Include(i => i.OriginalInvoice)
                 .Include(i => i.InvoiceItems)
                     .ThenInclude(ii => ii.Product)
                 .Include(i => i.InvoiceItems)
@@ -246,6 +254,7 @@ namespace Sayl.Core.Services
             var vm = new InvoicePrintVM
             {
                 InvoiceId = invoice.InvoiceId,
+                InvoiceNumber = invoice.InvoiceNumber,
                 Type = invoice.Type.ToString(),
                 Status = invoice.Status.ToString(),
                 PaymentStatus = invoice.PaymentStatus.ToString(),
@@ -256,6 +265,7 @@ namespace Sayl.Core.Services
                 CashierName = invoice.User?.Employee?.Name ?? invoice.User?.Username ?? "",
                 SessionId = invoice.SessionId,
                 OriginalInvoiceId = invoice.OriginalInvoiceId,
+                OriginalInvoiceNumber = invoice.OriginalInvoice != null ? invoice.OriginalInvoice.InvoiceNumber : null,
                 Notes = invoice.Notes,
                 CreatedAt = invoice.CreatedAt,
                 TotalAmount = invoice.TotalAmount,

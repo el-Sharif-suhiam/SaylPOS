@@ -118,6 +118,13 @@ namespace Sayl.Core.Services
                     CreatedAt = DateTime.UtcNow
                 };
 
+                // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة الشراء نفسها
+                // قبل الإدراج — فشل الإسناد يفشل العملية وتراجع العدّاد معها.
+                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                if (!invoiceNumber.IsSuccess)
+                    throw new InvalidOperationException(invoiceNumber.Message);
+                invoice.InvoiceNumber = invoiceNumber.Data;
+
                 _dbContext.Invoices.Add(invoice);
                 await _dbContext.SaveChangesAsync();
 

@@ -309,7 +309,7 @@ namespace Sayl.UI.Forms
                         _remainingByProduct.GetValueOrDefault(item.ProductId),
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
 
-                _lblInfo.Text = AppLang.T("Return.Info.Loaded", invoiceId,
+                _lblInfo.Text = AppLang.T("Return.Info.Loaded", result.Data.InvoiceNumber,
                     result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
             }
             catch

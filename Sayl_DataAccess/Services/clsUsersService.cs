@@ -501,6 +501,269 @@ BEGIN
         /* مهلة القفل/ازدحام: تخطٍّ غير فادح للإقلاع — إقلاع لاحق يعيد التطبيق */
         ROLLBACK TRAN;
     END
+END;
+/* Task-2/3: الترقيم التجاري السنوي للفواتير INV-YYYY-NNNNNN (Upgrade_19).
+   الفواتير تُعرَّف بـInvoiceId داخليًا فقط — المطلوب رقم تجاري سنوي واحد
+   مشترك عبر الأنواع الأربعة كلها (sale/purchase/customer_return/
+   supplier_return) فريد داخل سنتها البرمجية (UTC+3 — اتفاقية
+   ProgramClock). العمود NVARCHAR(32): يُضاف nullable أولًا كي يُرحِّل
+   القديم (لا يمكن شدّ NOT NULL قبل وجود رقم لكل صف)، ثم بعد اكتمال
+   الترحيل يُشدَّد NOT NULL — لا مسار إنتاج يُدرج فاتورة بلا رقم:
+   المولّد (Task 3) يسنده داخل معاملة كل عملية، وNOT NULL حاجز هيكلي
+   يمنع أي إدراج بلا رقم. فهرس فريد — الصيغة النهائية عادية بلا
+   مرشِّح: يمنع تكرار الرقم عبر كل صفوف الجدول (حاجز محرك فوق أي
+   فحص-ثم-إسناد لاحق)؛ أثناء الترحيل فقط يُبنى مُرشَّحًا (NULL حرّ
+   كي تُرقَّم الصفوف) ثم يُهدم ويُعاد عاديًّا بعد شدّ NOT NULL. جدول
+   عدّاد لكل سنة يقرؤه المولّد ويجعله فوق أعلى لاحقة صادرة. الترحيل:
+   صف بلا CreatedAt (بيانات فاسدة قائمة لكنها حقيقية) يُرقَّم في السنة
+   البرمجية الحالية — مُوثَّق عمدًا. الترتيب داخل السنة حتمي: بلا
+   CreatedAt أخيرًا ثم CreatedAt ثم InvoiceId. القاعدة العدّادية:
+   التسلسل = base + rn حيث base لكل سنة = MAX(عدّاد إن وُجد، أعلى
+   لاحقة مُحلَّلة من المحفوظ INV-<digits>-<digits>، 0) — ROW_NUMBER من 1
+   الصرف كان يصطدم بالأرقام المحفوظة في إعادة تشغيل بعد ترقية جزئية.
+   FORMAT(seq,'000000') يزيد الحشو ولا يقص أبدًا (RIGHT كان يقص —
+   مرفوض)؛ أقصى طول 'INV-YYYY-' + 19 = 28 ≤ 32. upsert العدّاد لا
+   يُخفَّضه أبدًا. رفض صريح: إن بقي بعد الترحيل صف بلا رقم (NULL أو
+   فارغ — الفارغ يسمم الفهرس الفريد العادي) فTHROW يتراجع عن الترقية
+   كلها: لمسُ بيانات تافهة قرار مالك لا سكربت تلقائي. كل شيء (عمود +
+   فهرس + جدول + ترحيل + عدّادات + تعميد NOT NULL) في
+   معاملة واحدة تحت قفل تطبيقي مسمّى (sp_getapplock Exclusive بمالك
+   المعاملة — نمط Upgrade_18) يُسلسِل الطرفيات المتوازية، وفحص الحالة
+   يُعاد بعد القسط على القفل — من تنتهي مهلته يتخطى تخطيًّا غير فادح
+   والإقلاع اللاحق يعيد التطبيق (idempotent: المُرقَّم لا يُعاد إسناده
+   فإعادة التشغيل تزايدية بلا تصادم، والحالة النهائية على تركيب جديد
+   من SaylDB.sql النهائية تُكتشف فيتخطى كل شيء). فشل حقيقي يتراجع
+   كليًا ثم يُرمى.
+   نفس منطق Upgrade_19_AnnualInvoiceNumbering.sql وSaylDB.sql تمامًا —
+   والمسارات الثلاثة متطابقة النتيجة. */
+IF OBJECT_ID(N'dbo.Invoices', N'U') IS NOT NULL
+BEGIN
+    DECLARE @u19Lock int;
+    BEGIN TRAN;
+    EXEC @u19Lock = sys.sp_getapplock
+         @Resource = N'Upgrade19InvoiceNumbering',
+         @LockMode = 'Exclusive',
+         @LockOwner = 'Transaction',
+         @LockTimeout = 10000;
+    IF @u19Lock >= 0
+    BEGIN
+        BEGIN TRY
+            /* إعادة فحص حالة الترقية بعد القسط على القفل — لا قبله.
+               الحراس على مرحلتين عمدًا: فحص الصفوف NULL يُكتب بعمود
+               InvoiceNumber — لو جُمع مع فحص وجود العمود في شرط واحد
+               لفشل الترجمة على قاعدة قديمة بلا عمود (Invalid column name
+               لحظة ترجمة العبارة قبل تنفيذ ALTER). */
+            DECLARE @u19Todo bit = 0;
+            IF OBJECT_ID(N'dbo.InvoiceNumberCounters', N'U') IS NULL
+               OR NOT EXISTS (SELECT 1 FROM sys.columns
+                              WHERE object_id = OBJECT_ID(N'dbo.Invoices')
+                                AND name = N'InvoiceNumber')
+               OR EXISTS (SELECT 1 FROM sys.columns
+                          WHERE object_id = OBJECT_ID(N'dbo.Invoices')
+                            AND name = N'InvoiceNumber' AND is_nullable = 1)
+               OR NOT EXISTS (SELECT 1 FROM sys.indexes
+                              WHERE object_id = OBJECT_ID(N'dbo.Invoices')
+                                AND name = N'UQ_Invoices_InvoiceNumber'
+                                AND is_unique = 1 AND has_filter = 0)
+                SET @u19Todo = 1;
+            ELSE
+            BEGIN
+                /* فحص الصفوف NULL/فارغ عبر sp_executesql وجوبي: مرجعٌ ثابت
+                   للعمود في هذا الفرع كان سيقتل ترجمة الدفعة كلها على قاعدة
+                   قديمة بلا العمود (Msg 207 قبل تنفيذ شيء — مُثبَت تجريبيًا)،
+                   وهو لا يُنفَّذ إلا بعد ثبوت وجود العمود فترجمته اللحظية
+                   للدفعة الفرعية آمنة. */
+                DECLARE @u19Nulls int = 0;
+                EXEC sp_executesql
+                     N'SELECT @u19Nulls = COUNT(*) FROM dbo.Invoices
+                       WHERE InvoiceNumber IS NULL OR InvoiceNumber = N''''',
+                     N'@u19Nulls int OUTPUT', @u19Nulls = @u19Nulls OUTPUT;
+                IF @u19Nulls > 0
+                    SET @u19Todo = 1;
+            END;
+
+            IF @u19Todo = 1
+            BEGIN
+                /* EXEC وجوبي — مُثبَت تجريبيًا: أي مرجع ثابت للعمود (حتى في
+                   فروع IF/ELSE غير منفَّذة) يُترجم مع الدفعة كلها لحظة بدئها —
+                   قبل تنفيذ ALTER إضافة العمود على قاعدة قديمة — فيفشل بـ
+                   Msg 207 ولا يُنفَّذ شيء. الدفعة الفرعية الأولى تضيف العمود
+                   فقط؛ والثانية تُترجم لحظة تنفيذها بعد وجود العمود فمراجعه
+                   فيها كلها آمنة. */
+                EXEC(N'
+                    /* العمود — إن غاب فقط (nullable أولًا: الترحيل يحتاجه كي
+                       يملأ كل الصفوف قبل شدّ NOT NULL) */
+                    IF NOT EXISTS (SELECT 1 FROM sys.columns
+                                   WHERE object_id = OBJECT_ID(N''dbo.Invoices'')
+                                     AND name = N''InvoiceNumber'')
+                        ALTER TABLE dbo.Invoices ADD InvoiceNumber NVARCHAR(32) NULL;
+                ');
+
+                EXEC(N'
+                /* الفهرس الفريد المُرشَّح — إن غاب فقط (حاجز محرك أثناء
+                   الترحيل، يُستبدل بعاديٍّ بعد شدّ NOT NULL). أرقام قديمة
+                   مكررة (بيانات فاسدة قائمة) تفشل الإنشاء بـTHROW وتراجع
+                   كل شيء: لمسها قرار مالك لا سكربت تلقائي. داخل دفعة
+                   EXEC الفرعية: العمود موجود وقت ترجمتها، فالمرجع آمن. */
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes
+                               WHERE object_id = OBJECT_ID(N''dbo.Invoices'')
+                                 AND name = N''UQ_Invoices_InvoiceNumber'')
+                    CREATE UNIQUE INDEX UQ_Invoices_InvoiceNumber
+                        ON dbo.Invoices(InvoiceNumber) WHERE InvoiceNumber IS NOT NULL;
+
+                /* جدول العدّاد — إن غاب فقط */
+                IF OBJECT_ID(N''dbo.InvoiceNumberCounters'', N''U'') IS NULL
+                    CREATE TABLE dbo.InvoiceNumberCounters
+                    (
+                        NumberYear INT NOT NULL
+                            CONSTRAINT PK_InvoiceNumberCounters PRIMARY KEY,
+                        LastIssuedNumber BIGINT NOT NULL
+                            CONSTRAINT DF_InvoiceNumberCounters_LastIssuedNumber DEFAULT (0),
+                        LastUpdatedAtUtc DATETIME2 NOT NULL
+                            CONSTRAINT DF_InvoiceNumberCounters_LastUpdatedAtUtc DEFAULT (SYSUTCDATETIME())
+                    );
+
+                /* الترحيل — الصفوف NULL فقط (تزايدية). نفس خوارزمية
+                   Upgrade_19_AnnualInvoiceNumbering.sql حرفيًا. */
+                CREATE TABLE #Inv19Targets
+                (
+                    InvoiceId   INT NOT NULL PRIMARY KEY,
+                    ProgramYear INT NOT NULL,
+                    rn          BIGINT NOT NULL
+                );
+
+                INSERT INTO #Inv19Targets (InvoiceId, ProgramYear, rn)
+                SELECT InvoiceId,
+                       ProgramYear,
+                       ROW_NUMBER() OVER (PARTITION BY ProgramYear
+                                          ORDER BY CASE WHEN CreatedAt IS NULL THEN 1 ELSE 0 END,
+                                                   CreatedAt, InvoiceId)
+                FROM (
+                    SELECT i.InvoiceId,
+                           i.CreatedAt,
+                           CASE WHEN i.CreatedAt IS NULL
+                                THEN YEAR(DATEADD(HOUR, 3, SYSUTCDATETIME()))
+                                ELSE YEAR(DATEADD(HOUR, 3, i.CreatedAt))
+                           END AS ProgramYear
+                    FROM dbo.Invoices i
+                    WHERE i.InvoiceNumber IS NULL
+                ) t;
+
+                CREATE TABLE #Inv19Maxes
+                (
+                    ProgramYear INT NOT NULL PRIMARY KEY,
+                    Base        BIGINT NOT NULL,
+                    NewMax      BIGINT NOT NULL
+                );
+
+                WITH Preserved AS (
+                    SELECT CAST(SUBSTRING(n.Num, 5, 4) AS INT)  AS ProgramYear,
+                           CAST(SUBSTRING(n.Num, 10, 100) AS BIGINT) AS Suffix
+                    FROM (SELECT InvoiceNumber AS Num
+                          FROM dbo.Invoices WITH (UPDLOCK)
+                          WHERE InvoiceNumber IS NOT NULL) n
+                    WHERE LEN(n.Num) >= 10
+                      AND SUBSTRING(n.Num, 1, 4) = N''INV-''
+                      AND SUBSTRING(n.Num, 5, 4) NOT LIKE N''%[^0-9]%''
+                      AND SUBSTRING(n.Num, 9, 1) = N''-''
+                      AND SUBSTRING(n.Num, 10, 100) <> N''''
+                      AND SUBSTRING(n.Num, 10, 100) NOT LIKE N''%[^0-9]%''
+                ),
+                Candidates AS (
+                    SELECT c.NumberYear AS ProgramYear, c.LastIssuedNumber AS Val
+                    FROM dbo.InvoiceNumberCounters c
+                    UNION ALL
+                    SELECT p.ProgramYear, p.Suffix FROM Preserved p
+                ),
+                Bases AS (
+                    SELECT y.ProgramYear, MAX(COALESCE(cd.Val, 0)) AS Base
+                    FROM (
+                        SELECT DISTINCT ProgramYear FROM #Inv19Targets
+                        UNION SELECT ProgramYear FROM Candidates
+                    ) y
+                    LEFT JOIN Candidates cd ON cd.ProgramYear = y.ProgramYear
+                    GROUP BY y.ProgramYear
+                )
+                INSERT INTO #Inv19Maxes (ProgramYear, Base, NewMax)
+                SELECT b.ProgramYear, b.Base, b.Base + COALESCE(t.mx, 0)
+                FROM Bases b
+                OUTER APPLY (SELECT MAX(t.rn) AS mx
+                             FROM #Inv19Targets t
+                             WHERE t.ProgramYear = b.ProgramYear) t;
+
+                UPDATE i
+                SET i.InvoiceNumber = N''INV-'' + CONVERT(NVARCHAR(4), m.ProgramYear)
+                                      + N''-'' + FORMAT(m.Base + t.rn, N''000000'')
+                FROM dbo.Invoices i
+                JOIN #Inv19Targets t ON t.InvoiceId = i.InvoiceId
+                JOIN #Inv19Maxes m ON m.ProgramYear = t.ProgramYear;
+
+                /* upsert العدّاد لكل سنة — لا يُخفَّض أبدًا */
+                UPDATE c
+                SET c.LastIssuedNumber = CASE WHEN c.LastIssuedNumber > m.NewMax
+                                              THEN c.LastIssuedNumber ELSE m.NewMax END,
+                    c.LastUpdatedAtUtc = SYSUTCDATETIME()
+                FROM dbo.InvoiceNumberCounters c
+                JOIN #Inv19Maxes m ON m.ProgramYear = c.NumberYear;
+
+                INSERT INTO dbo.InvoiceNumberCounters (NumberYear, LastIssuedNumber, LastUpdatedAtUtc)
+                SELECT m.ProgramYear, m.NewMax, SYSUTCDATETIME()
+                FROM #Inv19Maxes m
+                WHERE NOT EXISTS (SELECT 1 FROM dbo.InvoiceNumberCounters c
+                                  WHERE c.NumberYear = m.ProgramYear);
+
+                DROP TABLE #Inv19Targets;
+                DROP TABLE #Inv19Maxes;
+
+                /* رفض إتمام التعميد: صف بلا رقم (NULL أو فارغ) بعد الترحيل =
+                   بيانات لا يمكن شدّ NOT NULL معها (والفارغ يسمم الفهرس
+                   الفريد العادي) — THROW يتراجع عن الترقية كلها: لمسُها
+                   قرار مالك لا سكربت تلقائي. */
+                DECLARE @u19Unnumbered int =
+                    (SELECT COUNT(*) FROM dbo.Invoices
+                     WHERE InvoiceNumber IS NULL OR InvoiceNumber = N'''');
+                IF @u19Unnumbered > 0
+                BEGIN
+                    DECLARE @u19Msg nvarchar(2048) =
+                        N''Upgrade_19: تعذر إتمام الترقية — بقي ''
+                        + CONVERT(nvarchar(20), @u19Unnumbered)
+                        + N'' صف فاتورة بلا رقم تجاري (NULL أو فارغ) بعد الترحيل. ''
+                        + N''أصلح هذه الصفوف يدويًا ثم أعد تشغيل الترقية.'';
+                    THROW 50019, @u19Msg, 1;
+                END;
+
+                /* التعميد النهائي: هدم الفهرس المُرشَّح (وجوبًا قبل ALTER —
+                   SQL Server يرفض ALTER على عمود مُفهرس) ثم شدّ NOT NULL
+                   ثم إعادة الفهرس فريدًا عاديًّا بالاسم نفسه (داخل هذه
+                   الدفعة الفرعية مباشرة: العمود موجود وقت ترجمتها).
+                   الصيغة النهائية: كل صف مميَّز برقم لا NULL ولا فارغ. */
+                IF EXISTS (SELECT 1 FROM sys.indexes
+                           WHERE object_id = OBJECT_ID(N''dbo.Invoices'')
+                             AND name = N''UQ_Invoices_InvoiceNumber'')
+                    DROP INDEX UQ_Invoices_InvoiceNumber ON dbo.Invoices;
+
+                IF EXISTS (SELECT 1 FROM sys.columns
+                           WHERE object_id = OBJECT_ID(N''dbo.Invoices'')
+                             AND name = N''InvoiceNumber'' AND is_nullable = 1)
+                    ALTER TABLE dbo.Invoices
+                        ALTER COLUMN InvoiceNumber NVARCHAR(32) NOT NULL;
+
+                CREATE UNIQUE INDEX UQ_Invoices_InvoiceNumber
+                    ON dbo.Invoices(InvoiceNumber);
+                ');
+            END;
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            THROW;
+        END CATCH;
+    END
+    ELSE
+    BEGIN
+        /* مهلة القفل/ازدحام: تخطٍّ غير فادح للإقلاع — إقلاع لاحق يعيد التطبيق */
+        ROLLBACK TRAN;
+    END
 END;";
 
         /// <summary>يضمن أعمدة/جداول المخطط الجديدة على أي قاعدة (قديمة أو جديدة) — يُنادى مرة عند الإقلاع.</summary>

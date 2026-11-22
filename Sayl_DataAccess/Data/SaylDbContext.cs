@@ -35,6 +35,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<InvoiceItem> InvoiceItems { get; set; }
 
+    public virtual DbSet<InvoiceNumberCounter> InvoiceNumberCounters { get; set; }
+
     public virtual DbSet<Party> Parties { get; set; }
 
     public virtual DbSet<Payment> Payments { get; set; }
@@ -385,7 +387,18 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.Type).HasMaxLength(20).HasConversion<string>();
 
-           
+            // Upgrade_19: الرقم التجاري السنوي INV-YYYY-NNNNNN — NOT NULL هيكليًا:
+            // المولّد يسنده داخل معاملة كل عملية إنتاج، والمُرحِّل ملأ القديم
+            // ورفض أي صف بقي بلا رقم؛ فأي إدراج بلا رقم يفشل (EF NULL → NOT NULL
+            // violation) قبل أن يلمس أي شيء. فهرس فريد عادي بلا مرشِّح — كل صف
+            // مميَّز برقم (حاجز محرك فوق أي فحص-ثم-إسناد).
+            entity.Property(e => e.InvoiceNumber)
+                .IsRequired()
+                .HasMaxLength(32); // nvarchar افتراضيًا — مطابق لعمود NVARCHAR(32) في SaylDB.sql/Upgrade_19
+
+            entity.HasIndex(e => e.InvoiceNumber, "UQ_Invoices_InvoiceNumber")
+                .IsUnique();
+
             entity.HasOne(d => d.Party).WithMany(p => p.Invoices)
                 .HasForeignKey(d => d.PartyId)
                 .HasConstraintName("FK_Invoices_PartyId");
@@ -394,6 +407,17 @@ public partial class SaylDbContext : DbContext
                 .HasForeignKey(d => d.SessionId)
                 .HasConstraintName("FK_Invoices_SessionId");
 
+        });
+
+        modelBuilder.Entity<InvoiceNumberCounter>(entity =>
+        {
+            // عدّاد الترقيم التجاري السنوي: صف واحد لكل سنة برنامجية (UTC+3)،
+            // LastIssuedNumber لا يُخفَّض أبدًا — المولّد يقرؤه ويزيده داخل
+            // معاملة الإسناد، والترقيم يُلغي التصادم بين المسارات الثلاثة.
+            entity.HasKey(e => e.NumberYear).HasName("PK_InvoiceNumberCounters");
+
+            entity.Property(e => e.NumberYear).ValueGeneratedNever();
+            entity.Property(e => e.LastUpdatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<InvoiceItem>(entity =>

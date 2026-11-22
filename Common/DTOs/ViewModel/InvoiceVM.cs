@@ -7,6 +7,7 @@ namespace Common.DTOs.ViewModel
     public class InvoiceVM
     {
         public int InvoiceId { get; set; }
+        public string InvoiceNumber { get; set; } = null!;
         public string Type { get; set; } = null!;
         public string Status { get; set; } = null!;
         public string PaymentStatus { get; set; } = null!;
@@ -15,6 +16,7 @@ namespace Common.DTOs.ViewModel
         public string? UserName { get; set; }
         public int? SessionId { get; set; }
         public int? OriginalInvoiceId { get; set; }
+        public string? OriginalInvoiceNumber { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal TaxAmount { get; set; }

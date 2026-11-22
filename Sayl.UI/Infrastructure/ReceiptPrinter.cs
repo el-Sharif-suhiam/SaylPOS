@@ -135,7 +135,10 @@ namespace Sayl.UI.Infrastructure
                 if (!string.IsNullOrWhiteSpace(vatNumber)) Line(AppLang.T("Receipt.Line.Vat", vatNumber));
                 bytes.AddRange(new byte[] { 0x1B, 0x61, 0x00 });    // محاذاة يمين
                 Divider();
-                Line(AppLang.T("Receipt.Line.Invoice", invoice.InvoiceId, Sayl.UI.Infrastructure.AppClock.ToLocal(invoice.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm")));
+                Line(AppLang.T("Receipt.Line.Invoice", invoice.InvoiceNumber, Sayl.UI.Infrastructure.AppClock.ToLocal(invoice.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm")));
+                // مرتجع: مرجع الفاتورة الأصلية برقمها التجاري — لا المعرّف الداخلي
+                if (!string.IsNullOrWhiteSpace(invoice.OriginalInvoiceNumber))
+                    Line(AppLang.T("Pdf.Return.OfShort", invoice.OriginalInvoiceNumber));
                 Line(AppLang.T("Common.Label.Cashier", invoice.CashierName));
                 if (!string.IsNullOrWhiteSpace(invoice.PartyName)) Line(AppLang.T("Receipt.Line.Customer", invoice.PartyName));
                 Divider();

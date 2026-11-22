@@ -179,16 +179,23 @@ namespace Sayl.UI.Forms
                 _invoice = result.Data;
                 var inv = _invoice;
 
-                Text = AppLang.T("InvoiceDetails.Title", inv.InvoiceId);
+                Text = AppLang.T("InvoiceDetails.Title", inv.InvoiceNumber);
+
+                // مرتجع: سطر مرجع الفاتورة الأصلية برقمها التجاري (لا المعرّف الداخلي)
+                string originalRef = inv.Type is "customer_return" or "supplier_return"
+                                      && !string.IsNullOrWhiteSpace(inv.OriginalInvoiceNumber)
+                    ? "\n" + AppLang.T("Pdf.Return.Original", inv.OriginalInvoiceNumber)
+                    : "";
+
                 _lblHeader.Text = AppLang.T("InvoiceDetails.Header",
-                    inv.InvoiceId,
+                    inv.InvoiceNumber,
                     TranslateType(inv.Type),
                     TranslateStatus(inv.Status),
                     TranslatePayment(inv.PaymentStatus),
                     inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
                     string.IsNullOrWhiteSpace(inv.PartyPhone) ? "" : AppLang.T("InvoiceDetails.Header.Phone", inv.PartyPhone),
                     inv.CashierName,
-                    Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm"));
+                    Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt ?? DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm")) + originalRef;
 
                 _gridItems.Rows.Clear();
                 foreach (var item in inv.Items)

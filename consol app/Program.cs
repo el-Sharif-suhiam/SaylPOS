@@ -2422,6 +2422,9 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     PaymentStatus = Common.Enums.enPaymentStatus.paid,
                     PartyType = 'C', PartyId = customerId, UserId = cashierId,
                     TotalAmount = 10m, DiscountAmount = 0m, TaxAmount = 0m, NetAmount = 10m,
+                    // QA فقط: رقم تجاري اصطناعي فريد — InvoiceNumber NOT NULL
+                    // (Upgrade_19) وحبال الفحص هذا لا يمرّ بالمولّد التجاري.
+                    InvoiceNumber = $"INV-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..12]}",
                     CreatedAt = DateTime.UtcNow
                 };
                 pdb.Invoices.Add(manual);

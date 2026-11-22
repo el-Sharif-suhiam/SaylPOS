@@ -7,6 +7,7 @@ namespace Common.DTOs.ViewModel
     public class InvoicePrintVM
     {
         public int InvoiceId { get; set; }
+        public string InvoiceNumber { get; set; } = null!;
         public string Type { get; set; } = null!;
         public string Status { get; set; } = null!;
         public string PaymentStatus { get; set; } = null!;
@@ -17,6 +18,7 @@ namespace Common.DTOs.ViewModel
         public string CashierName { get; set; } = null!;
         public int? SessionId { get; set; }
         public int? OriginalInvoiceId { get; set; }
+        public string? OriginalInvoiceNumber { get; set; }
         public string? Notes { get; set; }
         public DateTime? CreatedAt { get; set; }
 

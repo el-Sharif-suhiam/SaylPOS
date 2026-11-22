@@ -47,7 +47,7 @@ namespace Sayl.UI.UserControls
         {
             // الأعمدة قبل انتظار البيانات: أول فتح يظهر الجدول برأسه فورًا
             Grid.Columns.Clear();
-            Grid.Columns.Add("colId", AppLang.T("Invoices.Label.Id"));
+            Grid.Columns.Add("colId", AppLang.T("Invoices.Label.InvoiceNo"));
             Grid.Columns.Add("colDate", AppLang.T("Common.Label.Date"));
             Grid.Columns.Add("colParty", AppLang.T("Invoices.Label.Party"));
             Grid.Columns.Add("colUser", AppLang.T("Invoices.Label.User"));
@@ -118,7 +118,7 @@ namespace Sayl.UI.UserControls
                         string returnAction = inv.Type == "purchase" && inv.Status == "completed"
                             ? AppLang.T("Invoices.Action.Return")
                             : "";
-                        rowIndex = Grid.Rows.Add(inv.InvoiceId,
+                        rowIndex = Grid.Rows.Add(inv.InvoiceNumber,
                             inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                             inv.PartyName ?? "-",
                             inv.UserName ?? "-",
@@ -135,7 +135,7 @@ namespace Sayl.UI.UserControls
                     }
                     else
                     {
-                        rowIndex = Grid.Rows.Add(inv.InvoiceId,
+                        rowIndex = Grid.Rows.Add(inv.InvoiceNumber,
                             inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                             inv.PartyName ?? "-",
                             inv.UserName ?? "-",

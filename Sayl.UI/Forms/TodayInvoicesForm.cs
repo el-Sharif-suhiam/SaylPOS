@@ -404,7 +404,7 @@ namespace Sayl.UI.Forms
             bool isReturn = inv.Type == "customer_return" || inv.Type == "supplier_return";
             Color mainColor = isReturn ? AppTheme.Danger : AppTheme.TextPrimary;
 
-            string no = AppLang.T("Common.Label.InvoiceNo", inv.InvoiceId);
+            string no = AppLang.T("Common.Label.InvoiceNo", inv.InvoiceNumber);
             string type = InvoiceDetailsForm.TranslateType(inv.Type);
             string pay = InvoiceDetailsForm.TranslatePayment(inv.PaymentStatus);
             string party = inv.PartyName ?? AppLang.T("Common.Party.WalkIn");

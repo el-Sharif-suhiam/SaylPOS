@@ -92,6 +92,7 @@ public class ReturnPaymentStatusTests
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = net,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = DateTime.UtcNow
         };
         db.Invoices.Add(invoice);

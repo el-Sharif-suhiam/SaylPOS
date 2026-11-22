@@ -99,4 +99,11 @@ public sealed class TestSeed
             ProductId = product.ProductId
         };
     }
+
+    /// <summary>رقم تجاري اصطناعي فريد لتركيب الفواتير مباشرة في الاختبارات
+    /// (INV-YYYY-12hex — 20 خانة ≤ 32): العمود NOT NULL بعد Upgrade_19
+    /// والفهرس الفريد العادي يمنع التكرار، والمولّد الحقيقي يُختبر في
+    /// InvoiceNumberingGeneratorTests/IntegrationTests لا هنا.</summary>
+    public static string NewInvoiceNumber()
+        => $"INV-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..12]}";
 }

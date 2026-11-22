@@ -346,7 +346,7 @@ namespace Sayl.UI.Infrastructure
                             r.ConstantItem(240).AlignLeft().Column(c2 =>
                             {
                                 c2.Item().Text(typeLabel).FontSize(18).Bold().FontColor("#FFFFFF");
-                                c2.Item().PaddingTop(4).Text(AppLang.T("Pdf.InvNo", inv.InvoiceId))
+                                c2.Item().PaddingTop(4).Text(AppLang.T("Pdf.InvNo", inv.InvoiceNumber))
                                     .FontSize(11f).FontColor(Sky);
                                 c2.Item().PaddingTop(2).Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-")
                                     .FontSize(10f).FontColor(MutedGrey);
@@ -375,8 +375,8 @@ namespace Sayl.UI.Infrastructure
                                 c2.Item().PaddingTop(2).Text($"{AppLang.T("Pdf.CashierWord")}: {inv.CashierName}").FontSize(10.5f).FontColor("#475569");
                                 if (inv.SessionId != null)
                                     c2.Item().Text($"{AppLang.T("Pdf.SessionWord")}: #{inv.SessionId}").FontSize(10.5f).FontColor("#475569");
-                                if (inv.OriginalInvoiceId != null)
-                                    c2.Item().Text(AppLang.T("Pdf.Return.Original", inv.OriginalInvoiceId))
+                                if (!string.IsNullOrWhiteSpace(inv.OriginalInvoiceNumber))
+                                    c2.Item().Text(AppLang.T("Pdf.Return.Original", inv.OriginalInvoiceNumber))
                                         .FontSize(10.5f).FontColor("#B91C1C");
                             });
                         });
@@ -605,14 +605,14 @@ namespace Sayl.UI.Infrastructure
                                 .FontSize(8.5f).Bold();
                         col.Item().Row(r =>
                         {
-                            r.RelativeItem().Text(AppLang.T("Pdf.Thermal.TypeNo", TranslateType(inv.Type), inv.InvoiceId)).FontSize(9.5f).Bold();
+                            r.RelativeItem().Text(AppLang.T("Pdf.Thermal.TypeNo", TranslateType(inv.Type), inv.InvoiceNumber)).FontSize(9.5f).Bold();
                             r.ConstantItem(52).AlignLeft().Text(inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("dd/MM/yyyy") : "-").FontSize(8);
                         });
                         col.Item().Row(r =>
                         {
                             r.RelativeItem().Text(AppLang.T("Pdf.Return.Time", inv.CreatedAt)).FontSize(8);
-                            if (inv.OriginalInvoiceId != null)
-                                r.ConstantItem(140).AlignLeft().Text(AppLang.T("Pdf.Return.OfShort", inv.OriginalInvoiceId)).FontSize(7.5f);
+                            if (!string.IsNullOrWhiteSpace(inv.OriginalInvoiceNumber))
+                                r.ConstantItem(140).AlignLeft().Text(AppLang.T("Pdf.Return.OfShort", inv.OriginalInvoiceNumber)).FontSize(7.5f);
                         });
 
                         // 3) الكاشير (إلزامي فوق البنود) + الطرف (مورد للشراء، عميل لغيره)

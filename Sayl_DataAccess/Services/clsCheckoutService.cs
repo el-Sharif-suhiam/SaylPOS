@@ -597,6 +597,14 @@ END";
                 CreatedAt = DateTime.UtcNow
             };
 
+            // Upgrade_19: إسناد الرقم التجاري السنوي (INV-YYYY-NNNNNN) داخل معاملة
+            // البيع نفسها قبل إدراج الرأس — فشل الإسناد يفشل العملية كلها وتراجع
+            // العدّاد معها (النداء داخل ExecuteCheckoutAsync المعاملة Serializable).
+            var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+            if (!invoiceNumber.IsSuccess)
+                throw new InvalidOperationException(invoiceNumber.Message);
+            invoice.InvoiceNumber = invoiceNumber.Data;
+
             _dbContext.Invoices.Add(invoice);
             return invoice;
         }

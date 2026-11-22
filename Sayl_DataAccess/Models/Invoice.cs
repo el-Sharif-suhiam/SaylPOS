@@ -33,6 +33,11 @@ public partial class Invoice
 
     public string? Notes { get; set; }
 
+    /// <summary>الرقم التجاري السنوي المشترك لكل أنواع الفواتير (INV-YYYY-NNNNNN)
+    /// — غير فارغ هيكليًا (NOT NULL): المولّد يسنده داخل معاملة كل عملية إنتاج،
+    /// والترحيل (Upgrade_19) ملأ القديم ورفض أي صف بقي بلا رقم.</summary>
+    public string InvoiceNumber { get; set; } = null!;
+
     public DateTime? CreatedAt { get; set; }
 
     public virtual ICollection<InvoiceItem> InvoiceItems { get; set; } = new List<InvoiceItem>();

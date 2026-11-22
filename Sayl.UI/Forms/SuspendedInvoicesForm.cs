@@ -229,7 +229,7 @@ namespace Sayl.UI.Forms
 
             foreach (var inv in _invoices.Skip((_currentPage - 1) * _pageSize).Take(_pageSize))
             {
-                _grid.Rows.Add(inv.InvoiceId,
+                _grid.Rows.Add(inv.InvoiceNumber,
                     inv.CreatedAt.HasValue ? Sayl.UI.Infrastructure.AppClock.ToLocal(inv.CreatedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                     inv.PartyName ?? AppLang.T("Common.Party.Unknown"),
                     inv.ItemsCount,
@@ -387,7 +387,7 @@ namespace Sayl.UI.Forms
 
             var invoice = _invoices[pi];
             bool confirmed = ConfirmationDialog.Show(this, AppLang.T("Suspended.Cancel.Title"),
-                AppLang.T("Suspended.Cancel.Confirm", invoice.InvoiceId));
+                AppLang.T("Suspended.Cancel.Confirm", invoice.InvoiceNumber));
             if (!confirmed)
                 return;
 

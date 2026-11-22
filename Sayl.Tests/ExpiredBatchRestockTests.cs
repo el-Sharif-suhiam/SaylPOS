@@ -130,6 +130,7 @@ public class ExpiredBatchRestockTests
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 10m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = DateTime.UtcNow
         };
         db.Invoices.Add(manual);

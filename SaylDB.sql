@@ -265,6 +265,10 @@ CREATE TABLE Invoices
     NetAmount DECIMAL(10,2) NOT NULL DEFAULT (0),
     Notes NVARCHAR(MAX) NULL,
     CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
+    -- Upgrade_19: الرقم التجاري السنوي المشترك لكل أنواع الفواتير — NOT NULL
+    -- هيكليًا: المولّد يسنده داخل معاملة كل عملية إنتاج، والفهرس الفريد
+    -- العادي بالأسفل يمنع تكرار الرقم عبر كل الصفوف.
+    InvoiceNumber NVARCHAR(32) NOT NULL,
 
     CONSTRAINT CK_Invoices_Type CHECK (Type IN ('sale','purchase','customer_return','supplier_return')),
     CONSTRAINT CK_Invoices_Status CHECK (Status IN ('completed','suspended','cancelled')),
@@ -385,6 +389,30 @@ GO
 -- One consumption per invoice: engine-level barrier above the CAS transition
 CREATE UNIQUE INDEX UQ_CreditApprovals_ConsumedByInvoice
     ON CreditApprovals(ConsumedByInvoiceId) WHERE ConsumedByInvoiceId IS NOT NULL;
+GO
+
+-----------------------------------------------------------
+-- 13d) Create InvoiceNumberCounters (Upgrade_19)
+--      Annual commercial invoice numbering: one counter row
+--      per program year (UTC+3) shared across ALL FOUR
+--      invoice types (sale/purchase/customer_return/supplier_return).
+--      LastIssuedNumber = highest sequence issued in that
+--      year; the runtime generator reads it and advances it,
+--      and Upgrade_19 seeds it above the highest preserved
+--      suffix so re-runs never collide.
+-----------------------------------------------------------
+CREATE TABLE InvoiceNumberCounters
+(
+    NumberYear INT NOT NULL PRIMARY KEY,
+    LastIssuedNumber BIGINT NOT NULL DEFAULT (0),
+    LastUpdatedAtUtc DATETIME2 NOT NULL DEFAULT (SYSUTCDATETIME())
+);
+GO
+
+-- Duplicates of a completed number are engine-barred; unnumbered (NULL)
+-- rows stay free until the migration/generator assigns them.
+CREATE UNIQUE INDEX UQ_Invoices_InvoiceNumber
+    ON Invoices(InvoiceNumber);
 GO
 
 -----------------------------------------------------------

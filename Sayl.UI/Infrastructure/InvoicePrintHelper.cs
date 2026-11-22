@@ -78,7 +78,8 @@ namespace Sayl.UI.Infrastructure
                     InvoiceDetailsForm.TranslateType(invoice.Type));
                 System.IO.Directory.CreateDirectory(dir);
 
-                string fileName = $"Invoice_{invoice.InvoiceId}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+                // اسم الملف بالرقم التجاري — المستخدم يجد نسخة الفاتورة برقمها المطبوع
+                string fileName = $"Invoice_{invoice.InvoiceNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
                 filePath = IOPath.Combine(dir, fileName);
 
                 var inv = invoice;
@@ -94,7 +95,7 @@ namespace Sayl.UI.Infrastructure
                 // VULN-40: كل طباعة كانت تترك PDF بطابع زمني جديد — سنوات التشغيل
                 // تكدس آلاف الملفات في Documents بلا نظافة. نحتفظ بآخر 3 نسخ
                 // لكل فاتورة (النسخة الحالية + سابقتان للتراجع) ونمسح الأقدم.
-                PruneOldInvoicePdfs(dir, invoice.InvoiceId);
+                PruneOldInvoicePdfs(dir, invoice.InvoiceNumber);
             }
             catch
             {
@@ -121,11 +122,11 @@ namespace Sayl.UI.Infrastructure
         /// بآخر MaxCopiesPerInvoice (الطوابع الزمنية بالنزول؛ الأقدم يُحذف).
         /// فشل المسح صمت مقصود — النظافة تحسين لا توقف الطباعة.</summary>
         private const int MaxCopiesPerInvoice = 3;
-        private static void PruneOldInvoicePdfs(string dir, int invoiceId)
+        private static void PruneOldInvoicePdfs(string dir, string invoiceNumber)
         {
             try
             {
-                string prefix = $"Invoice_{invoiceId}_";
+                string prefix = $"Invoice_{invoiceNumber}_";
                 var oldFiles = new DirectoryInfo(dir)
                     .EnumerateFiles(prefix + "*.pdf")
                     .OrderByDescending(f => f.Name) // الطابع الزمني في الاسم — نصيًا يعادل زمنيًا

@@ -85,6 +85,7 @@ public class DashboardInventoryValuationTests
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 1m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = DateTime.UtcNow
         };
         db.Invoices.Add(invoice);

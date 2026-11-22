@@ -67,6 +67,7 @@ Source: "staging\database\Upgrade_15_UtcDefaults.sql"; DestDir: "{app}\Database"
 Source: "staging\database\Upgrade_16_DefaultCreditLimit.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_17_CreditApprovals.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\Upgrade_18_CreditApprovalGrantPolicy.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
+Source: "staging\database\Upgrade_19_AnnualInvoiceNumbering.sql"; DestDir: "{app}\Database"; Flags: ignoreversion
 Source: "staging\database\xml\*"; DestDir: "{app}\Database\xml"; Flags: ignoreversion
 Source: "staging\redist\SQLEXPR_x64_ENU.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion
 

@@ -139,7 +139,7 @@ namespace Sayl.UI.Forms
 
                 var inv = r.Data;
                 _lblInfo.Text = AppLang.T("LastInvoice.Info",
-                    inv.InvoiceId,
+                    inv.InvoiceNumber,
                     InvoiceDetailsForm.TranslateType(inv.Type),
                     InvoiceDetailsForm.TranslatePayment(inv.PaymentStatus),
                     inv.PartyName ?? AppLang.T("Common.Party.WalkIn"),

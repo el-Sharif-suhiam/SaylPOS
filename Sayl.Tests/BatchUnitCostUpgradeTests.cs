@@ -55,6 +55,7 @@ public class BatchUnitCostUpgradeTests
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 50m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = DateTime.UtcNow.AddDays(-5)
         };
         db.Invoices.Add(invoice);
@@ -92,14 +93,17 @@ public class BatchUnitCostUpgradeTests
         {
             string marker = $"rt-{Guid.NewGuid():N}"[..12];
             var seed = await TestSeed.SeedAsync(db, marker);
+            // رقم تجاري اصطناعي فريد لصف الفاتورة المزروع — العمود NOT NULL
+            // (Upgrade_19) وهذا الاختبار يختبر ترحيل UnitCost لا الترقيم.
+            string invNum = TestSeed.NewInvoiceNumber();
 
             // الزرع عبر SQL مباشرة — قاعدة قديمة لا يعرفها نموذج EF (بلا عمود UnitCost)
             await db.Database.ExecuteSqlRawAsync($@"
 INSERT INTO dbo.Batches (ProductId, BatchNumber, BatchQuantity, CreatedAt)
 VALUES ({seed.ProductId}, N'B-LEGACY-RT', 3, GETUTCDATE());
 DECLARE @bid INT = SCOPE_IDENTITY();
-INSERT INTO dbo.Invoices (Type, Status, PaymentStatus, PartyType, PartyId, UserId, TotalAmount, DiscountAmount, TaxAmount, NetAmount, CreatedAt)
-VALUES (N'purchase', N'completed', N'paid', N'S', {seed.SupplierId}, {seed.UserId}, 30, 0, 0, 30, GETUTCDATE());
+INSERT INTO dbo.Invoices (Type, Status, PaymentStatus, PartyType, PartyId, UserId, TotalAmount, DiscountAmount, TaxAmount, NetAmount, InvoiceNumber, CreatedAt)
+VALUES (N'purchase', N'completed', N'paid', N'S', {seed.SupplierId}, {seed.UserId}, 30, 0, 0, 30, N'{invNum}', GETUTCDATE());
 DECLARE @iid INT = SCOPE_IDENTITY();
 INSERT INTO dbo.InvoiceItems (InvoiceId, ProductId, Quantity, BatchId, ItemPrice, ItemCost)
 VALUES (@iid, {seed.ProductId}, 3, @bid, 10, 10);");
@@ -152,6 +156,7 @@ VALUES (@iid, {seed.ProductId}, 3, @bid, 10, 10);");
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 40m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = DateTime.UtcNow.AddDays(-1)
         };
         db.Invoices.Add(invoice);

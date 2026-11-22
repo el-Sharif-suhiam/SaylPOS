@@ -70,6 +70,7 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 30m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = createdAtUtc
         };
         db.Invoices.Add(invoice);
@@ -108,6 +109,7 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = 100m,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = createdAtUtc
         };
         db.Invoices.Add(invoice);
@@ -133,6 +135,7 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = netAmount,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = createdAtUtc
         };
         db.Invoices.Add(invoice);
@@ -196,6 +199,7 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
             DiscountAmount = 0m,
             TaxAmount = 0m,
             NetAmount = -returnedValue,
+            InvoiceNumber = TestSeed.NewInvoiceNumber(),
             CreatedAt = createdAtUtc
         };
         db.Invoices.Add(returnInvoice);
