@@ -1608,7 +1608,19 @@ namespace Sayl.UI.Forms
 
             if (suspend)
             {
-                UiHelpers.ShowInfo(this, AppLang.T("Pos.Msg.Suspended", result.Data));
+                // Commercial invoice number resolved post-commit (never the internal id);
+                // generic success if the lookup unexpectedly fails.
+                string suspendedNumber = null!;
+                using (var numberScope = Program.Services.CreateScope())
+                {
+                    var invoiceService = numberScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                    var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
+                    suspendedNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
+                }
+
+                UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(suspendedNumber)
+                    ? AppLang.T("Common.Msg.Saved")
+                    : AppLang.T("Pos.Msg.Suspended", suspendedNumber));
                 // C1: أزلنسل أصناف السلة قبل المسح — نُحدّثها وحدها لا الكتالوج كاملًا
                 int[] soldIds = _cart.Select(i => i.ProductId).Distinct().ToArray();
                 ClearCart();

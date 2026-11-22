@@ -13,7 +13,7 @@ namespace Sayl.UI.Forms
     /// </summary>
     public class ReturnForm : DialogForm
     {
-        private TextBox _txtInvoiceId = null!;
+        private TextBox _txtInvoiceNumber = null!;
         private Button _btnLoad = null!;
         private DataGridView _grid = null!;
         private Label _lblInfo = null!;
@@ -139,13 +139,15 @@ namespace Sayl.UI.Forms
                 AutoEllipsis = true
             };
 
-            _txtInvoiceId = new TextBox
+            _txtInvoiceNumber = new TextBox
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 TextAlign = HorizontalAlignment.Center,
                 BackColor = AppTheme.FieldBg,
             };
+            // النص الإرشادي الرمادي — يوضح صيغة الرقم التجاري المتوقعة
+            _txtInvoiceNumber.PlaceholderText = AppLang.T("Return.Search.Placeholder");
 
 
             // حزمة التسمية+المربع في العمود المرن (0 = يمين بصريًا)
@@ -165,7 +167,7 @@ namespace Sayl.UI.Forms
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
 
             inputRow.Controls.Add(lblInvoice, 0, 0);
-            inputRow.Controls.Add(_txtInvoiceId, 1, 0);
+            inputRow.Controls.Add(_txtInvoiceNumber, 1, 0);
             inputRow.Controls.Add(_btnLoad, 2, 0);
             // ── جدول البنود (الصف المرن — يتمدد مع النافذة) ──
             _grid = new DataGridView { Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4) };
@@ -250,21 +252,37 @@ namespace Sayl.UI.Forms
             Controls.Add(root);
             CancelButton = btnCancel;
             AcceptButton = _btnLoad; // Enter = تحميل (الخطوة الأولى دومًا)
-            ActiveControl = _txtInvoiceId;
+            ActiveControl = _txtInvoiceNumber;
         }
 
         private async Task LoadInvoiceAsync()
         {
-            if (!int.TryParse(_txtInvoiceId.Text?.Trim(), out int invoiceId) || invoiceId <= 0)
+            // البحث بالرقم التجاري (مثال: INV-2026-000001) — مطابقة تامة فقط،
+            // لا تفسير رقمي ولا تجريد تنسيق: ما لا يطابق رقمًا مخزَّنًا يُرفض.
+            var input = _txtInvoiceNumber.Text?.Trim() ?? "";
+            if (input.Length == 0)
             {
-                UiHelpers.ShowError(this, AppLang.T("Return.Msg.InvalidInvoiceId"));
+                UiHelpers.ShowError(this, AppLang.T("Return.Msg.InvalidInvoiceNumber"));
                 return;
             }
 
             try
             {
-                using var scope = Program.Services.CreateScope();
-                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                int invoiceId;
+                using (var lookupScope = Program.Services.CreateScope())
+                {
+                    var lookupService = lookupScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                    var byNumber = await lookupService.GetInvoiceIdByNumberAsync(input);
+                    if (!byNumber.IsSuccess || byNumber.Data <= 0)
+                    {
+                        UiHelpers.ShowError(this, AppLang.T("Return.Msg.InvoiceNotFound"));
+                        return;
+                    }
+                    invoiceId = byNumber.Data;
+                }
+
+                using var loadScope = Program.Services.CreateScope();
+                var invoiceService = loadScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
                 var result = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
                 if (!result.IsSuccess || result.Data == null)
                 {
@@ -390,7 +408,18 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            UiHelpers.ShowInfo(this, AppLang.T("Return.Msg.Done", result.Data));
+            // رقم المرتجع التجاري يُجلب بعد الإيداع — العرض للرقم الداخلي ممنوع.
+            string returnNumber;
+            using (var scope = Program.Services.CreateScope())
+            {
+                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
+                returnNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
+            }
+
+            UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(returnNumber)
+                ? AppLang.T("Common.Msg.Saved")
+                : AppLang.T("Return.Msg.Done", returnNumber));
             Returned = true;
             DialogResult = DialogResult.OK;
         }

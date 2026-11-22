@@ -230,6 +230,43 @@ namespace Sayl.Core.Services
         }
 
         // ─────────────────────────────────────────────────
+        // البحث بالرقم التجاري (INV-YYYY-NNNNNN) — مطابقة تامة فقط.
+        // لا تفسير رقمي ولا تجريد تنسيق: المُدخل إما رقم تجاري مخزَّن حرفيًا أو رفض.
+        // ─────────────────────────────────────────────────
+        public async Task<Result<int>> GetInvoiceIdByNumberAsync(string invoiceNumber)
+        {
+            var input = invoiceNumber?.Trim();
+
+            if (string.IsNullOrWhiteSpace(input))
+                return Result<int>.Fail("أدخل رقم الفاتورة التجاري.");
+
+            var id = await _dbContext.Invoices.AsNoTracking()
+                .Where(i => i.InvoiceNumber == input)
+                .Select(i => (int?)i.InvoiceId)
+                .FirstOrDefaultAsync();
+
+            if (id == null)
+                return Result<int>.Fail("لا توجد فاتورة بالرقم التجاري المُدخل.");
+
+            return Result<int>.Ok(id.Value);
+        }
+
+        /// <summary>الرقم التجاري لفاتورة بالمعرف الداخلي — لرسائل النجاح بعد الإيداع
+        /// (InvoiceNumber NOT NULL مُسند داخل معاملة الإنشاء، فالفشل نظريًا مستحيل).</summary>
+        public async Task<Result<string>> GetInvoiceNumberAsync(int invoiceId)
+        {
+            var number = await _dbContext.Invoices.AsNoTracking()
+                .Where(i => i.InvoiceId == invoiceId)
+                .Select(i => i.InvoiceNumber)
+                .FirstOrDefaultAsync();
+
+            if (string.IsNullOrWhiteSpace(number))
+                return Result<string>.Fail("الفاتورة غير موجودة.");
+
+            return Result<string>.Ok(number);
+        }
+
+        // ─────────────────────────────────────────────────
         // بيانات الفاتورة الكاملة للطباعة (البنود والمدفوعات)
         // ─────────────────────────────────────────────────
         public async Task<Result<InvoicePrintVM>> GetInvoiceForPrintAsync(int invoiceId)

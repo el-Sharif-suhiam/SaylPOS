@@ -798,8 +798,22 @@ namespace Sayl.UI.Forms
                     result = await purchaseService.CreatePurchaseInvoiceAsync(request);
                 }
 
-                UiHelpers.ShowResult(this, result,
-                    AppLang.T("Purchase.Msg.Created", result.Data));
+                // Commercial invoice number resolved post-commit (never the internal id);
+                // generic success if the lookup unexpectedly fails.
+                string? successMessage = null;
+                if (result.IsSuccess)
+                {
+                    using (var numberScope = Program.Services.CreateScope())
+                    {
+                        var invoiceService = numberScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                        var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
+                        successMessage = numberResult.IsSuccess && !string.IsNullOrWhiteSpace(numberResult.Data)
+                            ? AppLang.T("Purchase.Msg.Created", numberResult.Data)
+                            : AppLang.T("Common.Msg.Saved");
+                    }
+                }
+
+                UiHelpers.ShowResult(this, result, successMessage);
 
                 if (result.IsSuccess)
                 {

@@ -17,7 +17,7 @@ namespace Sayl.UI.Forms
     /// </summary>
     public class SupplierReturnForm : DialogForm
     {
-        private TextBox _txtInvoiceId = null!;
+        private TextBox _txtInvoiceNumber = null!;
         private Button _btnLoad = null!;
         private DataGridView _grid = null!;
         private TextBox _txtNotes = null!;
@@ -50,12 +50,12 @@ namespace Sayl.UI.Forms
         /// (per-row return action) - the invoice auto-loads on open.</summary>
         public static SupplierReturnForm CreateForInvoice(int invoiceId, int? activeSessionId)
         {
-            var form = new SupplierReturnForm(activeSessionId)
+            // The internal id stays out of the textbox: it auto-loads by id
+            // (OnShown) and the box then shows the loaded commercial number.
+            return new SupplierReturnForm(activeSessionId)
             {
                 _autoLoadInvoiceId = invoiceId
             };
-            form._txtInvoiceId.Text = invoiceId.ToString();
-            return form;
         }
 
         /// <summary>Invoice to auto-load when the form is shown (per-row entry).</summary>
@@ -66,8 +66,9 @@ namespace Sayl.UI.Forms
             base.OnShown(e);
             if (_autoLoadInvoiceId > 0)
             {
+                int autoId = _autoLoadInvoiceId;
                 _autoLoadInvoiceId = 0;
-                await LoadInvoiceAsync();
+                await LoadInvoiceAsync(autoId);
             }
         }
 
@@ -152,13 +153,15 @@ namespace Sayl.UI.Forms
                 AutoEllipsis = true
             };
 
-            _txtInvoiceId = new TextBox
+            _txtInvoiceNumber = new TextBox
             {
                 Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 TextAlign = HorizontalAlignment.Center,
                 BackColor = AppTheme.FieldBg,
             };
+            // Placeholder hint - shows the expected commercial number format
+            _txtInvoiceNumber.PlaceholderText = AppLang.T("SupplierReturn.Search.Placeholder");
 
             _btnLoad = AppTheme.MakeButton(AppLang.T("SupplierReturn.Button.Load"), AppTheme.Primary, hoverColor: AppTheme.PrimaryDark);
             _btnLoad.TextAlign = ContentAlignment.MiddleCenter;
@@ -166,7 +169,7 @@ namespace Sayl.UI.Forms
             _btnLoad.Click += async (_, _) => await LoadInvoiceAsync();
 
             inputRow.Controls.Add(lblInvoice, 0, 0);
-            inputRow.Controls.Add(_txtInvoiceId, 1, 0);
+            inputRow.Controls.Add(_txtInvoiceNumber, 1, 0);
             inputRow.Controls.Add(_btnLoad, 2, 0);
 
             // ── items grid (flexible row) ──
@@ -277,21 +280,53 @@ namespace Sayl.UI.Forms
             Controls.Add(root);
             CancelButton = btnCancel;
             AcceptButton = _btnLoad; // Enter = load (always the first step)
-            ActiveControl = _txtInvoiceId;
+            ActiveControl = _txtInvoiceNumber;
         }
 
-        private async Task LoadInvoiceAsync()
+        /// <param name="autoLoadInvoiceId">Optional pre-resolved internal id
+        /// (per-row entry): bypasses number parsing and loads by id directly.
+        /// The textbox then shows the loaded invoice's commercial number.</param>
+        private async Task LoadInvoiceAsync(int? autoLoadInvoiceId = null)
         {
-            if (!int.TryParse(_txtInvoiceId.Text?.Trim(), out int invoiceId) || invoiceId <= 0)
+            // Manual entry searches by the commercial number (e.g. INV-2026-000001)
+            // - exact match only, no numeric interpretation or format stripping:
+            // input that does not match a stored number is rejected.
+            // The auto-load path (per-row entry) passes the internal id directly.
+            string? input = null;
+            if (autoLoadInvoiceId == null)
             {
-                UiHelpers.ShowError(this, AppLang.T("SupplierReturn.Msg.InvalidInvoiceId"));
-                return;
+                input = _txtInvoiceNumber.Text?.Trim() ?? "";
+                if (input.Length == 0)
+                {
+                    UiHelpers.ShowError(this, AppLang.T("SupplierReturn.Msg.InvalidInvoiceNumber"));
+                    return;
+                }
             }
 
             try
             {
-                using var scope = Program.Services.CreateScope();
-                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                int invoiceId;
+                using (var lookupScope = Program.Services.CreateScope())
+                {
+                    var lookupService = lookupScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                    if (autoLoadInvoiceId != null)
+                    {
+                        invoiceId = autoLoadInvoiceId.Value;
+                    }
+                    else
+                    {
+                        var byNumber = await lookupService.GetInvoiceIdByNumberAsync(input!);
+                        if (!byNumber.IsSuccess || byNumber.Data <= 0)
+                        {
+                            UiHelpers.ShowError(this, AppLang.T("SupplierReturn.Msg.InvoiceNotFound"));
+                            return;
+                        }
+                        invoiceId = byNumber.Data;
+                    }
+                }
+
+                using var loadScope = Program.Services.CreateScope();
+                var invoiceService = loadScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
                 var result = await invoiceService.GetInvoiceForPrintAsync(invoiceId);
                 if (!result.IsSuccess || result.Data == null)
                 {
@@ -337,6 +372,10 @@ namespace Sayl.UI.Forms
                         previouslyReturned.GetValueOrDefault(item.ProductId),
                         _remainingByProduct.GetValueOrDefault(item.ProductId),
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
+
+                // The box shows the loaded invoice's commercial number (never
+                // the internal id) - both for auto-load and manual lookup.
+                _txtInvoiceNumber.Text = result.Data.InvoiceNumber;
 
                 _lblInfo.Text = AppLang.T("SupplierReturn.Info.Loaded", result.Data.InvoiceNumber,
                     result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
@@ -434,7 +473,19 @@ namespace Sayl.UI.Forms
             }
 
             // Success shown only after commit - ShowInfo after result.IsSuccess.
-            UiHelpers.ShowInfo(this, AppLang.T("SupplierReturn.Msg.Done", result.Data));
+            // The commercial return number is resolved post-commit; showing the
+            // internal id is never allowed.
+            string returnNumber;
+            using (var scope = Program.Services.CreateScope())
+            {
+                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
+                returnNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
+            }
+
+            UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(returnNumber)
+                ? AppLang.T("Common.Msg.Saved")
+                : AppLang.T("SupplierReturn.Msg.Done", returnNumber));
             Returned = true;
             DialogResult = DialogResult.OK;
         }
