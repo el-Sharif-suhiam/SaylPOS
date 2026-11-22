@@ -290,6 +290,34 @@ public class InvoiceNumberLookupTests
         }
     }
 
+    // ══ 8) فاتورة غير موجودة بالمعرّف الداخلي: فشل منظّم بلا استثناء —
+    //       هذا ما يعتمد عليه الرجوع بـ null في مساعد الواجهة
+    //       UiHelpers.GetCommercialNumberSafeAsync. ══
+    [Fact]
+    public async Task GetInvoiceNumberAsync_MissingInvoice_FailsWithoutException()
+    {
+        string marker = $"il8-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+        try
+        {
+            {
+                await using var pdb = _fx.CreateContext();
+                await PurchaseStockAsync(pdb, seed, $"L8-{marker[..8]}", 5);
+            }
+
+            var svc = new clsInvoiceService(db);
+
+            int missingId = await db.Invoices.AsNoTracking().MaxAsync(i => i.InvoiceId) + 1000;
+            var r = await svc.GetInvoiceNumberAsync(missingId); // يجب ألا يرمي استثناءً
+            Assert.False(r.IsSuccess);
+        }
+        finally
+        {
+            await CleanupAsync(db, marker);
+        }
+    }
+
     /// <summary>تنظيف صفوف الاختبار (فواتير بذرته) — نفس نهج اختبارات الترقيم:
     /// العدّاد يبقى (الأرقام تتصاعد دائمًا وقاعدة الـfixture عشوائية لكل رَن).</summary>
     private static async Task CleanupAsync(SaylDbContext db, string marker)

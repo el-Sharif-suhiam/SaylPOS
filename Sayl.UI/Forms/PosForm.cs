@@ -1609,14 +1609,10 @@ namespace Sayl.UI.Forms
             if (suspend)
             {
                 // Commercial invoice number resolved post-commit (never the internal id);
-                // generic success if the lookup unexpectedly fails.
-                string suspendedNumber = null!;
-                using (var numberScope = Program.Services.CreateScope())
-                {
-                    var invoiceService = numberScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                    var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
-                    suspendedNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
-                }
+                // failure-safe: any lookup exception/failure stays inside the helper and
+                // shows the generic success message — the committed sale's flow
+                // (info message, cart clear, stock refresh) always continues.
+                string? suspendedNumber = await UiHelpers.GetCommercialNumberSafeAsync(result.Data);
 
                 UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(suspendedNumber)
                     ? AppLang.T("Common.Msg.Saved")

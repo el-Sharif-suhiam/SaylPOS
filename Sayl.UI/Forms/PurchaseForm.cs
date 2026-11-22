@@ -799,18 +799,16 @@ namespace Sayl.UI.Forms
                 }
 
                 // Commercial invoice number resolved post-commit (never the internal id);
-                // generic success if the lookup unexpectedly fails.
+                // failure-safe: any lookup exception/failure stays inside the helper and
+                // shows the generic success message — it can never fail the
+                // already-committed purchase via this method's outer catch.
                 string? successMessage = null;
                 if (result.IsSuccess)
                 {
-                    using (var numberScope = Program.Services.CreateScope())
-                    {
-                        var invoiceService = numberScope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                        var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
-                        successMessage = numberResult.IsSuccess && !string.IsNullOrWhiteSpace(numberResult.Data)
-                            ? AppLang.T("Purchase.Msg.Created", numberResult.Data)
-                            : AppLang.T("Common.Msg.Saved");
-                    }
+                    var commercialNumber = await UiHelpers.GetCommercialNumberSafeAsync(result.Data);
+                    successMessage = string.IsNullOrWhiteSpace(commercialNumber)
+                        ? AppLang.T("Common.Msg.Saved")
+                        : AppLang.T("Purchase.Msg.Created", commercialNumber);
                 }
 
                 UiHelpers.ShowResult(this, result, successMessage);

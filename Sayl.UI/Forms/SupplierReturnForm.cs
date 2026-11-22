@@ -61,6 +61,22 @@ namespace Sayl.UI.Forms
         /// <summary>Invoice to auto-load when the form is shown (per-row entry).</summary>
         private int _autoLoadInvoiceId;
 
+        /// <summary>Stale-selection invalidation: clears the loaded-invoice state
+        /// (id, items, totals, ratio, remaining per product, grid rows) and resets
+        /// the info line to its initial text - every early-return path after this
+        /// call leaves the form in a clean "nothing loaded" state.</summary>
+        private void ResetLoadedInvoice()
+        {
+            _originalInvoiceId = 0;
+            _items = new();
+            _invoiceTotal = 0;
+            _invoiceNet = 0;
+            _netRatio = 0;
+            _remainingByProduct.Clear();
+            _grid.Rows.Clear();
+            _lblInfo.Text = AppLang.T("SupplierReturn.Info.Initial");
+        }
+
         protected override async void OnShown(EventArgs e)
         {
             base.OnShown(e);
@@ -292,6 +308,13 @@ namespace Sayl.UI.Forms
             // - exact match only, no numeric interpretation or format stripping:
             // input that does not match a stored number is rejected.
             // The auto-load path (per-row entry) passes the internal id directly.
+            // Stale-selection invalidation before any attempt (one code path for
+            // both manual and auto: auto-load has no prior state, clearing is
+            // harmless there) - a failed lookup must never leave the previous
+            // invoice's state loaded and executable; state is repopulated only
+            // after ALL validation below passes.
+            ResetLoadedInvoice();
+
             string? input = null;
             if (autoLoadInvoiceId == null)
             {
@@ -474,14 +497,10 @@ namespace Sayl.UI.Forms
 
             // Success shown only after commit - ShowInfo after result.IsSuccess.
             // The commercial return number is resolved post-commit; showing the
-            // internal id is never allowed.
-            string returnNumber;
-            using (var scope = Program.Services.CreateScope())
-            {
-                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
-                returnNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
-            }
+            // internal id is never allowed. Failure-safe: any lookup exception or
+            // failed result stays inside the helper and shows the generic success
+            // message - it can never abort the committed return or the close flow.
+            string? returnNumber = await UiHelpers.GetCommercialNumberSafeAsync(result.Data);
 
             UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(returnNumber)
                 ? AppLang.T("Common.Msg.Saved")

@@ -266,6 +266,11 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            // إبطال التحديد السابق: فشل تحميل فاتورة جديدة لا يجب أن يترك حالة
+            // الفاتورة القديمة محمّلة وقابلة للتنفيذ — تُصفَّر هنا قبل المحاولة،
+            // وتُعاد التعبئة فقط بعد نجاح كل الفحوص أدناه.
+            ResetLoadedInvoice();
+
             try
             {
                 int invoiceId;
@@ -334,6 +339,22 @@ namespace Sayl.UI.Forms
             {
                 UiHelpers.ShowError(this, AppLang.T("Return.Msg.LoadFailed"));
             }
+        }
+
+        /// <summary>إبطال تحديد سابق: تُصفَّر حالة الفاتورة المحمّلة (المعرّف،
+        /// البنود، الإجماليات، النسبة، المتبقي لكل منتج، صفوف الجدول) وتعود
+        /// سطر المعلومات لنصّها الابتدائي — كل مسارات الإرجاع المبكرة بعد
+        /// الاستدعاء تترك النافذة في حالة «لا شيء محمّل» نظيفة.</summary>
+        private void ResetLoadedInvoice()
+        {
+            _originalInvoiceId = 0;
+            _items = new();
+            _invoiceTotal = 0;
+            _invoiceNet = 0;
+            _netRatio = 0;
+            _remainingByProduct.Clear();
+            _grid.Rows.Clear();
+            _lblInfo.Text = AppLang.T("Return.Info.Initial");
         }
 
         private async Task ExecuteReturnAsync()
@@ -409,13 +430,9 @@ namespace Sayl.UI.Forms
             }
 
             // رقم المرتجع التجاري يُجلب بعد الإيداع — العرض للرقم الداخلي ممنوع.
-            string returnNumber;
-            using (var scope = Program.Services.CreateScope())
-            {
-                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
-                var numberResult = await invoiceService.GetInvoiceNumberAsync(result.Data);
-                returnNumber = numberResult.IsSuccess ? numberResult.Data! : null!;
-            }
+            // آمن فشلًا: أي استثناء/فشل يبقى داخل المساعد ويعرض رسالة النجاح العامة —
+            // لا يمكنه إحباط المرتجع المودع أو منع إغلاق النافذة.
+            string? returnNumber = await UiHelpers.GetCommercialNumberSafeAsync(result.Data);
 
             UiHelpers.ShowInfo(this, string.IsNullOrWhiteSpace(returnNumber)
                 ? AppLang.T("Common.Msg.Saved")

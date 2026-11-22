@@ -21,6 +21,7 @@ namespace Sayl.UI.Forms
         private ComboBox _cmbMethod = null!;
         private TextBox _txtNotes = null!;
         private Label _lblInfo = null!;
+        private Label _lblTitle = null!;
         private Button _btnSave = null!;
 
         private SupplierPaymentForm(int? invoiceId, int? partyId, string? partyName, decimal remaining)
@@ -39,6 +40,25 @@ namespace Sayl.UI.Forms
             ShowInTaskbar = false;
 
             BuildUi();
+
+            // The generic title goes up first; the commercial number is resolved
+            // asynchronously (the internal id is never displayed anywhere).
+            if (_invoiceId.HasValue)
+                _ = ResolveTitleInvoiceNumberAsync();
+        }
+
+        /// <summary>Resolve the purchase invoice's commercial number for the title
+        /// after open. Failure-safe: the helper returns null on any exception or
+        /// failed result and the generic title simply stays — the payment flow is
+        /// untouched. The continuation resumes on the UI thread (WinForms
+        /// context); guard against a form disposed before it completes.</summary>
+        private async Task ResolveTitleInvoiceNumberAsync()
+        {
+            if (_invoiceId == null) return;
+            string? number = await UiHelpers.GetCommercialNumberSafeAsync(_invoiceId.Value);
+            if (IsDisposed || !IsHandleCreated) return;
+            if (!string.IsNullOrWhiteSpace(number))
+                _lblTitle.Text = AppLang.T("SupplierPay.Title.Invoice", number);
         }
 
         /// <summary>سداد لفاتورة شراء محددة.</summary>
@@ -64,9 +84,11 @@ namespace Sayl.UI.Forms
         // ═══════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            var lblTitle = new Label
+            _lblTitle = new Label
             {
-                Text = _invoiceId.HasValue ? AppLang.T("SupplierPay.Title.Invoice", _invoiceId) : AppLang.T("SupplierPay.Title.Balance"),
+                // Generic purchase-invoice title at first paint; the commercial
+                // number replaces it once resolved (never the internal id).
+                Text = _invoiceId.HasValue ? AppLang.T("SupplierPay.Title.InvoiceGeneric") : AppLang.T("SupplierPay.Title.Balance"),
                 Bounds = new Rectangle(0, 14, ClientSize.Width, 30),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = AppTheme.FontHeading,
@@ -146,7 +168,7 @@ namespace Sayl.UI.Forms
 
             Controls.AddRange(new Control[]
             {
-                lblTitle, _lblInfo,
+                _lblTitle, _lblInfo,
                 lblAmount, _txtAmount,
                 lblMethod, _cmbMethod,
                 lblNotes, _txtNotes,

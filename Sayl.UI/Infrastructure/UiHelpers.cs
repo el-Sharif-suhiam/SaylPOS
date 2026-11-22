@@ -109,6 +109,26 @@ namespace Sayl.UI.Infrastructure
                 ShowError(owner, string.IsNullOrWhiteSpace(result.Message) ? AppLang.T("Common.Msg.OperationFailed") : result.Message);
         }
 
+        /// <summary>الرقم التجاري بعد الإيداع — آمن فشلًا: أي استثناء أو فشل نتيجة يعيد null.
+        /// للاستعلام الثانوي بعد نجاح العملية فقط — لا يغيّر مصير العملية المودعة أبدًا.</summary>
+        public static async Task<string?> GetCommercialNumberSafeAsync(int invoiceId)
+        {
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var invoiceService = scope.ServiceProvider.GetRequiredService<clsInvoiceService>();
+                var result = await invoiceService.GetInvoiceNumberAsync(invoiceId);
+                return result.IsSuccess ? result.Data : null;
+            }
+            catch
+            {
+                // صمت مقصود: العملية المالية أُودعت بالفعل — فشل الاستعلام الثانوي
+                // (انقطاع اتصال، خطأ نتيجة) لا يجب أن يُفشلها أو يوقف تدفق النجاح؛
+                // الواجهة تعرض رسالة النجاح العامة بدل رقم الفاتورة.
+                return null;
+            }
+        }
+
         /// <summary>تنفيذ عملية خدمة ضمن Scope مستقل (سياق EF قصير العمر).</summary>
         public static async Task<Result> UseServiceAsync(Func<clsStockService, Task<Result>> action)
         {
