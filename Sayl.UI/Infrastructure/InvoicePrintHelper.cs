@@ -79,7 +79,7 @@ namespace Sayl.UI.Infrastructure
                 System.IO.Directory.CreateDirectory(dir);
 
                 // اسم الملف بالرقم التجاري — المستخدم يجد نسخة الفاتورة برقمها المطبوع
-                string fileName = $"Invoice_{invoice.InvoiceNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+                string fileName = $"Invoice_{invoice.InvoiceNumber}_{AppClock.NowLocal:yyyyMMdd_HHmmss}.pdf";
                 filePath = IOPath.Combine(dir, fileName);
 
                 var inv = invoice;

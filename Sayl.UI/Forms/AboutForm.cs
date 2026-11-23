@@ -156,7 +156,8 @@ namespace Sayl.UI.Forms
                 string who = string.IsNullOrEmpty(customer) ? "—" : customer;
                 string until = expiryUtc == null
                     ? AppLang.T("About.License.Permanent")
-                    : AppLang.T("About.License.Until", expiryUtc.Value.ToLocalTime().ToString("yyyy/MM/dd"));
+                    // expiryUtc من الرخصة UTC صريح (ExpiryTicksUtc — ActivationManager) — التحويل الوحيد المعتمد بتوقيت البرنامج
+                    : AppLang.T("About.License.Until", AppClock.ToLocal(expiryUtc.Value).ToString("yyyy/MM/dd"));
                 licenseText = AppLang.T("About.License.LicensedTo", who, until);
                 licenseColor = AppTheme.Success;
             }

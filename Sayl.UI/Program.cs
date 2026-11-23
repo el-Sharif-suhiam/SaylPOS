@@ -121,7 +121,7 @@ namespace Sayl.UI
                     "Sayl_POS");
                 Directory.CreateDirectory(dir);
                 File.AppendAllText(Path.Combine(dir, "ui-error.log"),
-                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {source}: {ex}\n");
+                    $"[{AppClock.NowLocal:yyyy-MM-dd HH:mm:ss}] {source}: {ex}\n");
             }
             catch
             {

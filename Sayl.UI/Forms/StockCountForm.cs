@@ -218,7 +218,7 @@ namespace Sayl.UI.Forms
                 if (l.CountedAt.HasValue)
                 {
                     string mark = _recountedIds.Contains(l.CountId) ? "↻ " : "✓ ";
-                    status = mark + l.CountedAt.Value.ToLocalTime().ToString("HH:mm");
+                    status = mark + AppClock.ToLocal(l.CountedAt.Value).ToString("HH:mm");
                 }
 
                 int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString(),
@@ -230,7 +230,7 @@ namespace Sayl.UI.Forms
 
                 if (l.CountedAt.HasValue)
                     _grid.Rows[row].Cells["colStatus"].ToolTipText =
-                        AppLang.T("StockCount.Status.CountedAt", l.CountedAt.Value.ToLocalTime());
+                        AppLang.T("StockCount.Status.CountedAt", AppClock.ToLocal(l.CountedAt.Value));
 
                 if (l.Difference.HasValue)
                 {
@@ -390,7 +390,7 @@ namespace Sayl.UI.Forms
                 l.ProductName,
                 l.BookQuantity.ToString(),
                 l.CountedQuantity?.ToString() ?? "-",
-                l.CountedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-",
+                l.CountedAt.HasValue ? AppClock.ToLocal(l.CountedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
                 l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
                 l.CountedQuantity.HasValue ? l.DifferenceCost.ToString("N2") : "-"
             }).ToList();
@@ -406,7 +406,7 @@ namespace Sayl.UI.Forms
             {
                 Title = AppLang.T("StockCount.Save.PdfTitle"),
                 Filter = AppLang.T("StockCount.Save.PdfFilter"),
-                FileName = AppLang.T("StockCount.Save.FileName", DateTime.Now) + ".pdf"
+                FileName = AppLang.T("StockCount.Save.FileName", AppClock.NowLocal) + ".pdf"
             };
             if (save.ShowDialog(this) != DialogResult.OK) return;
 
@@ -445,7 +445,7 @@ namespace Sayl.UI.Forms
             {
                 Title = AppLang.T("StockCount.Save.ExcelTitle"),
                 Filter = AppLang.T("StockCount.Save.ExcelFilter"),
-                FileName = AppLang.T("StockCount.Save.FileName", DateTime.Now) + ".xlsx"
+                FileName = AppLang.T("StockCount.Save.FileName", AppClock.NowLocal) + ".xlsx"
             };
             if (save.ShowDialog(this) != DialogResult.OK) return;
 

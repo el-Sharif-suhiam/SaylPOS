@@ -493,7 +493,7 @@ namespace Sayl.UI.UserControls
             }
 
             // 2) اسم الملف بنفس الصيغة السابقة
-            string fileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.pdf";
+            string fileName = $"{_currentTitle}_{AppClock.NowLocal:yyyyMMdd_HHmm}.pdf";
             string fullPath = Path.Combine(reportsDir, fileName);
 
             try
@@ -572,7 +572,7 @@ namespace Sayl.UI.UserControls
             }
 
             // 2) اسم الملف بنفس الصيغة السابقة
-            string fileName = $"{_currentTitle}_{DateTime.Now:yyyyMMdd_HHmm}.xlsx";
+            string fileName = $"{_currentTitle}_{AppClock.NowLocal:yyyyMMdd_HHmm}.xlsx";
             string fullPath = Path.Combine(reportsDir, fileName);
 
             try
