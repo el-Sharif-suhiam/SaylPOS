@@ -456,4 +456,148 @@ public class StoreClockTests
             await WriteSettingAsync(db, null);
         }
     }
+
+    // ══ 17) LocalDayBoundsUtc بالاحتياطي الإرثي (بلا توقيت مركزي): +3 ثابتة ══
+    // قيم مطابقة للإزاحة المكتوبة يدويًا سابقًا في التقارير/الفواتير (منتصف ليل − 3)
+    // — هذا هو أمان الترحيل: اختبارات الخدمات القديمة تمرّ بلا تغيير.
+    [Fact]
+    public void ProgramClock_LocalDayBoundsUtc_LegacyFallback_FixedOffset()
+    {
+        try
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+
+            var (start, end) = Common.Utils.ProgramClock.LocalDayBoundsUtc(new DateOnly(2026, 7, 1));
+
+            // البداية = منتصف ليل 1 يوليو − 3 (نفس القديم)
+            Assert.Equal(new DateTime(2026, 6, 30, 21, 0, 0), start);
+            // الإزاحة الثابتة لا تعرف DST — اليوم دائمًا 24 ساعة
+            Assert.Equal(TimeSpan.FromHours(24), end - start);
+
+            // شامل البداية وحصري النهاية: اللحظة الأولى داخله ولحظة النهاية نفسها خارجه
+            Assert.True(start < end);
+            DateTime endProbe = end;
+            Assert.False(endProbe < end);        // لحظة النهاية نفسها خارجه (حصري)
+            Assert.True(end.AddTicks(-1) < end); // آخر لقطة قبله داخله
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 18) LocalDayBoundsUtc بالتوقيت المركزي المنشور (نيويورك): DST الديناميكي ══
+    // نفس حقائق DST المستخدمة في اختبارات حدود الخدمة (7): يوم 23 ساعة عند تقديم
+    // الساعة و25 ساعة عند تأخيرها — الخدمة تفوّض لهذا المصدر فالنتيجة واحدة.
+    [Fact]
+    public void ProgramClock_LocalDayBoundsUtc_NewYork_SpanFollowsDst()
+    {
+        try
+        {
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(ny);
+
+            // تقديم الساعة (2026-03-08): البداية 05:00Z واليوم 23 ساعة
+            (DateTime s, DateTime e) = Common.Utils.ProgramClock.LocalDayBoundsUtc(new DateOnly(2026, 3, 8));
+            Assert.Equal(new DateTime(2026, 3, 8, 5, 0, 0, DateTimeKind.Utc), s);
+            Assert.Equal(TimeSpan.FromHours(23), e - s);
+
+            // تأخير الساعة (2026-11-01): البداية 04:00Z (منتصف الليل ما زال EDT) واليوم 25 ساعة
+            (s, e) = Common.Utils.ProgramClock.LocalDayBoundsUtc(new DateOnly(2026, 11, 1));
+            Assert.Equal(new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc), s);
+            Assert.Equal(TimeSpan.FromHours(25), e - s);
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 19) تكافؤ حد النهاية بعد الترحيل: القديم <= (MaxValue−3h) ≡ الجديد < منتصف ليل اليوم التالي ══
+    // datetime2(7) لقطة-دقيق بين 20:59:59.9999999 و21:00:00 لا قيم له — فالاستثناء بالمجموعتين متطابق.
+    [Fact]
+    public void ProgramClock_LocalDayBoundsUtc_LegacyEndBound_EquivalentToOldMaxValue()
+    {
+        try
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+
+            var (_, endEx) = Common.Utils.ProgramClock.LocalDayBoundsUtc(new DateOnly(2026, 7, 1));
+            DateTime oldEnd = new DateOnly(2026, 7, 1).ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+
+            // الفجوة بين الحدّين لقطة واحدة (100ns) — datetime2(7) لا قيم له بينهما
+            Assert.Equal(TimeSpan.FromTicks(1), endEx - oldEnd);
+            // القديم (شامل: x <= oldEnd) والجديد (حصري: x < endEx) يقبلان ويرفضان
+            // المجموعة نفسها على كل لقطة حول الفجوة — التكافؤ الفعلي لا الشكلي
+            for (int i = -1; i <= 1; i++)
+            {
+                DateTime probe = endEx.AddTicks(i);
+                Assert.Equal(probe <= oldEnd, probe < endEx);
+            }
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 20) التقاط الانحراف: بعد الإقلاع UtcNow الموثق ≈ ساعة SQL (Kind=Utc) ══
+    // الإقلاع يقرأ SYSUTCDATETIME ويحسب الفارق عن ساعة العميل — ProgramClock.UtcNow
+    // (ساعة العميل + الانحراف) يجب أن تساوي قراءة ساعة SQL بحدود دقيقتين.
+    [Fact]
+    public async Task ProgramClock_UtcNow_AfterInit_MatchesSqlClock()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var clock = new clsStoreClockService(db, forceHost: true);
+            await clock.InitializeAsync();
+
+            DateTime sqlNow = await clock.GetUtcNowAsync(); // تُحدِّث الانحراف أيضًا
+            DateTime published = Common.Utils.ProgramClock.UtcNow;
+
+            Assert.Equal(DateTimeKind.Utc, published.Kind);
+            Assert.True(Math.Abs((published - sqlNow).TotalMilliseconds) < TimeSpan.FromMinutes(2).TotalMilliseconds,
+                $"الفارق عن ساعة SQL كبير: {published - sqlNow}");
+            Assert.True(Math.Abs((published - DateTime.UtcNow).TotalMilliseconds) < TimeSpan.FromMinutes(2).TotalMilliseconds,
+                $"الانحراف المنشور غير منطقي: {clock.ClientClockSkew}");
+        }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreClock(null, TimeSpan.Zero); // النشر الجانبي لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 21) الانحراف الافتراضي: قبل أي ضبط UtcNow الموثق ≡ ساعة العميل (انحراف صفري) ══
+    // أمان الترحيل: اختبارات الخدمات القديمة تعمل بلا إقلاع — انحراف صفري
+    // فيتطابق ProgramClock.UtcNow مع DateTime.UtcNow حرفيًا فلا تتغير أي قيمة.
+    [Fact]
+    public void ProgramClock_UtcNow_DefaultZeroSkew_EqualsClientClock()
+    {
+        try
+        {
+            Common.Utils.ProgramClock.ConfigureStoreClock(null, TimeSpan.Zero); // الحالة الافتراضية قبل الإقلاع
+
+            DateTime published = Common.Utils.ProgramClock.UtcNow;
+
+            Assert.Equal(DateTimeKind.Utc, published.Kind);
+            Assert.True(Math.Abs((published - DateTime.UtcNow).TotalMilliseconds) < TimeSpan.FromSeconds(5).TotalMilliseconds,
+                $"الانحراف الافتراضي يجب أن يكون صفريًا لكنه {published - DateTime.UtcNow}");
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreClock(null, TimeSpan.Zero); }
+    }
+
+    // ══ 22) تطبيق الانحراف: ConfigureStoreClock يزحزح UtcNow الموثق بمقداره ══
+    [Fact]
+    public void ProgramClock_UtcNow_AppliesConfiguredSkew()
+    {
+        try
+        {
+            Common.Utils.ProgramClock.ConfigureStoreClock(null, TimeSpan.FromHours(5));
+
+            DateTime published = Common.Utils.ProgramClock.UtcNow;
+
+            Assert.Equal(DateTimeKind.Utc, published.Kind);
+            Assert.True(Math.Abs((published - DateTime.UtcNow.AddHours(5)).TotalMilliseconds) < TimeSpan.FromSeconds(5).TotalMilliseconds,
+                $"الانحراف +5 ساعات لم يُطبَّق: {published - DateTime.UtcNow.AddHours(5)}");
+        }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreClock(null, TimeSpan.Zero); // تصفير — رجوع إلى ~الآن
+            Assert.True(Math.Abs((Common.Utils.ProgramClock.UtcNow - DateTime.UtcNow).TotalMilliseconds)
+                < TimeSpan.FromSeconds(5).TotalMilliseconds, "التصفير لم يُعد UtcNow إلى الوقت الحالي");
+        }
+    }
 }

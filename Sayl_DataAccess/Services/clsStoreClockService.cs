@@ -36,6 +36,12 @@ namespace Sayl.Core.Services
         /// <summary>هل تعمل العملية على جهاز خادم SQL نفسه — يُحدَّد عند الإقلاع.</summary>
         public bool IsSqlHost { get; private set; }
 
+        /// <summary>انحراف ساعة العميل عن ساعة SQL Server = ساعة SQL − ساعة
+        /// العميل — يُلتقط عند نجاح الإقلاع (SYSUTCDATETIME − DateTime.UtcNow)
+        /// ويُحدَّث مع كل قراءة GetUtcNowAsync ناجحة (زحل ساعة العميل الذاتي
+        /// بين القراءات). صفر قبل الإقلاع — كتابة TimeSpan عادية بلا أقفال.</summary>
+        public TimeSpan ClientClockSkew { get; private set; }
+
         private bool _initialized;
 
         public clsStoreClockService(IServiceScopeFactory scopeFactory)
@@ -123,13 +129,13 @@ namespace Sayl.Core.Services
                     {
                         SettingKey = clsSettingsService.KeyStoreTimeZoneId,
                         SettingValue = hostTzId,
-                        UpdatedAt = DateTime.UtcNow
+                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                 }
                 else
                 {
                     setting.SettingValue = hostTzId;
-                    setting.UpdatedAt = DateTime.UtcNow;
+                    setting.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
                 }
                 await db.SaveChangesAsync();
                 _storeTimeZone = _injectedTimeZone ?? TimeZoneInfo.Local;
@@ -155,8 +161,12 @@ namespace Sayl.Core.Services
                 }
             }
 
-            // نشر التوقيت المركزي للساعات الموحدة (ProgramClock/AppClock) — نجاح الإقلاع فقط؛ الفشل ينشر شيئًا فتبقى الساعات على الاحتياطي الإرثي (+3)
-            Common.Utils.ProgramClock.ConfigureStoreTimeZone(_storeTimeZone);
+            // التقاط انحراف ساعة العميل عن ساعة SQL (كلا الفرعين بعد نجاحهما):
+            // ساعة الخادم هي المصدر الموثق — الفارق يصحح كل الطوابع المكتوبة من هذا الجهاز
+            ClientClockSkew = await GetUtcNowAsync() - DateTime.UtcNow;
+
+            // نشر التوقيت المركزي والانحراف للساعات الموحدة (ProgramClock/AppClock) — نجاح الإقلاع فقط؛ الفشل ينشر شيئًا فتبقى الساعات على الاحتياطي الإرثي (+3) وبانحراف صفري
+            Common.Utils.ProgramClock.ConfigureStoreClock(_storeTimeZone, ClientClockSkew);
 
             _initialized = true;
         }
@@ -164,13 +174,20 @@ namespace Sayl.Core.Services
         // ══ الساعة ══
 
         /// <summary>الوقت الحالي UTC من خادم SQL (SYSUTCDATETIME) — المصدر الموحّد.
-        /// يُقرأ Unspecified فيُطبَّع إلى Kind=Utc صراحةً.</summary>
+        /// يُقرأ Unspecified فيُطبَّع إلى Kind=Utc صراحةً. كل قراءة ناجحة تُحدِّث
+        /// انحراف ساعة العميل المنشور (ClientClockSkew) كي يلاحق الزحل الذاتي
+        /// لساعة العميل على العمليات طويلة العمر.</summary>
         public async Task<DateTime> GetUtcNowAsync()
         {
+            DateTime now;
             if (_dbContextForTests != null)
-                return await ReadSqlUtcNowAsync(_dbContextForTests);
-            await using (var scope = _scopeFactory.CreateAsyncScope())
-                return await ReadSqlUtcNowAsync(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
+                now = await ReadSqlUtcNowAsync(_dbContextForTests);
+            else
+                await using (var scope = _scopeFactory.CreateAsyncScope())
+                    now = await ReadSqlUtcNowAsync(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
+            // تحديث فرصة الانحراف: فرق القراءتين — كتابة TimeSpan بسيطة بلا أقفال (بنية الكود المحيطة)
+            ClientClockSkew = now - DateTime.UtcNow;
+            return now;
         }
 
         private static async Task<DateTime> ReadSqlUtcNowAsync(SaylDbContext db)
@@ -203,45 +220,14 @@ namespace Sayl.Core.Services
 
         /// <summary>حدود اليوم بمعنى المتجر لليوم المعطى بمعنى UTC: منتصفا ليل اليوم
         /// والتالي محوَّلين عائدًا إلى UTC — شامل البداية وحصري النهاية. طول اليوم
-        /// (23/24/25 ساعة) تُحسبه قواعد ويندوز الديناميكية تلقائيًا.</summary>
+        /// (23/24/25 ساعة) تُحسبه قواعد ويندوز الديناميكية تلقائيًا.
+        /// تفويض إلى ProgramClock.LocalDayBoundsUtc — المصدر الوحيد للتحويل
+        /// (VULN-45: لا منطق تحويل مكرر في الخدمة)؛ يُحرس بـ RequireTimeZone()
+        /// لتبقى دلالات الفشل المغلق للخدمة المُخدومة (بلا إقلاع = استثناء).</summary>
         public (DateTime StartUtc, DateTime EndUtc) GetStoreDayBoundsUtc(DateOnly storeDate)
         {
-            TimeZoneInfo tz = RequireTimeZone();
-            return (ConvertStoreLocalToUtc(storeDate.ToDateTime(TimeOnly.MinValue), tz),
-                    ConvertStoreLocalToUtc(storeDate.AddDays(1).ToDateTime(TimeOnly.MinValue), tz));
-        }
-
-        /// <summary>تحويل توقيت المتجر إلى UTC:
-        ///  • الوقت غير الصالح (ثغرة تقديم الساعة — لا منتصف ليل فعليًا) يُزيَّح
-        ///    بمقدار الدلتا الصيفية للقاعدة السارية كي لا ينفجر التحويل.
-        ///  • الوقت الملتبس (تأخير الساعة — منتصف ليل يتكرر مرتين) يُحوَّل إلى
-        ///    أبكر لحظة UTC له محسوبة من إزاحات المنطقة الفعلية نفسها
-        ///    (GetAmbiguousTimeOffsets — تراعي BaseUtcOffsetDelta لقواعد تُزيح
-        ///    الإزاحة الأساسية) لا من إعادة بناء يدوية — ConvertTimeToUtc يفترض
-        ///    التفسير القياسي للملتبس فيختار اللحظة الأحدث ويُسقط الساعة
-        ///    المتكررة الأولى من حدود اليوم، لذا نحسمه بأنفسنا.</summary>
-        private static DateTime ConvertStoreLocalToUtc(DateTime local, TimeZoneInfo tz)
-        {
-            if (tz.IsInvalidTime(local))
-            {
-                TimeSpan delta = tz.GetAdjustmentRules()
-                    .Where(r => r.DateStart.Date <= local.Date && r.DateEnd.Date >= local.Date)
-                    .Select(r => r.DaylightDelta)
-                    .Append(TimeSpan.Zero)
-                    .First(d => !tz.IsInvalidTime(local + d));
-                local += delta;
-            }
-
-            if (tz.IsAmbiguousTime(local))
-            {
-                // أبكر لحظة UTC من إزاحات المنطقة الفعلية للوقت الملتبس —
-                // GetAmbiguousTimeOffsets تراعي BaseUtcOffsetDelta أيضًا.
-                return tz.GetAmbiguousTimeOffsets(local)
-                    .Select(offset => new DateTime(local.Ticks - offset.Ticks, DateTimeKind.Utc))
-                    .Min();
-            }
-
-            return TimeZoneInfo.ConvertTimeToUtc(local, tz);
+            RequireTimeZone(); // حرس الفشل المغلق: بلا إقلاع = استثناء قبل أي تحويل
+            return Common.Utils.ProgramClock.LocalDayBoundsUtc(storeDate);
         }
 
         // ══ أدوات داخلية ══
