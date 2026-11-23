@@ -155,6 +155,9 @@ namespace Sayl.Core.Services
                 }
             }
 
+            // نشر التوقيت المركزي للساعات الموحدة (ProgramClock/AppClock) — نجاح الإقلاع فقط؛ الفشل ينشر شيئًا فتبقى الساعات على الاحتياطي الإرثي (+3)
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(_storeTimeZone);
+
             _initialized = true;
         }
 

@@ -60,7 +60,11 @@ public class StoreClockTests
             Assert.False(clock.IsSqlHost);
             Assert.Equal("America/New_York", await ReadSettingAsync(db));
         }
-        finally { await WriteSettingAsync(db, null); }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
     }
 
     // ══ 3) غياب الإعداد على الطرفي -> استثناء برسالة عربية ══
@@ -113,7 +117,11 @@ public class StoreClockTests
             Assert.True(clock.IsSqlHost);
             Assert.Equal(TimeZoneInfo.Local.Id, await ReadSettingAsync(db));
         }
-        finally { await WriteSettingAsync(db, null); }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
     }
 
     // ══ 6) تحويل UTC -> توقيت المتجر بقواعد DST الديناميكية (نيويورك) ══
@@ -136,7 +144,11 @@ public class StoreClockTests
         DateTime summer = new DateTime(2026, 7, 1, 4, 0, 0, DateTimeKind.Utc);
         Assert.Equal(new DateTime(2026, 7, 1, 0, 0, 0), clock.ToStoreLocal(summer));
         }
-        finally { await WriteSettingAsync(db, null); }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
     }
 
     // ══ 7) حدود اليوم: يوم 23 ساعة / 24 / 25 (شامل البداية حصري النهاية) ══
@@ -162,7 +174,68 @@ public class StoreClockTests
             (s, e) = clock.GetStoreDayBoundsUtc(new DateOnly(2026, 6, 15)); // يوم عادي: 24 ساعة
             Assert.Equal(TimeSpan.FromHours(24), e - s);
         }
-        finally { await WriteSettingAsync(db, null); }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 9) نجاح إقلاع المضيف ينشر التوقيت المركزي للساعات الموحدة ══
+    [Fact]
+    public async Task Host_Init_PublishesStoreTimeZoneToProgramClock()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var clock = new clsStoreClockService(db, ny, forceHost: true);
+
+            await clock.InitializeAsync();
+
+            Assert.Equal("America/New_York", Common.Utils.ProgramClock.StoreTimeZone?.Id);
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 10) نجاح إقلاع الطرفي ينشر التوقيت المركزي أيضًا ══
+    [Fact]
+    public async Task Terminal_Init_PublishesStoreTimeZoneToProgramClock()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            await WriteSettingAsync(db, "America/New_York");
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var clock = new clsStoreClockService(db, ny, forceHost: false);
+
+            await clock.InitializeAsync();
+
+            Assert.Equal("America/New_York", Common.Utils.ProgramClock.StoreTimeZone?.Id);
+        }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 11) فشل الإقلاع ينشر شيئًا — الساعات تبقى على الاحتياطي الإرثي ══
+    [Fact]
+    public async Task FailedInit_DoesNotPublishStoreTimeZone()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            await WriteSettingAsync(db, null);
+            var clock = new clsStoreClockService(db, forceHost: false);
+
+            await Assert.ThrowsAsync<clsStoreClockService.StoreClockInitializationException>(
+                () => clock.InitializeAsync());
+
+            Assert.Null(Common.Utils.ProgramClock.StoreTimeZone);
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
     }
 
     // ══ 8) ساعة SQL: ضمن دقيقتين من ساعة الجهاز (المصدر SQL — تسامح واسع) ══
@@ -182,6 +255,74 @@ public class StoreClockTests
             Assert.True(Math.Abs((sqlNow - DateTime.UtcNow).TotalMinutes) < 2,
                 $"SQL UTC {sqlNow:O} بعيد عن ساعة الجهاز {DateTime.UtcNow:O}");
         }
-        finally { await WriteSettingAsync(db, null); }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 12) FromUtc بالتوقيت المركزي: DST الديناميكي نفسه (نيويورك) ══
+    [Fact]
+    public void ProgramClock_FromUtc_NewYork_DynamicDst()
+    {
+        try
+        {
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(ny);
+
+            // الشتاء EST (-5): 05:00Z = منتصف ليل 2026-03-08 محليًا
+            Assert.Equal(new DateOnly(2026, 3, 8),
+                Common.Utils.ProgramClock.FromUtc(new DateTime(2026, 3, 8, 5, 0, 0, DateTimeKind.Utc)));
+
+            // الصيف EDT (-4): 04:00Z = منتصف ليل 2026-07-01 محليًا
+            Assert.Equal(new DateOnly(2026, 7, 1),
+                Common.Utils.ProgramClock.FromUtc(new DateTime(2026, 7, 1, 4, 0, 0, DateTimeKind.Utc)));
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 13) ToLocal بالتوقيت المركزي: يساوي ConvertTimeFromUtc + حرس البيانات القديمة ══
+    [Fact]
+    public void ProgramClock_ToLocal_NewYork_MatchesConvertTimeFromUtc_AndLocalGuard()
+    {
+        try
+        {
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(ny);
+
+            // لحظة ثابتة: 2026-03-08 05:00Z = منتصف ليل EST
+            DateTime utc = new DateTime(2026, 3, 8, 5, 0, 0, DateTimeKind.Utc);
+            Assert.Equal(TimeZoneInfo.ConvertTimeFromUtc(utc, ny),
+                Common.Utils.ProgramClock.ToLocal(utc));
+
+            // حرس البيانات القديمة: Kind==Local تُعاد كما هي (لا إزاحة مرتين)
+            DateTime local = new DateTime(2026, 3, 8, 7, 0, 0, DateTimeKind.Local);
+            Assert.Equal(local, Common.Utils.ProgramClock.ToLocal(local));
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 14) الاحتياطي الإرثي بعد التصفير: +3 ثابتة ══
+    [Fact]
+    public void ProgramClock_AfterReset_LegacyFixedOffsetFallback()
+    {
+        try
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+
+            // NowLocal ضمن دقيقة من UTC + 3 (الاحتياطي الإرثي)
+            Assert.True(Math.Abs((Common.Utils.ProgramClock.NowLocal - DateTime.UtcNow.AddHours(3)).TotalMinutes) < 1,
+                "الاحتياطي الإرثي يجب أن يكون UTC+3");
+
+            // FromUtc بإزاحة +3 الثابتة: 2026-03-08 21:00Z = منتصف ليل 2026-03-09 بمعنى +3
+            Assert.Equal(new DateOnly(2026, 3, 9),
+                Common.Utils.ProgramClock.FromUtc(new DateTime(2026, 3, 8, 21, 0, 0, DateTimeKind.Utc)));
+
+            // ToLocal بالإزاحة الثابتة نفسها
+            DateTime utc = new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc);
+            Assert.Equal(utc.AddHours(3), Common.Utils.ProgramClock.ToLocal(utc));
+        }
+        finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
     }
 }
