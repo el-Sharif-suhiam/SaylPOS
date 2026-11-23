@@ -387,4 +387,73 @@ public class StoreClockTests
             await WriteSettingAsync(db, null);
         }
     }
+
+    // ══ 16) منتصف الليل الملتبس مع قاعدة تُزيح الإزاحة الأساسية (BaseUtcOffsetDelta):
+    // يجب أن تُحسب أبكر لحظة UTC من إزاحات المنطقة الفعلية (GetAmbiguousTimeOffsets)
+    // لا من إعادة بناء يدوية تتجاهل BaseUtcOffsetDelta. توقيت مخصص ثابت التواريخ:
+    // أساس -5، دلتا صيفية +1، إزاحة قاعدية إضافية +1 (فترة القاعدة: -3 صيفي)،
+    // فترة DST من 1 يناير 00:00 إلى 2 يناير 01:00 (تواريخ ثابتة).
+    // عند نهاية DST يقفز الساعة من 2 يناير 01:00 (صيفي -3) إلى 2 يناير 00:00
+    // (قياسي داخل القاعدة -4) — فيتكرر منتصف ليل 2 يناير مرتين: -3 (03:00Z)
+    // و -4 (04:00Z). الأبكر الحقيقي 03:00Z؛ الإعادة اليدوية القديمة كانت
+    // تعطي 04:00Z لأنها تتجاهل BaseUtcOffsetDelta.
+    [Fact]
+    public async Task GetStoreDayBoundsUtc_AmbiguousMidnight_BaseUtcOffsetDelta_UsesActualOffsets()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+                DateTime.MinValue.Date, DateTime.MaxValue.Date,
+                TimeSpan.FromHours(1), // دلتا صيفية +1
+                TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 0, 0, 0), month: 1, day: 1), // بدء DST: 1 يناير 00:00
+                TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 1, 0, 0), month: 1, day: 2), // نهاية DST: 2 يناير 01:00
+                TimeSpan.FromHours(1)); // إزاحة قاعدية إضافية +1 خلال القاعدة (فترة القاعدة: -4 قياسي، -3 صيفي)
+            var tz = TimeZoneInfo.CreateCustomTimeZone("Test/AmbiguousMidnightBaseDelta",
+                TimeSpan.FromHours(-5), "Test/AmbiguousMidnightBaseDelta", "Test Standard", "Test Daylight", new[] { rule });
+
+            await WriteSettingAsync(db, tz.Id); // مسار الطرفي يحتاج إعدادًا صالحًا
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync();
+
+            // حرس الفرضية: منتصف ليل 2 يناير ملتبس بإزاحتين فعليتين {-3، -4}
+            DateTime midnight = new DateTime(2026, 1, 2, 0, 0, 0);
+            Assert.True(tz.IsAmbiguousTime(midnight),
+                "الفرضية فسدت: منتصف ليل 2 يناير يجب أن يكون ملتبسًا في التوقيت المخصص");
+            TimeSpan[] offsets = tz.GetAmbiguousTimeOffsets(midnight);
+            Assert.Equal(2, offsets.Length);
+            Assert.Contains(TimeSpan.FromHours(-3), offsets); // صيفي (خلال القاعدة: -5 + 1 + 1)
+            Assert.Contains(TimeSpan.FromHours(-4), offsets); // قياسي داخل القاعدة (-5 + 1)
+
+            (DateTime s, DateTime e) = clock.GetStoreDayBoundsUtc(new DateOnly(2026, 1, 2));
+
+            // البداية = أبكر لحظة UTC محسوبة من الإزاحات الفعلية نفسها = 03:00Z
+            // (الإعادة اليدوية القديمة كانت ستعطي 04:00Z لأنها تتجاهل BaseUtcOffsetDelta)
+            DateTime earliest = offsets.Select(o => new DateTime(midnight.Ticks - o.Ticks, DateTimeKind.Utc)).Min();
+            Assert.Equal(earliest, s);
+            Assert.Equal(new DateTime(2026, 1, 2, 3, 0, 0, DateTimeKind.Utc), s);
+            // النهاية = منتصف ليل اليوم التالي بإزاحة القاعدة بعد التأخير (-4) = 04:00Z
+            Assert.Equal(new DateTime(2026, 1, 3, 4, 0, 0, DateTimeKind.Utc), e);
+            // اليوم الملتبس طوله 25 ساعة (24 + ساعة تأخير الساعة)
+            Assert.Equal(TimeSpan.FromHours(25), e - s);
+
+            // الساعة المتكررة بالكامل داخل حدود 2 يناير: 03:30Z (صيفي) و 04:30Z (قياسي)
+            // كلاهما يُعاد إلى 00:30 محليًا — لا تُسقط أي ساعة متكررة
+            DateTime first = new DateTime(2026, 1, 2, 3, 30, 0, DateTimeKind.Utc);
+            Assert.True(first >= s && first < e, $"الساعة المتكررة {first:O} خارج حدود اليوم");
+            Assert.Equal(new DateTime(2026, 1, 2, 0, 30, 0), clock.ToStoreLocal(first));
+            DateTime second = new DateTime(2026, 1, 2, 4, 30, 0, DateTimeKind.Utc);
+            Assert.True(second >= s && second < e, $"الساعة المتكررة {second:O} خارج حدود اليوم");
+            Assert.Equal(new DateTime(2026, 1, 2, 0, 30, 0), clock.ToStoreLocal(second));
+
+            // يوم عادي خارج فترة القاعدة يبقى 24 ساعة (sanity على التوقيت نفسه)
+            (s, e) = clock.GetStoreDayBoundsUtc(new DateOnly(2026, 2, 1));
+            Assert.Equal(TimeSpan.FromHours(24), e - s);
+        }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
+    }
 }

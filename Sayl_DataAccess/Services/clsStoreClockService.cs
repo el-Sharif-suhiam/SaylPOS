@@ -215,7 +215,9 @@ namespace Sayl.Core.Services
         ///  • الوقت غير الصالح (ثغرة تقديم الساعة — لا منتصف ليل فعليًا) يُزيَّح
         ///    بمقدار الدلتا الصيفية للقاعدة السارية كي لا ينفجر التحويل.
         ///  • الوقت الملتبس (تأخير الساعة — منتصف ليل يتكرر مرتين) يُحوَّل إلى
-        ///    أبكر لحظة UTC له (تفسير الجهة الصيفية) — ConvertTimeToUtc يفترض
+        ///    أبكر لحظة UTC له محسوبة من إزاحات المنطقة الفعلية نفسها
+        ///    (GetAmbiguousTimeOffsets — تراعي BaseUtcOffsetDelta لقواعد تُزيح
+        ///    الإزاحة الأساسية) لا من إعادة بناء يدوية — ConvertTimeToUtc يفترض
         ///    التفسير القياسي للملتبس فيختار اللحظة الأحدث ويُسقط الساعة
         ///    المتكررة الأولى من حدود اليوم، لذا نحسمه بأنفسنا.</summary>
         private static DateTime ConvertStoreLocalToUtc(DateTime local, TimeZoneInfo tz)
@@ -232,17 +234,11 @@ namespace Sayl.Core.Services
 
             if (tz.IsAmbiguousTime(local))
             {
-                // التفسيران المحتملان للوقت الملتبس: جهة قياسية وجهة صيفية —
-                // نحسب لحظة UTC لكلٍّ منهما ونختار الأبكر (الجهة الصيفية).
-                TimeSpan standardOffset = tz.BaseUtcOffset;
-                TimeSpan daylightOffset = tz.BaseUtcOffset + tz.GetAdjustmentRules()
-                    .Where(r => r.DateStart.Date <= local.Date && r.DateEnd.Date >= local.Date)
-                    .Select(r => r.DaylightDelta)
-                    .DefaultIfEmpty(TimeSpan.Zero)
-                    .Max();
-                DateTime asStandard = new DateTime(local.Ticks - standardOffset.Ticks, DateTimeKind.Utc);
-                DateTime asDaylight = new DateTime(local.Ticks - daylightOffset.Ticks, DateTimeKind.Utc);
-                return asDaylight < asStandard ? asDaylight : asStandard;
+                // أبكر لحظة UTC من إزاحات المنطقة الفعلية للوقت الملتبس —
+                // GetAmbiguousTimeOffsets تراعي BaseUtcOffsetDelta أيضًا.
+                return tz.GetAmbiguousTimeOffsets(local)
+                    .Select(offset => new DateTime(local.Ticks - offset.Ticks, DateTimeKind.Utc))
+                    .Min();
             }
 
             return TimeZoneInfo.ConvertTimeToUtc(local, tz);
