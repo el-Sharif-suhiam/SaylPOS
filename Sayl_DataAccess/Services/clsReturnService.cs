@@ -202,7 +202,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow,
                     TotalAmount = -returnedGross,
                     DiscountAmount = -returnedDiscount,
                     TaxAmount = -returnedTax,
@@ -370,7 +370,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow,
                     TotalAmount = -returnedGrossSup,
                     DiscountAmount = -returnedDiscountSup,
                     TaxAmount = -returnedTaxSup,
@@ -612,7 +612,7 @@ namespace Sayl.Core.Services
                     ExpiryDate = null,
                     BatchQuantity = quantity,
                     IsQuarantined = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 };
                 _dbContext.Batches.Add(batch);
             }
@@ -625,11 +625,11 @@ namespace Sayl.Core.Services
                 Quantity = quantity,
                 SourceType = "Invoice",
                 SourceId = returnInvoice.InvoiceId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             });
 
             inventory.QuantityAvailable += quantity;
-            inventory.UpdatedAt = DateTime.UtcNow;
+            inventory.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
         }
 
         private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
@@ -663,7 +663,7 @@ namespace Sayl.Core.Services
                         Quantity = -quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                 }
                 else
@@ -679,7 +679,7 @@ namespace Sayl.Core.Services
             }
 
             inventory.QuantityAvailable -= quantity;
-            inventory.UpdatedAt = DateTime.UtcNow;
+            inventory.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
         }
 
         /// <summary>خصم عبر الدفعات FEFO (الأقرب انتهاءً ثم المحجوبة أولًا) —
@@ -711,7 +711,7 @@ namespace Sayl.Core.Services
                     Quantity = -take,
                     SourceType = "Invoice",
                     SourceId = returnInvoice.InvoiceId,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
             }
 
@@ -751,7 +751,7 @@ namespace Sayl.Core.Services
                     PaymentDate = ProgramClock.Today,
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
             }
 
@@ -792,7 +792,7 @@ namespace Sayl.Core.Services
                     PaymentDate = ProgramClock.Today,
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
             }
 

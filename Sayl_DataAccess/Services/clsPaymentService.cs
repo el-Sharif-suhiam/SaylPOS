@@ -150,7 +150,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
 
                 // VULN-07 + التسوية: حالة السداد تُقيّم على كل ما دُفع فعليًا
@@ -257,7 +257,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
 
                 // التسوية الحتمية: الدفعة العامة تُخصَّص على الفواتير المستحقة
@@ -348,7 +348,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
 
                 // التسوية الحتمية — نفس منطق تحصيل العميل أعلاه

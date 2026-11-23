@@ -1189,7 +1189,7 @@ END;";
                     UserId = user.UserId,
                     Action = "Login",
                     Details = $"تسجيل دخول المستخدم '{user.Username}'",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
                 await _dbContext.SaveChangesAsync();
             }
@@ -1239,7 +1239,7 @@ END;";
                 UserId = userId,
                 Action = "Logout",
                 Details = $"تسجيل خروج المستخدم '{user.Username}'",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 
@@ -1285,7 +1285,7 @@ END;";
                 UserId = user.UserId,
                 Action = "ChangePassword",
                 Details = $"المستخدم '{user.Username}' غيّر كلمة مروره.",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 
@@ -1335,7 +1335,7 @@ END;";
                 UserId = actorUserId.Value,
                 Action = "ResetPassword",
                 Details = $"مدير النظام أعاد تعيين كلمة مرور المستخدم '{user.Username}'.",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             });
             await _dbContext.SaveChangesAsync();
 

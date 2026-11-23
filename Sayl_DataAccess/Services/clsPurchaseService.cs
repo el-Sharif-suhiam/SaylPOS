@@ -115,7 +115,7 @@ namespace Sayl.Core.Services
                     TaxAmount = tax,
                     NetAmount = net,
                     Notes = request.Notes,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 };
 
                 // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة الشراء نفسها
@@ -147,7 +147,7 @@ namespace Sayl.Core.Services
                             ExpiryDate = item.ExpiryDate,
                             BatchQuantity = item.Quantity,
                             UnitCost = unitEffectiveCost, // تكلفة الاقتناء التاريخية للدفعة
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = Common.Utils.ProgramClock.UtcNow
                         };
                         _dbContext.Batches.Add(batch);
                         // فهرس UQ_Batches_Product_Batch يمنع إنشاء دفعة مكررة عند طلبين متوازيين —
@@ -242,7 +242,7 @@ WHERE BatchId = {batch.BatchId}");
                         Quantity = item.Quantity,
                         SourceType = "Invoice",
                         SourceId = invoice.InvoiceId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = Common.Utils.ProgramClock.UtcNow
                     });
 
                     var product = products[item.ProductId];
@@ -379,7 +379,7 @@ WHERE BatchId = {batch.BatchId}");
                     PaymentDate = request.Payment!.PaymentDate,
                     PaymentMethod = request.Payment.Method,
                     Notes = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
             }
 

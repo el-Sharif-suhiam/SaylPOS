@@ -22,8 +22,10 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         public async Task<Result<DailySalesVM>> GetDailySalesAsync(DateOnly date)
         {
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            DateTime dayEnd = dayStart.AddDays(1);
+            // حدود اليوم البرنامجية من المصدر الموحّد ProgramClock (VULN-45) —
+            // شامل البداية وحصري النهاية؛ بلا توقيت مركزي = الاحتياطي الإرثي +3
+            // (نفس قيم الإزاحة المكتوبة يدويًا سابقًا، فسلوك التقارير لا يتغير)
+            var (dayStart, dayEnd) = ProgramClock.LocalDayBoundsUtc(date);
 
             var invoicesQuery = _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
@@ -192,19 +194,22 @@ namespace Sayl.Core.Services
             if (fromDate > toDate)
                 return Result<ProfitSummaryVM>.Fail("تاريخ البداية يجب أن يكون قبل تاريخ النهاية.");
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود الفترة من المصدر الموحّد ProgramClock (VULN-45) — شامل البداية
+            // وحصري النهاية: نهاية toDate = منتصف ليل اليوم التالي والقارن < النهاية
+            // (تكافئ القديم: MaxValue−3h يستثني بالضبط ما يستثنيه منتصف ليل اليوم التالي)
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             decimal salesRevenue = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                          && i.Status == enInvoicesStatus.completed
-                         && i.CreatedAt >= start && i.CreatedAt <= end)
+                         && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .SumAsync(i => (decimal?)i.NetAmount) ?? 0m;
 
             decimal returnsAmount = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.customer_return
                          && i.Status == enInvoicesStatus.completed
-                         && i.CreatedAt >= start && i.CreatedAt <= end)
+                         && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .SumAsync(i => (decimal?)i.NetAmount) ?? 0m; // قيمة سالبة
 
             decimal netRevenue = salesRevenue + returnsAmount;
@@ -212,7 +217,7 @@ namespace Sayl.Core.Services
             var saleInvoiceIds = _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                          && i.Status == enInvoicesStatus.completed
-                         && i.CreatedAt >= start && i.CreatedAt <= end)
+                         && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .Select(i => i.InvoiceId);
 
             decimal cogs = await _dbContext.InvoiceItems
@@ -227,7 +232,7 @@ namespace Sayl.Core.Services
             decimal returnsCogs = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                          && ii.Invoice.Status == enInvoicesStatus.completed
-                         && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                         && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt < endEx)
                 .SumAsync(ii => (decimal?)(ii.ItemCost ?? 0m) * ii.Quantity) ?? 0m;
 
             decimal cogsNet = cogs - returnsCogs;
@@ -269,12 +274,15 @@ namespace Sayl.Core.Services
 
             var periodStarts = BuildPeriodStarts(fromDate, toDate, reportType);
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود الفترة من المصدر الموحّد ProgramClock (VULN-45) — شامل البداية
+            // وحصري النهاية: نهاية toDate = منتصف ليل اليوم التالي والقارن < النهاية
+            // (تكافئ القديم: MaxValue−3h يستثني بالضبط ما يستثنيه منتصف ليل اليوم التالي)
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             // ── لفّ واحد على الفواتير المكتملة (بيع + مرتجع بيع) في النطاق ──
             var invoices = (await _dbContext.Invoices
-                .Where(i => i.CreatedAt >= start && i.CreatedAt <= end
+                .Where(i => i.CreatedAt >= start && i.CreatedAt < endEx
                          && i.Status == enInvoicesStatus.completed
                          && (i.Type == enInvoicesType.sale || i.Type == enInvoicesType.customer_return))
                 .Select(i => new
@@ -472,7 +480,7 @@ namespace Sayl.Core.Services
             var sessions = await _dbContext.PosSessions
                 .Include(s => s.User)
                 .Where(s => s.Status == enPosSessionStatusType.closed
-                         && s.ClosedAt >= start && s.ClosedAt <= end)
+                         && s.ClosedAt >= start && s.ClosedAt < endEx)
                 .OrderBy(s => s.ClosedAt)
                 .ToListAsync();
 
@@ -643,13 +651,16 @@ namespace Sayl.Core.Services
             if (limit <= 0)
                 limit = 10;
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود الفترة من المصدر الموحّد ProgramClock (VULN-45) — شامل البداية
+            // وحصري النهاية: نهاية toDate = منتصف ليل اليوم التالي والقارن < النهاية
+            // (تكافئ القديم: MaxValue−3h يستثني بالضبط ما يستثنيه منتصف ليل اليوم التالي)
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             var saleInvoiceIds = _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                          && i.Status == enInvoicesStatus.completed
-                         && i.CreatedAt >= start && i.CreatedAt <= end)
+                         && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .Select(i => i.InvoiceId);
 
             var result = await _dbContext.InvoiceItems
@@ -674,11 +685,14 @@ namespace Sayl.Core.Services
         // ─────────────────────────────────────────────────
         public async Task<Result<DashboardSummaryVM>> GetDashboardSummaryAsync(DateOnly date)
         {
-            DateTime dayStart = date.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            DateTime dayEnd = dayStart.AddDays(1);
+            // حدود اليوم البرنامجية من المصدر الموحّد ProgramClock (VULN-45) —
+            // شامل البداية وحصري النهاية؛ بلا توقيت مركزي = الاحتياطي الإرثي +3
+            // (نفس قيم الإزاحة المكتوبة يدويًا سابقًا، فسلوك التقارير لا يتغير)
+            var (dayStart, dayEnd) = ProgramClock.LocalDayBoundsUtc(date);
 
             DateOnly monthStartDate = new DateOnly(date.Year, date.Month, 1);
-            DateTime mtdStart = monthStartDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+            // المصدر الموحّد ProgramClock (VULN-45) — بداية الشهر حتى تاريخه بنفس ساعة البرنامج
+            var (mtdStart, _) = ProgramClock.LocalDayBoundsUtc(monthStartDate);
 
             // ── اليوم ──
             var todaySales = await _dbContext.Invoices
@@ -838,13 +852,17 @@ namespace Sayl.Core.Services
             if (fromDate > toDate)
                 return Result<List<SalesTrendPointVM>>.Fail("تاريخ البداية يجب أن يكون قبل تاريخ النهاية.");
 
-            DateTime start = fromDate.ToDateTime(TimeOnly.MinValue);
-            DateTime end = toDate.ToDateTime(TimeOnly.MaxValue);
+            // حدود الفترة من المصدر الموحّد ProgramClock (VULN-45) — كانت تُقارَن
+            // هنا بأوساط ليل محلية بلا أي تحويل إزاحة (نافذة مُزاحة بافتراض جهاز
+            // غير موثوق مقابل طوابع UTC) — الآن نفس ساعة البرنامج كبقية التقارير.
+            // شامل البداية وحصري النهاية: نهاية toDate = منتصف ليل اليوم التالي.
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             // تجميع يومي داخل قاعدة البيانات ثم دمج الفترات (أسبوع/شهر) في الذاكرة
             var rows = await _dbContext.Invoices
                 .Where(i => i.Status == enInvoicesStatus.completed
-                         && i.CreatedAt >= start && i.CreatedAt <= end
+                         && i.CreatedAt >= start && i.CreatedAt < endEx
                          && (i.Type == enInvoicesType.sale || i.Type == enInvoicesType.customer_return))
                 .GroupBy(i => new { Day = i.CreatedAt!.Value.Date, i.Type })
                 .Select(g => new
@@ -952,9 +970,10 @@ namespace Sayl.Core.Services
         /// <summary>ربحية كل منتج في فترة: كمية/إيراد/تكلفة/ربح/هامش/حصة — مرتبًا بالربح تنازليًا.</summary>
         public async Task<Result<List<ProductProfitVM>>> GetProductProfitReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير
-            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود اليوم البرنامجية من المصدر الموحّد ProgramClock (VULN-45) —
+            // شامل البداية وحصري النهاية (نهاية toDate = منتصف ليل اليوم التالي)
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             // ══ إيراد البند الفعلي يخصم نصيبه من خصم رأس الفاتورة (والضريبة وفق سياسة الصافي) ══
             // الفاتورة بُنيت: الصافي = الإجمالي − الخصم + الضريبة، والإيراد المعتمد في كل
@@ -964,7 +983,7 @@ namespace Sayl.Core.Services
             var saleRows = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.Type == enInvoicesType.sale
                           && ii.Invoice.Status == enInvoicesStatus.completed
-                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt < endEx)
                 .Select(ii => new
                 {
                     ii.ProductId,
@@ -983,7 +1002,7 @@ namespace Sayl.Core.Services
             var returnRows = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                           && ii.Invoice.Status == enInvoicesStatus.completed
-                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt < endEx)
                 .Select(ii => new
                 {
                     ii.ProductId,
@@ -1049,15 +1068,16 @@ namespace Sayl.Core.Services
         /// <summary>أفضل العملاء في فترة: عدد فواتيرهم وإيرادهم وربحهم وصافي ما تحصّل منهم.</summary>
         public async Task<Result<List<CustomerProfitVM>>> GetTopCustomersReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير
-            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود اليوم البرنامجية من المصدر الموحّد ProgramClock (VULN-45) —
+            // شامل البداية وحصري النهاية (نهاية toDate = منتصف ليل اليوم التالي)
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             var sales = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt >= start && i.CreatedAt <= end)
+                          && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .GroupBy(i => new { i.PartyId, i.Party!.Name })
                 .Select(g => new
                 {
@@ -1072,7 +1092,7 @@ namespace Sayl.Core.Services
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt >= start && i.CreatedAt <= end)
+                          && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .Select(i => (int?)i.InvoiceId);
 
             var cogsByParty = await _dbContext.InvoiceItems
@@ -1085,7 +1105,7 @@ namespace Sayl.Core.Services
                 .Where(i => i.Type == enInvoicesType.customer_return
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt >= start && i.CreatedAt <= end)
+                          && i.CreatedAt >= start && i.CreatedAt < endEx)
                 .GroupBy(i => i.PartyId!.Value)
                 .Select(g => new { PartyId = g.Key, Returns = g.Sum(x => x.NetAmount) })
                 .ToDictionaryAsync(x => x.PartyId, x => x.Returns);
@@ -1097,7 +1117,7 @@ namespace Sayl.Core.Services
                 .Where(ii => ii.Invoice.Type == enInvoicesType.customer_return
                           && ii.Invoice.Status == enInvoicesStatus.completed
                           && ii.Invoice.PartyId != null
-                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt <= end)
+                          && ii.Invoice.CreatedAt >= start && ii.Invoice.CreatedAt < endEx)
                 .GroupBy(ii => ii.Invoice.PartyId!.Value)
                 .Select(g => new { PartyId = g.Key, Cost = g.Sum(x => (x.ItemCost ?? 0m) * x.Quantity) })
                 .ToDictionaryAsync(x => x.PartyId, x => x.Cost);
@@ -1134,14 +1154,17 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result<List<DebtAgeingVM>>> GetDebtAgeingReportAsync(DateOnly asOf)
         {
-            var asOfDate = asOf.ToDateTime(TimeOnly.MaxValue);
+            // المصدر الموحّد ProgramClock (VULN-45) — كانت تُقارَن هنا بأوساط ليل
+            // محلية بلا أي تحويل إزاحة (نافذة مُزاحة بافتراض جهاز غير موثوق مقابل
+            // طوابع UTC). نهاية asOf حصرية = منتصف ليل اليوم التالي والقارن < النهاية.
+            var (_, asOfEndEx) = ProgramClock.LocalDayBoundsUtc(asOf);
 
             // كل فواتير البيع المكتملة غير المسددة بالكامل لعملاء مسجلين — الأقدم أولًا
             var openInvoices = await _dbContext.Invoices
                 .Where(i => i.Type == enInvoicesType.sale
                           && i.Status == enInvoicesStatus.completed
                           && i.PartyId != null
-                          && i.CreatedAt <= asOfDate)
+                          && i.CreatedAt < asOfEndEx)
                 .OrderBy(i => i.CreatedAt)
                 .Select(i => new { i.InvoiceId, i.PartyId, i.NetAmount, i.CreatedAt })
                 .ToListAsync();
@@ -1244,12 +1267,13 @@ namespace Sayl.Core.Services
         ///   • الرواتب تُحسب مرة واحدة (SalariesPaid) — مصروفها المرتبط مستثنى من ExpensesPaid.</summary>
         public async Task<Result<CashFlowVM>> GetCashFlowReportAsync(DateOnly fromDate, DateOnly toDate)
         {
-            // حدود اليوم البرنامجية (UTC+3) — مطابقة بقية التقارير: أعمدة UTC
-            // (CashMovements.CreatedAt و PayrollRecords.PaidAt) تُقارن بحدود UTC
-            // لمنتصف الليل المحلي، فلا تُسقط حركات ما بعد 9 مساءً ولا تُحمَّل
-            // حركات منتصف الليل (00:00–03:00) على اليوم الخطأ.
-            var start = fromDate.ToDateTime(TimeOnly.MinValue).AddHours(-3);
-            var end = toDate.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
+            // حدود اليوم البرنامجية من المصدر الموحّد ProgramClock (VULN-45) —
+            // مطابقة بقية التقارير: أعمدة UTC (CashMovements.CreatedAt و
+            // PayrollRecords.PaidAt) تُقارن بحدود UTC لمنتصفا ليل اليوم والتالي
+            // بشامل البداية وحصري النهاية، فلا تُسقط حركات ما بعد 9 مساءً ولا
+            // تُحمَّل حركات منتصف الليل (00:00–03:00) على اليوم الخطأ.
+            var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
+            var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
             // مبيعات وتحصيلات نقدية من العملاء — حسب الطرف (PartyType='C') لا نوع الفاتورة:
             // استرداد مورد (دخل بطرف 'S') لا يُصنَّف أبدًا تحصيلًا للعملاء
@@ -1289,12 +1313,12 @@ namespace Sayl.Core.Services
 
             var cashIn = await _dbContext.CashMovements
                 .Where(m => m.MovementType == 'I'
-                          && m.CreatedAt >= start && m.CreatedAt <= end)
+                          && m.CreatedAt >= start && m.CreatedAt < endEx)
                 .SumAsync(m => (decimal?)m.Amount) ?? 0m;
 
             var cashOut = await _dbContext.CashMovements
                 .Where(m => m.MovementType == 'O'
-                          && m.CreatedAt >= start && m.CreatedAt <= end)
+                          && m.CreatedAt >= start && m.CreatedAt < endEx)
                 .SumAsync(m => (decimal?)m.Amount) ?? 0m;
 
             // مصروفات غير رواتب: صرف الراتب ينشئ مصروفًا مرتبطًا (ExpenseId في
@@ -1305,7 +1329,7 @@ namespace Sayl.Core.Services
                 .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
             var salariesPaid = await _dbContext.PayrollRecords
-                .Where(p => p.Status == enPayrollStatus.paid && p.PaidAt >= start && p.PaidAt <= end)
+                .Where(p => p.Status == enPayrollStatus.paid && p.PaidAt >= start && p.PaidAt < endEx)
                 .SumAsync(p => (decimal?)p.Net) ?? 0m;
 
             return Result<CashFlowVM>.Ok(new CashFlowVM

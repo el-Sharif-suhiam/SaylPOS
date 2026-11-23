@@ -73,13 +73,13 @@ namespace Sayl.Core.Services
                 {
                     SettingKey = key,
                     SettingValue = value,
-                    UpdatedAt = DateTime.UtcNow
+                    UpdatedAt = Common.Utils.ProgramClock.UtcNow
                 });
             }
             else
             {
                 setting.SettingValue = value;
-                setting.UpdatedAt = DateTime.UtcNow;
+                setting.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
             }
 
             await _dbContext.SaveChangesAsync();
@@ -173,13 +173,13 @@ namespace Sayl.Core.Services
                     {
                         SettingKey = KeyTaxPercent,
                         SettingValue = newValueStr,
-                        UpdatedAt = DateTime.UtcNow
+                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                 }
                 else
                 {
                     oldRow.SettingValue = newValueStr;
-                    oldRow.UpdatedAt = DateTime.UtcNow;
+                    oldRow.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
                 }
 
                 clsAudit.Log(_dbContext, actorUserId, "TaxPercentChanged",
@@ -246,13 +246,13 @@ namespace Sayl.Core.Services
                     {
                         SettingKey = KeyVatNumber,
                         SettingValue = newValue,
-                        UpdatedAt = DateTime.UtcNow
+                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                 }
                 else
                 {
                     oldRow.SettingValue = newValue;
-                    oldRow.UpdatedAt = DateTime.UtcNow;
+                    oldRow.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
                 }
 
                 string newDisplay = newValue.Length == 0 ? "(فارغ)" : $"«{newValue}»";

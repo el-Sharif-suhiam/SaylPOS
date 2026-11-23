@@ -177,7 +177,7 @@ namespace Sayl.Core.Services
                     ExcessAmount = projected - dbLimit,
                     Reason = reason,
                     Status = "granted",
-                    ApprovedAtUtc = DateTime.UtcNow
+                    ApprovedAtUtc = Common.Utils.ProgramClock.UtcNow
                 };
 
                 _dbContext.CreditApprovals.Add(approval);

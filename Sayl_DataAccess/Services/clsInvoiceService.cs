@@ -2,6 +2,7 @@ using Common.DTOs;
 using Common.DTOs.ViewModel;
 using Common.Enums;
 using Common.Results;
+using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Sayl.Core.Data;
 
@@ -48,14 +49,19 @@ namespace Sayl.Core.Services
 
             if (fromDate.HasValue)
             {
-                DateTime start = fromDate.Value.ToDateTime(TimeOnly.MinValue);
+                // المصدر الموحّد ProgramClock (VULN-45) — كانت البداية تُقارَن هنا
+                // بأوساط ليل محلية بلا أي تحويل إزاحة (نافذة مُزاحة بافتراض جهاز
+                // غير موثوق مقابل طوابع UTC) — الآن نفس ساعة البرنامج كبقية النظام.
+                var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate.Value);
                 query = query.Where(i => i.CreatedAt >= start);
             }
 
             if (toDate.HasValue)
             {
-                DateTime end = toDate.Value.ToDateTime(TimeOnly.MaxValue);
-                query = query.Where(i => i.CreatedAt <= end);
+                // نهاية toDate حصرية = منتصف ليل اليوم التالي والقارن < النهاية
+                // (تكافئ القديم: MaxValue المحلي يستثني بالضبط ما يستثنيه منتصف الليل التالي).
+                var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate.Value);
+                query = query.Where(i => i.CreatedAt < endEx);
             }
 
             var result = await query
@@ -129,16 +135,18 @@ namespace Sayl.Core.Services
 
             if (fromDate.HasValue)
             {
-                // التاريخ يوصل «ببرنامج اليوم» (UTC+3) — نزّله إلى حدود UTC المخزنة
-                // (نفس إزاحة التقارير): بداية المحل للتاريخ المحدد = الثالثة فجرًا قبله.
-                DateTime start = fromDate.Value.ToDateTime(TimeOnly.MinValue).AddHours(-3);
+                // المصدر الموحّد ProgramClock (VULN-45) — بداية المحل للتاريخ المحدد
+                // منتصفا ليل اليوم والتالي محوَّلين بمعنى UTC (نفس إزاحة التقارير).
+                var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate.Value);
                 query = query.Where(i => i.CreatedAt >= start);
             }
 
             if (toDate.HasValue)
             {
-                DateTime end = toDate.Value.ToDateTime(TimeOnly.MaxValue).AddHours(-3);
-                query = query.Where(i => i.CreatedAt <= end);
+                // نهاية toDate حصرية = منتصف ليل اليوم التالي والقارن < النهاية
+                // (تكافئ القديم: MaxValue−3h يستثني بالضبط ما يستثنيه منتصف ليل اليوم التالي).
+                var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate.Value);
+                query = query.Where(i => i.CreatedAt < endEx);
             }
 
             int total = await query.CountAsync();

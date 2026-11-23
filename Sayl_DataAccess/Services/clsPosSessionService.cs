@@ -76,7 +76,7 @@ namespace Sayl.Core.Services
             {
                 UserId = userId,
                 OpeningAmount = openingAmount,
-                StartedAt = DateTime.UtcNow,
+                StartedAt = Common.Utils.ProgramClock.UtcNow,
                 Status = enPosSessionStatusType.open
             };
 
@@ -213,7 +213,7 @@ namespace Sayl.Core.Services
                 // B16: التقريب مرة واحدة على القيمة المخزنة — Z-report يطابق ما قُرئ
                 session.ExpectedAmount = Math.Round(expected, 2, MidpointRounding.AwayFromZero);
                 session.ClosingAmount = closingAmount;
-                session.ClosedAt = DateTime.UtcNow;
+                session.ClosedAt = Common.Utils.ProgramClock.UtcNow;
                 session.Status = enPosSessionStatusType.closed;
 
                 await _dbContext.SaveChangesAsync();

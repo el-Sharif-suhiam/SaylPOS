@@ -298,7 +298,7 @@ namespace Sayl.Core.Services
                     CostPrice = dtoProduct.CostPrice,
                     ReorderLevel = dtoProduct.ReorderLevel,
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 };
 
                 _dbContext.Products.Add(product);
@@ -311,7 +311,7 @@ namespace Sayl.Core.Services
                         ProductId = product.ProductId,
                         QuantityAvailable = 0,
                         QuantityReserved = 0,
-                        UpdatedAt = DateTime.UtcNow
+                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                     await _dbContext.SaveChangesAsync();
                 }

@@ -89,7 +89,7 @@ namespace Sayl.Core.Services
                 UserId = userId,
                 Action = action,
                 Details = details,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             });
         }
 
@@ -127,7 +127,7 @@ namespace Sayl.Core.Services
                     UserId = userId,
                     Action = action,
                     Details = details,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
                 // حفظ فوري على الاتصال المستقل — لا ينتظر التزام معاملة العملية
                 await auditDb.SaveChangesAsync();

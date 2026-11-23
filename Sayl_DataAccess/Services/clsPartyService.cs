@@ -216,7 +216,7 @@ namespace Sayl.Core.Services
             if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
                 party.Notes = dtoParty.Notes;
 
-            party.UpdatedAt = DateTime.UtcNow;
+            party.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
 
             // ══ إنشاء السجل الناقص عند التحويل إلى 'B' ══
             // نفس PartyId في الجدولين — السجلات المالية القائمة (فواتير، مدفوعات،

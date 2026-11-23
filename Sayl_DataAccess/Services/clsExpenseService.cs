@@ -136,7 +136,7 @@ namespace Sayl.Core.Services
                 Category = string.IsNullOrWhiteSpace(dtoExpense.Category) ? null : dtoExpense.Category,
                 Notes = string.IsNullOrWhiteSpace(dtoExpense.Notes) ? null : dtoExpense.Notes,
                 UserId = dtoExpense.UserId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             };
 
             _dbContext.Expenses.Add(expense);

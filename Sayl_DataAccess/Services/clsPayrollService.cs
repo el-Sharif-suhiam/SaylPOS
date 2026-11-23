@@ -241,7 +241,7 @@ namespace Sayl.Core.Services
                     Additions = 0,
                     Net = Math.Round(gross, 2),
                     Status = enPayrollStatus.pending,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 };
 
                 _dbContext.PayrollRecords.Add(record);
@@ -448,13 +448,13 @@ namespace Sayl.Core.Services
                     Category = SalaryExpenseCategory,
                     Notes = $"كشف راتب #{record.PayrollId}",
                     UserId = actorUserId,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 };
                 _dbContext.Expenses.Add(expense);
                 await _dbContext.SaveChangesAsync(); // لاستخراج ExpenseId
 
                 record.Status = enPayrollStatus.paid;
-                record.PaidAt = DateTime.UtcNow;
+                record.PaidAt = Common.Utils.ProgramClock.UtcNow;
                 record.ExpenseId = expense.ExpenseId;
 
                 clsAudit.Log(_dbContext, actorUserId, "PayPayroll",

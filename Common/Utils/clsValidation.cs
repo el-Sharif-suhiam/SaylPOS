@@ -102,7 +102,7 @@ namespace Common.Utils
         public static DateTime ValidateBirthDate(DateTime birthDate, int minAgeYears = 10, int minYear = 1930)
         {
             var minDate = new DateTime(minYear, 1, 1);
-            var maxDate = DateTime.UtcNow.AddYears(-minAgeYears);
+            var maxDate = Common.Utils.ProgramClock.UtcNow.AddYears(-minAgeYears);
 
             if (birthDate < minDate || birthDate > maxDate)
                 throw new ValidationException("Invalid BirthDate.");

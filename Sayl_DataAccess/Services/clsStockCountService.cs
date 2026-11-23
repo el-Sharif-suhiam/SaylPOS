@@ -190,7 +190,7 @@ END";
                         // لا بهذا العمود — انظر COSTING.md وGetOpenSessionAsync.
                         UnitCost = p.CostPrice,
                         CountedBy = userId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = Common.Utils.ProgramClock.UtcNow
                     });
                 }
 
@@ -409,7 +409,7 @@ END";
                         .AsNoTracking()
                         .FirstOrDefaultAsync(i => i.ProductId == line.ProductId);
                     line.BookQuantityAtCount = inventory?.QuantityAvailable ?? 0;
-                    line.CountedAt = DateTime.UtcNow;
+                    line.CountedAt = Common.Utils.ProgramClock.UtcNow;
                     line.CountedQuantity = counted;
                 }
                 else

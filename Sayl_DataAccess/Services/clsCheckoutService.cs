@@ -594,7 +594,7 @@ END";
                 TaxAmount = tax,
                 NetAmount = net,
                 Notes = request.Notes,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = Common.Utils.ProgramClock.UtcNow
             };
 
             // Upgrade_19: إسناد الرقم التجاري السنوي (INV-YYYY-NNNNNN) داخل معاملة
@@ -665,7 +665,7 @@ END";
                     InvoiceId = invoiceId,
                     ProductId = group.Key,
                     Quantity = quantity,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
                 inv.QuantityReserved += quantity;
             }
@@ -783,7 +783,7 @@ END";
                             Quantity = -take,
                             SourceType = "Invoice",
                             SourceId = invoiceId,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = Common.Utils.ProgramClock.UtcNow
                         });
                     }
 
@@ -840,7 +840,7 @@ END";
                     // VULN-20: نفس التشخيص — موقع القصّص الثاني (مسار الإكمال)
                     await ClampReservedWithDiagnosticAsync(inv, ownRelease, item.ProductId, invoiceId);
                 }
-                inv.UpdatedAt = DateTime.UtcNow;
+                inv.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
             }
         }
 
@@ -887,7 +887,7 @@ END";
                     PaymentDate = payment.PaymentDate,
                     PaymentMethod = payment.Method,
                     Notes = null,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = Common.Utils.ProgramClock.UtcNow
                 });
                 paid += payment.Amount;
             }
