@@ -168,16 +168,16 @@ namespace Sayl.Core.Services
         public async Task<DateTime> GetUtcNowAsync()
         {
             if (_dbContextForTests != null)
-                return ReadSqlUtcNow(_dbContextForTests);
+                return await ReadSqlUtcNowAsync(_dbContextForTests);
             await using (var scope = _scopeFactory.CreateAsyncScope())
-                return ReadSqlUtcNow(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
+                return await ReadSqlUtcNowAsync(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
         }
 
-        private static DateTime ReadSqlUtcNow(SaylDbContext db)
+        private static async Task<DateTime> ReadSqlUtcNowAsync(SaylDbContext db)
         {
-            var rows = db.Database
+            var rows = await db.Database
                 .SqlQueryRaw<DateTime>("SELECT CAST(SYSUTCDATETIME() AS datetime2(3)) AS [Value]")
-                .ToList();
+                .ToListAsync();
             if (rows.Count == 0)
                 throw new StoreClockInitializationException(
                     "تعذّر قراءة ساعة خادم SQL — تحقق من الاتصال ثم أعد المحاولة.");
@@ -211,8 +211,13 @@ namespace Sayl.Core.Services
                     ConvertStoreLocalToUtc(storeDate.AddDays(1).ToDateTime(TimeOnly.MinValue), tz));
         }
 
-        /// <summary>تحويل توقيت المتجر إلى UTC؛ ثغرة التوقيت الصيفي (لا منتصف ليل
-        /// فعليًا) تُزيَّح بمقدار الدلتا الصيفية للقاعدة السارية كي لا ينفجر التحويل.</summary>
+        /// <summary>تحويل توقيت المتجر إلى UTC:
+        ///  • الوقت غير الصالح (ثغرة تقديم الساعة — لا منتصف ليل فعليًا) يُزيَّح
+        ///    بمقدار الدلتا الصيفية للقاعدة السارية كي لا ينفجر التحويل.
+        ///  • الوقت الملتبس (تأخير الساعة — منتصف ليل يتكرر مرتين) يُحوَّل إلى
+        ///    أبكر لحظة UTC له (تفسير الجهة الصيفية) — ConvertTimeToUtc يفترض
+        ///    التفسير القياسي للملتبس فيختار اللحظة الأحدث ويُسقط الساعة
+        ///    المتكررة الأولى من حدود اليوم، لذا نحسمه بأنفسنا.</summary>
         private static DateTime ConvertStoreLocalToUtc(DateTime local, TimeZoneInfo tz)
         {
             if (tz.IsInvalidTime(local))
@@ -224,6 +229,22 @@ namespace Sayl.Core.Services
                     .First(d => !tz.IsInvalidTime(local + d));
                 local += delta;
             }
+
+            if (tz.IsAmbiguousTime(local))
+            {
+                // التفسيران المحتملان للوقت الملتبس: جهة قياسية وجهة صيفية —
+                // نحسب لحظة UTC لكلٍّ منهما ونختار الأبكر (الجهة الصيفية).
+                TimeSpan standardOffset = tz.BaseUtcOffset;
+                TimeSpan daylightOffset = tz.BaseUtcOffset + tz.GetAdjustmentRules()
+                    .Where(r => r.DateStart.Date <= local.Date && r.DateEnd.Date >= local.Date)
+                    .Select(r => r.DaylightDelta)
+                    .DefaultIfEmpty(TimeSpan.Zero)
+                    .Max();
+                DateTime asStandard = new DateTime(local.Ticks - standardOffset.Ticks, DateTimeKind.Utc);
+                DateTime asDaylight = new DateTime(local.Ticks - daylightOffset.Ticks, DateTimeKind.Utc);
+                return asDaylight < asStandard ? asDaylight : asStandard;
+            }
+
             return TimeZoneInfo.ConvertTimeToUtc(local, tz);
         }
 

@@ -94,14 +94,17 @@ namespace consol_app
                     await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
                     // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
                     await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
-                    // ساعة المتجر المركزية: فشلها تحذير فقط — الهارنس يكمل
+                    // ساعة المتجر المركزية: فشلها حرج — الهارنس لا يدير دورات تشغيلية
+                    // بلا ساعة مركزية صالحة (الحدود اليومية ستُحسب بخطأ). يُطبع الفشل
+                    // بوضوح ثم يُجهض الإقلاع بأمان (تنظيف قاعدة الخربشة في finally).
                     try
                     {
                         await Svc<clsStoreClockService>(ws).InitializeAsync();
                     }
                     catch (Exception clockEx)
                     {
-                        Console.WriteLine($"⚠️  STORE CLOCK: {clockEx.Message} (المتابعة — تُعاد المحاولة عند الإقلاع التالي)");
+                        Console.WriteLine($"⚠️  STORE CLOCK: فشل تهيئة ساعة المتجر — إجهض الهارنس. {clockEx.Message}");
+                        return;
                     }
 
                     var admin = await db.Users

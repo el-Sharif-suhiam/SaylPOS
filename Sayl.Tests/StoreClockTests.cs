@@ -234,6 +234,13 @@ public class StoreClockTests
                 () => clock.InitializeAsync());
 
             Assert.Null(Common.Utils.ProgramClock.StoreTimeZone);
+
+            // التقوية: بعد فشل الإقلاع تبقى ToLocal على الاحتياطي الإرثي (+3) —
+            // نفس الإزاحة التي يجب ألا يعتمد عليها إقلاع الإنتاج أبدًا (fail-closed
+            // في Sayl.UI/Program.cs يمنع العمل عليها)
+            DateTime utcProbe = new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc);
+            Assert.Equal(utcProbe.AddHours(Common.Utils.ProgramClock.UtcOffsetHours),
+                Common.Utils.ProgramClock.ToLocal(utcProbe));
         }
         finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
     }
@@ -324,5 +331,60 @@ public class StoreClockTests
             Assert.Equal(utc.AddHours(3), Common.Utils.ProgramClock.ToLocal(utc));
         }
         finally { Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); }
+    }
+
+    // ══ 15) منتصف الليل الملتبس أثناء تأخير الساعة: أبكر لحظة UTC (الجهة الصيفية) ══
+    // توقيت مخصص ثابت التواريخ (بلا اعتماد على سنة الجهاز أو توقيته): أساس -5،
+    // دلتا صيفية +1، فترة DST من 1 يناير 00:00 إلى 2 يناير 01:00 (تواريخ ثابتة).
+    // عند نهاية DST يقفز الساعة من 2 يناير 01:00 (صيفي، 05:00Z) إلى 2 يناير 00:00
+    // (قياسي، 05:00Z) — فيتكرر منتصف ليل 2 يناير مرتين: جهة صيفية 04:00Z وجهة
+    // قياسية 05:00Z. يجب أن تختار حدود اليوم الأبكر (04:00Z) كي لا تُسقط الساعة
+    // المتكررة الأولى — ConvertTimeToUtc الافتراضي يفترض التفسير القياسي فيخطئ.
+    [Fact]
+    public async Task GetStoreDayBoundsUtc_AmbiguousMidnight_TakesEarliestUtcInstant()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+                DateTime.MinValue.Date, DateTime.MaxValue.Date,
+                TimeSpan.FromHours(1), // دلتا صيفية +1
+                TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 0, 0, 0), month: 1, day: 1), // بدء DST: 1 يناير 00:00
+                TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 1, 0, 0), month: 1, day: 2)); // نهاية DST: 2 يناير 01:00
+            var tz = TimeZoneInfo.CreateCustomTimeZone("Test/AmbiguousMidnight",
+                TimeSpan.FromHours(-5), "Test/AmbiguousMidnight", "Test Standard", "Test Daylight", new[] { rule });
+
+            await WriteSettingAsync(db, tz.Id); // مسار الطرفي يحتاج إعدادًا صالحًا
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync();
+
+            // حرس الفرضية: منتصف ليل 2 يناير ملتبس فعلًا في هذا التوقيت المخصص
+            DateTime midnight = new DateTime(2026, 1, 2, 0, 0, 0);
+            Assert.True(tz.IsAmbiguousTime(midnight),
+                "الفرضية فسدت: منتصف ليل 2 يناير يجب أن يكون ملتبسًا في التوقيت المخصص");
+
+            (DateTime s, DateTime e) = clock.GetStoreDayBoundsUtc(new DateOnly(2026, 1, 2));
+
+            // البداية = أبكر لحظة UTC (الجهة الصيفية 04:00Z) لا القياسية 05:00Z
+            Assert.Equal(new DateTime(2026, 1, 2, 4, 0, 0, DateTimeKind.Utc), s);
+            // النهاية = منتصف ليل اليوم التالي (قياسي -5) = 05:00Z
+            Assert.Equal(new DateTime(2026, 1, 3, 5, 0, 0, DateTimeKind.Utc), e);
+            // اليوم الملتبس طوله 25 ساعة
+            Assert.Equal(TimeSpan.FromHours(25), e - s);
+
+            // الساعة المتكررة [04:00Z، 05:00Z) داخل حدود 2 يناير — لا تُسقط
+            DateTime repeated = new DateTime(2026, 1, 2, 4, 30, 0, DateTimeKind.Utc);
+            Assert.True(repeated >= s && repeated < e, $"الساعة المتكررة {repeated:O} خارج حدود اليوم");
+            Assert.Equal(new DateTime(2026, 1, 2, 0, 30, 0), clock.ToStoreLocal(repeated));
+
+            // يوم عادي بعد التوقيت الصيفي يبقى 24 ساعة (sanity على التوقيت نفسه)
+            (s, e) = clock.GetStoreDayBoundsUtc(new DateOnly(2026, 2, 1));
+            Assert.Equal(TimeSpan.FromHours(24), e - s);
+        }
+        finally
+        {
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+            await WriteSettingAsync(db, null);
+        }
     }
 }

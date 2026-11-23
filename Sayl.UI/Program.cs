@@ -183,7 +183,10 @@ namespace Sayl.UI
                             .EnsureCountSchemaAsync().GetAwaiter().GetResult();
 
                         // ساعة المتجر المركزية: المضيف يسجّل توقيته، والطرفي يقرأه —
-                        // فشل الساعة ليس حرجًا: رسالة واضحة + استمرار (الإقلاع التالي يعيد المحاولة)
+                        // فشل الساعة حرج (fail-closed): لا يعمل البرنامج إطلاقًا على
+                        // الاحتياطي الإرثي (+3) بعد إقلاع ساعة فاشل، لأن حدود اليوم
+                        // والتقارير ستُحسب بتوقيت خاطئ. الإصلاح: تشغيل البرنامج مرة
+                        // واحدة على جهاز الخادم المركزي ثم إعادة التشغيل.
                         try
                         {
                             scope.ServiceProvider.GetRequiredService<Core.Services.clsStoreClockService>()
@@ -197,15 +200,17 @@ namespace Sayl.UI
                                 AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
                                 MessageBoxDefaultButton.Button1,
                                 MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                            return false; // فشل الساعة حرج — لا استمرار في الإقلاع
                         }
                         catch (Exception clockEx)
                         {
                             LogError("STORE_CLOCK", clockEx);
                             MessageBox.Show(
-                                "تعذّر تهيئة ساعة المتجر — ستُعاد المحاولة عند الإقلاع التالي.\n" + clockEx.Message,
+                                "تعذّر تهيئة ساعة المتجر — لن يعمل البرنامج إلا بعد إصلاح المشكلة وإعادة التشغيل.\n" + clockEx.Message,
                                 AppLang.T("Common.Title.Error"), MessageBoxButtons.OK, MessageBoxIcon.Warning,
                                 MessageBoxDefaultButton.Button1,
                                 MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+                            return false; // فشل الساعة حرج — لا استمرار في الإقلاع
                         }
 
                         // حسابات نشطة بالفعل = إعادة تثبيت على قاعدة حية: لا شيء يُنشأ.
