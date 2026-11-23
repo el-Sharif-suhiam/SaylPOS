@@ -22,7 +22,7 @@ public class PaymentConcurrencyTests
     private readonly DatabaseFixture _fx;
     public PaymentConcurrencyTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
 
     private static TestSeed SeedOf(int userId, int supplierId, int customerId, int productId) =>
         new() { UserId = userId, SupplierId = supplierId, CustomerId = customerId, ProductId = productId };

@@ -19,7 +19,7 @@ public class ReturnPaymentStatusTests
     private readonly DatabaseFixture _fx;
     public ReturnPaymentStatusTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
 
     // ───────── بذور (TestSeed مرة واحدة لكل اختبار — قيد UQ_Users_Username) ─────────
 

@@ -24,7 +24,7 @@ public class CashReconciliationTests
     private readonly DatabaseFixture _fx;
     public CashReconciliationTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
     /// <summary>يوم معزول للتقرير — بعيد عن أيام اختبارات أخرى في القاعدة المشتركة.</summary>
     private static readonly DateOnly ReportDay = new(2025, 6, 15);
     /// <summary>فترة الراتب تنتهي اليوم (حارس السنة المالية يرفض فترات ما قبل السنة الحالية).</summary>

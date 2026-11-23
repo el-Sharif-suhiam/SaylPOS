@@ -29,7 +29,7 @@ public class CreditApprovalTests
     private const string ManagerPassword = "Manager@123";
     private const string Reason = "عميل قديم موثوق - تفويض استثنائي لمرة واحدة";
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => ProgramClock.Today;
 
     /// <summary>بذرة + مخزون كافٍ للبيع (نفس نمط CreditLimitPolicyTests).</summary>
     private async Task<TestSeed> SeedWithStockAsync(string marker, int qty = 100, decimal unitCost = 5m)

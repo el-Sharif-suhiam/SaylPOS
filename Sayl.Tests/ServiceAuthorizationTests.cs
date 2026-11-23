@@ -26,7 +26,7 @@ public class ServiceAuthorizationTests
     private readonly DatabaseFixture _fx;
     public ServiceAuthorizationTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => ProgramClock.Today;
 
     private static async Task<int> SeedUserAsync(SaylDbContext db, string marker, int roleValue)
     {

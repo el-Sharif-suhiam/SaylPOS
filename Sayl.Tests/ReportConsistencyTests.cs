@@ -63,7 +63,7 @@ public class ReportConsistencyTests
             CustomerId = customerId,
             UserId = userId,
             SessionId = sessionId,
-            Payment = new DtoPaymentInfo { Amount = paid, Method = "cash", PaymentDate = paymentDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)) }
+            Payment = new DtoPaymentInfo { Amount = paid, Method = "cash", PaymentDate = paymentDate ?? Common.Utils.ProgramClock.Today }
         };
         foreach (var (pid, qty, price) in items)
             request.Items.Add(new DtoCheckoutItem { ProductId = pid, ProductName = "x", Quantity = qty, UnitPrice = price });
@@ -195,7 +195,7 @@ public class ReportConsistencyTests
     public async Task PeriodicSessionLines_AttributeSessionPayments_WithoutDuplication()
     {
         string marker = $"rc3-{Guid.NewGuid():N}"[..12];
-        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+        DateOnly today = Common.Utils.ProgramClock.Today;
 
         int seedUserId, customerId, supplierId, productId, session1, session2, debtInvoiceId;
         await using (var db = _fx.CreateContext())

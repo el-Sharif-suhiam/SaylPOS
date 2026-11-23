@@ -25,7 +25,7 @@ public class RejectionAuditTests
     private readonly DatabaseFixture _fx;
     public RejectionAuditTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => ProgramClock.Today;
 
     /// <summary>فاتورة بيع آجلة مكتملة (بلا أي سداد) بقيمة محددة.</summary>
     private static async Task<int> SeedCreditSaleAsync(SaylDbContext db, TestSeed seed, decimal net)

@@ -492,7 +492,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             int sessionId = (acting.IsSuccess && acting.Data != null)
                 ? acting.Data.SessionId
                 : (await sessions.OpenSessionAsync(admin.UserId, 0m)).Data;
-            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+            DateOnly today = ProgramClock.Today;
 
             string stamp = "PA-" + DateTime.Now.Ticks.ToString()[^8..];
             int customerId, supplierId;
@@ -657,7 +657,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             {
                 UserId = admin.UserId, SessionId = sessionId, CustomerId = customerId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 20, UnitPrice = 5m } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 50m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("refund probe sale (100, paid 50) created", sale.IsSuccess, sale.Message);
             if (!sale.IsSuccess) return;
@@ -716,7 +716,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 {
                     SupplierId = supplierId, UserId = admin.UserId,
                     Items = new List<DtoPurchaseItem> { new() { ProductId = 1, UnitCost = 5m, Quantity = 20, BatchNumber = "RP-" + DateTime.Now.Ticks % 100000 } },
-                    Payment = new DtoPaymentInfo { Amount = 50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                    Payment = new DtoPaymentInfo { Amount = 50m, Method = "cash", PaymentDate = ProgramClock.Today }
                 });
                 Check("refund probe purchase (100, paid 50) created", purch.IsSuccess, purch.Message);
                 purchId = purch.IsSuccess ? purch.Data : 0;
@@ -881,8 +881,8 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 TaxPercent = 10,
                 Payments = new List<DtoPaymentInfo>
                 {
-                    new() { Amount = Math.Round(netExpected / 2, 2), Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) },
-                    new() { Amount = Math.Round(netExpected - Math.Round(netExpected / 2, 2), 2), Method = "card", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                    new() { Amount = Math.Round(netExpected / 2, 2), Method = "cash", PaymentDate = ProgramClock.Today },
+                    new() { Amount = Math.Round(netExpected - Math.Round(netExpected / 2, 2), 2), Method = "card", PaymentDate = ProgramClock.Today }
                 }
             };
 
@@ -920,7 +920,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = cashier.UserId,
                 SessionId = sessionId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = 999999 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 999999, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 999999, Method = "cash", PaymentDate = ProgramClock.Today } }
             };
             var oversell = await checkout.ProcessCheckoutAsync(huge);
             Check("oversell rejected with clear message", !oversell.IsSuccess && !oversell.Message.Contains("فشلت عملية البيع"),
@@ -943,7 +943,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     UserId = admin.UserId,
                     SessionId = sessionId,
                     Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = 1, UnitPrice = original } },
-                    Payments = new List<DtoPaymentInfo> { new() { Amount = original, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = original, Method = "cash", PaymentDate = ProgramClock.Today } }
                 };
                 var snapSale = await checkout.ProcessCheckoutAsync(snapReq);
                 Check("VULN-14 snapshot sale executes", snapSale.IsSuccess, snapSale.Message);
@@ -1006,8 +1006,8 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 db.Invoices.Where(i => i.InvoiceId == _suspendedId).Select(i => i.NetAmount).FirstAsync());
             var done = await checkout.CompleteSuspendedInvoiceAsync(_suspendedId, new List<DtoPaymentInfo>
             {
-                new() { Amount = net / 2, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) },
-                new() { Amount = net - net / 2, Method = "bank_transfer", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                new() { Amount = net / 2, Method = "cash", PaymentDate = ProgramClock.Today },
+                new() { Amount = net - net / 2, Method = "bank_transfer", PaymentDate = ProgramClock.Today }
             }, actorUserId: cashierId);
             Check("resume completes with split payments", done.IsSuccess, done.Message);
 
@@ -1101,7 +1101,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 using var os = Scope();
                 var r = await Svc<clsCheckoutService>(os).CompleteSuspendedInvoiceAsync(invoiceId, new List<DtoPaymentInfo>
                 {
-                    new() { Amount = net, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                    new() { Amount = net, Method = "cash", PaymentDate = ProgramClock.Today }
                 }, actorUserId: cashierId);
                 return r.IsSuccess;
             }
@@ -1144,7 +1144,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 {
                     UserId = cashierId,
                     Items = new List<DtoCheckoutItem> { new() { ProductId = prodId, Quantity = qty } },
-                    Payments = new List<DtoPaymentInfo> { new() { Amount = qty * 10m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = qty * 10m, Method = "cash", PaymentDate = ProgramClock.Today } }
                 });
                 return (r.IsSuccess, r.Message);
             }
@@ -1188,7 +1188,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 db.Invoices.Where(i => i.InvoiceId == invC).Select(i => i.NetAmount).FirstAsync());
             var pays = new List<DtoPaymentInfo>
             {
-                new() { Amount = netC, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) }
+                new() { Amount = netC, Method = "cash", PaymentDate = ProgramClock.Today }
             };
             var results = await Task.WhenAll(
                 Task.Run(async () => { using var s1 = Scope(); return await Svc<clsCheckoutService>(s1).CompleteSuspendedInvoiceAsync(invC, pays, cashierId); }),
@@ -1347,7 +1347,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = admin.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
                 DiscountPercent = -10m,
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("ATTACK negative discount rejected", !negDiscount.IsSuccess, $"'{negDiscount.Message}'");
 
@@ -1357,7 +1357,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = cashier.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
                 TaxPercent = 50_000m,
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("ATTACK 50000% tax rejected", !crazyTax.IsSuccess, $"'{crazyTax.Message}'");
 
@@ -1366,7 +1366,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             {
                 UserId = admin.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 10_000m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 10_000m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("ATTACK overpayment rejected", !overpay.IsSuccess, $"'{overpay.Message}'");
 
@@ -1375,7 +1375,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             {
                 UserId = admin.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 8 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m * 8, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m * 8, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("ATTACK probe sale (8 units)", probeSale.IsSuccess, probeSale.Message);
             if (probeSale.IsSuccess)
@@ -1412,12 +1412,12 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             if (suspForeign.IsSuccess)
             {
                 var foreignComplete = await checkout.CompleteSuspendedInvoiceAsync(suspForeign.Data,
-                    new List<DtoPaymentInfo> { new() { Amount = 20m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } },
+                    new List<DtoPaymentInfo> { new() { Amount = 20m, Method = "cash", PaymentDate = ProgramClock.Today } },
                     actorUserId: cashier.UserId);
                 Check("ATTACK foreign resume rejected", !foreignComplete.IsSuccess, $"'{foreignComplete.Message}'");
 
                 var ownComplete = await checkout.CompleteSuspendedInvoiceAsync(suspForeign.Data,
-                    new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } },
+                    new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = ProgramClock.Today } },
                     actorUserId: admin.UserId,
                     actorSessionId: sessionId); // VULN-05: درج الفعل
                 Check("own resume allowed", ownComplete.IsSuccess, ownComplete.Message);
@@ -1441,7 +1441,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = admin.UserId,
                 SessionId = sessionId, // بيع اليوم بجلسة اليوم — المرتجع من نفس الجلسة
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 12.50m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("VULN-05 probe sale in session", retSession.IsSuccess, retSession.Message);
             if (retSession.IsSuccess)
@@ -1487,7 +1487,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 10, UnitPrice = 10m } },
                     DiscountPercent = 10m,          // خصم 10
                     TaxPercent = 10m,                // ضريبة 10 على الباقي
-                    Payments = new List<DtoPaymentInfo> { new() { Amount = 99m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = 99m, Method = "cash", PaymentDate = ProgramClock.Today } }
                 });
                 Check("VULN-03 probe sale (net 99: 100-10%+10% tax)", discSale.IsSuccess, discSale.Message);
                 if (discSale.IsSuccess)
@@ -1544,7 +1544,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 10, UnitPrice = 10m } },
                     DiscountPercent = 10m,
                     TaxPercent = 10m,
-                    Payments = new List<DtoPaymentInfo> { new() { Amount = 40m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                    Payments = new List<DtoPaymentInfo> { new() { Amount = 40m, Method = "cash", PaymentDate = ProgramClock.Today } }
                 });
                 Check("cash-problem probe: partial credit sale (40 of 99)", debtSale.IsSuccess, debtSale.Message);
                 if (debtSale.IsSuccess)
@@ -1633,7 +1633,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             {
                 UserId = cashier.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 0.01m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 0.01m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("underpay w/o customer rejected", !noCust.IsSuccess, $"'{noCust.Message}'");
 
@@ -1644,7 +1644,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = cashier.UserId,
                 CustomerId = customerId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 1m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 1m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("partial credit sale with customer allowed", partial.IsSuccess, partial.Message);
 
@@ -1680,7 +1680,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = cashier.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
                 DiscountPercent = 50,
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 100m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("cashier >10% discount rejected", !bigDiscount.IsSuccess, bigDiscount.Message);
 
@@ -1692,7 +1692,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 UserId = admin.UserId,
                 Items = new List<DtoCheckoutItem> { new() { ProductId = 1, Quantity = 1 } },
                 DiscountPercent = 50,
-                Payments = new List<DtoPaymentInfo> { new() { Amount = 6.25m, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) } }
+                Payments = new List<DtoPaymentInfo> { new() { Amount = 6.25m, Method = "cash", PaymentDate = ProgramClock.Today } }
             });
             Check("admin big discount allowed", adminDiscount.IsSuccess, adminDiscount.Message);
 
@@ -1712,7 +1712,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             // expense delete requires accountant+
             var expAdd = await expenses.AddNewExpenseAsync(new DtoExpense
             {
-                Description = "اختبار", Amount = 5m, ExpenseDate = DateOnly.FromDateTime(DateTime.Today),
+                Description = "اختبار", Amount = 5m, ExpenseDate = ProgramClock.Today,
                 UserId = admin.UserId, Category = "اختبار"
             });
             Check("expense added", expAdd.IsSuccess, expAdd.Message);
@@ -1848,15 +1848,15 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             using var s = Scope();
             var reports = Svc<clsReportService>(s);
 
-            var profit = await reports.GetProfitSummaryAsync(DateOnly.FromDateTime(DateTime.Today), DateOnly.FromDateTime(DateTime.Today));
+            var profit = await reports.GetProfitSummaryAsync(ProgramClock.Today, ProgramClock.Today);
             Check("profit summary", profit.IsSuccess && profit.Data != null, profit.Message);
             if (profit.Data != null)
                 Console.WriteLine($"   profit: revenue={profit.Data.SalesRevenue} cogs={profit.Data.COGS} profit={profit.Data.NetProfit}");
 
-            var daily = await reports.GetDailySalesAsync(DateOnly.FromDateTime(DateTime.Today));
+            var daily = await reports.GetDailySalesAsync(ProgramClock.Today);
             Check("daily sales", daily.IsSuccess && daily.Data != null);
 
-            var top = await reports.GetTopSellingProductsAsync(DateOnly.FromDateTime(DateTime.Today).AddDays(-30), DateOnly.FromDateTime(DateTime.Today), 5);
+            var top = await reports.GetTopSellingProductsAsync(ProgramClock.Today.AddDays(-30), ProgramClock.Today, 5);
             Check("top selling", top.IsSuccess && top.Data != null);
 
             var inv = await reports.GetInventoryStatusAsync();
@@ -1865,7 +1865,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             var expiring = await reports.GetExpiringBatchesAsync(365);
             Check("expiring batches", expiring.IsSuccess && expiring.Data != null);
 
-            var dash = await reports.GetDashboardSummaryAsync(DateOnly.FromDateTime(DateTime.Today));
+            var dash = await reports.GetDashboardSummaryAsync(ProgramClock.Today);
             Check("dashboard summary", dash.IsSuccess && dash.Data != null, dash.Message);
         }
 

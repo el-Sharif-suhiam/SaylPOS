@@ -28,7 +28,7 @@ public class CreditLimitPolicyTests
     private readonly DatabaseFixture _fx;
     public CreditLimitPolicyTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
 
     /// <summary>بذرة + مخزون كافٍ للبيع.</summary>
     private async Task<TestSeed> SeedWithStockAsync(string marker, int qty = 100, decimal unitCost = 5m)

@@ -19,7 +19,7 @@ public class PayrollTests
     private readonly DatabaseFixture _fx;
     public PayrollTests(DatabaseFixture fx) => _fx = fx;
 
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
 
     private static async Task SetFiscalYearStartAsync(SaylDbContext db, DateOnly date)
     {

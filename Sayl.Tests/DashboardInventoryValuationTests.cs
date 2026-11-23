@@ -359,5 +359,5 @@ public class DashboardInventoryValuationTests
     }
 
     /// <summary>اليوم البرمجي (UTC+3) — مطابق لحدود أيام التقارير.</summary>
-    private static DateOnly TestSeedToday => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly TestSeedToday => Common.Utils.ProgramClock.Today;
 }

@@ -21,7 +21,7 @@ public class ReportCalculationTests
     public ReportCalculationTests(DatabaseFixture fx) => _fx = fx;
 
     /// <summary>اليوم البرمجي (UTC+3) — مطابق لحدود أيام التقارير.</summary>
-    private static DateOnly ProgramToday => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly ProgramToday => Common.Utils.ProgramClock.Today;
 
     private static DateTime LocalDayUtc(DateOnly d) => d.ToDateTime(TimeOnly.MinValue).AddHours(-3);
 

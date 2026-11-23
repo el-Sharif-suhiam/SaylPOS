@@ -28,7 +28,7 @@ public class ExpiredBatchRestockTests
     public ExpiredBatchRestockTests(DatabaseFixture fx) => _fx = fx;
 
     /// <summary>يوم البرنامج (UTC+3) — نفس ساعة الخدمة (ProgramClock).</summary>
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    private static DateOnly Today => Common.Utils.ProgramClock.Today;
 
     /// <summary>شراء 10 @10 ثم بيع 3 (FEFO من الدفعة الوحيدة) — يعيد (منتج، مستخدم، دفعة المصدر، فاتورة البيع).</summary>
     private async Task<(int ProductId, int UserId, int SourceBatchId, int SaleInvoiceId)> SeedSaleAsync(string marker)

@@ -37,7 +37,7 @@ public class PurchasePaymentValidationTests
     }
 
     private static DtoPaymentInfo Pay(decimal amount) =>
-        new() { Amount = amount, Method = "cash", PaymentDate = DateOnly.FromDateTime(DateTime.Today) };
+        new() { Amount = amount, Method = "cash", PaymentDate = Common.Utils.ProgramClock.Today };
 
     // ── ضريبة: الدفعة الصحيحة (الإجمالي + الضريبة) تُقبل ──
     [Fact]
