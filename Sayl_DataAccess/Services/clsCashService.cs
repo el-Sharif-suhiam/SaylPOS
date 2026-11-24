@@ -11,10 +11,14 @@ namespace Sayl.Core.Services
     public class clsCashService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsCashService(SaylDbContext dbContext)
+        public clsCashService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         private async Task<int> GetUserRoleValueAsync(int userId)
@@ -48,6 +52,10 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(reason))
                 return Result.Fail("السبب مطلوب.");
 
+            // لقطة SQL واحدة للعملية كلها (Task 2): الحركة وسجل التدقيق يشتركان
+            // في اللحظة نفسها — من ساعة SQL Server على سياق العملية لا ساعة الجهاز.
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
@@ -59,14 +67,14 @@ namespace Sayl.Core.Services
                     // تدقيق الرفض — كتابة مستقلة تنجو من تراجع المعاملة
                     // (حركة نقد على درج مغلق = محاولة تلاعب محتملة)
                     await clsAudit.LogRejectedAsync(_dbContext, effectiveActorUserId, "CashMovementDenied",
-                        $"حركة نقد مرفوضة: جلسة الدرج #{sessionId} غير موجودة أو مغلقة.");
+                        $"حركة نقد مرفوضة: جلسة الدرج #{sessionId} غير موجودة أو مغلقة.", nowUtc);
                     return Result.Fail("الجلسة غير موجودة أو مغلقة.");
                 }
 
                 if (session.UserId != effectiveActorUserId)
                 {
                     await clsAudit.LogRejectedAsync(_dbContext, effectiveActorUserId, "CashMovementDenied",
-                        $"حركة نقد مرفوضة: جلسة درج #{sessionId} لمستخدم آخر (مالكها #{session.UserId}).");
+                        $"حركة نقد مرفوضة: جلسة درج #{sessionId} لمستخدم آخر (مالكها #{session.UserId}).", nowUtc);
                     return Result.Fail("لا يمكنك تسجيل حركة نقد في جلسة مستخدم آخر.");
                 }
 
@@ -77,7 +85,7 @@ namespace Sayl.Core.Services
                     Amount = amount,
                     Reason = reason.Trim(),
                     UserId = effectiveActorUserId,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
 
                 _dbContext.SystemLogs.Add(new SystemLog
@@ -85,7 +93,7 @@ namespace Sayl.Core.Services
                     UserId = effectiveActorUserId,
                     Action = movementType == 'I' ? "CashIn" : "CashOut",
                     Details = $"مبلغ: {amount:N2} — السبب: {reason.Trim()} — جلسة #{sessionId}",
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
 
                 await _dbContext.SaveChangesAsync();

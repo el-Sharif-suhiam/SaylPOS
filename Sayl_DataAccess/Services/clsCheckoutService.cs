@@ -12,11 +12,16 @@ namespace Sayl.Core.Services
     {
         private readonly SaylDbContext _dbContext;
         private readonly clsCreditApprovalService? _creditApprovalService;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsCheckoutService(SaylDbContext dbContext, clsCreditApprovalService? creditApprovalService = null)
+        public clsCheckoutService(SaylDbContext dbContext, clsCreditApprovalService? creditApprovalService = null,
+            clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
             _creditApprovalService = creditApprovalService;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ═══ ترقية مخطط حجوزات الفواتير (idempotent) ═══
@@ -107,7 +112,7 @@ END";
             // يتطلب شاشة فواتير البيع (بت 16)، نمط بوابة الخصم أعلاه: الواجهة ليست
             // حد الثقة. النسبة الافتراضية تمر للجميع — تُحمَّل للصندوق تلقائيًا ولا
             // تمسّها يد الكاشير (الواجهة تقفل الحقل للبلا صلاحية).
-            decimal defaultTaxPercent = await new clsSettingsService(_dbContext)
+            decimal defaultTaxPercent = await new clsSettingsService(_dbContext, _storeClock)
                 .GetDecimalAsync(clsSettingsService.KeyTaxPercent, 0m);
             if (Math.Round(request.TaxPercent, 2) != Math.Round(defaultTaxPercent, 2))
             {
@@ -190,10 +195,14 @@ END";
 
         private async Task<Result<int>> ExecuteCheckoutAsync(DtoCheckoutRequest request, bool suspend)
         {
-            //  بدء المعاملة (Serializable لمنع بيع نفس الكمية من طرفيتين في نفس اللحظة)
+            // بدء المعاملة (Serializable لمنع بيع نفس الكمية من طرفيتين في نفس اللحظة)
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // لقطة SQL واحدة للعملية كلها (Task 2): الفاتورة وبنودها وحركاتها ودفعاتها
+                // لحظة واحدة من ساعة SQL Server على معاملة العملية — تُشتق منها اليوم بمعنى المتجر.
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 // B3 + VULN-13: جلسة الدفع تُصادَق بالمساعد الموحد داخل المعاملة
                 // (مطابقة AddMovementAsync) — وجود + انفتاح + ملكية الفاعل
                 var (paymentSessionId, sessionError) = await ResolveOpenSessionIdAsync(request.SessionId, request.UserId);
@@ -201,7 +210,7 @@ END";
                     return Result<int>.Fail(sessionError);
 
                 // إنشاء رأس الفاتورة
-                Invoice invoice = await CreateInvoiceHeaderAsync(request, suspend);
+                Invoice invoice = await CreateInvoiceHeaderAsync(request, suspend, nowUtc);
                 await _dbContext.SaveChangesAsync(); // للحصول على InvoiceId
 
                 // إضافة بنود الفاتورة — الصفوف المرتجعة محاذاة مع request.Items
@@ -211,15 +220,15 @@ END";
                 if (suspend)
                 {
                     // حجز المخزون فقط — بملكية فاتورة (StockReservations)
-                    await ReserveStockAsync(request.Items, invoice.InvoiceId);
+                    await ReserveStockAsync(request.Items, invoice.InvoiceId, nowUtc);
                 }
                 else
                 {
                     // خصم المخزون (معالجة الدُفعات) — B1: بيع مباشر لا يحرر أي حجز
-                    await DeductStockAndCreateMovementsAsync(request.Items, invoice.InvoiceId, releaseReservation: false, itemRows);
+                    await DeductStockAndCreateMovementsAsync(request.Items, invoice.InvoiceId, releaseReservation: false, itemRows, nowUtc);
 
                     // معالجة الدفع
-                    await ProcessPaymentAsync(invoice, request, paymentSessionId);
+                    await ProcessPaymentAsync(invoice, request, paymentSessionId, nowUtc);
                 }
 
                 await _dbContext.SaveChangesAsync();
@@ -227,7 +236,7 @@ END";
                 // تدقيق: تسجيل العملية
                 clsAudit.Log(_dbContext, request.UserId,
                     suspend ? "SuspendInvoice" : "SaleInvoice",
-                    $"فاتورة #{invoice.InvoiceId} — صافي: {invoice.NetAmount:N2} — بنود: {request.Items.Count} — خصم: {invoice.DiscountAmount:N2}");
+                    $"فاتورة #{invoice.InvoiceId} — صافي: {invoice.NetAmount:N2} — بنود: {request.Items.Count} — خصم: {invoice.DiscountAmount:N2}", nowUtc);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -307,14 +316,16 @@ END";
         }
 
         /// <summary>هل التاريخ يقع قبل بداية السنة المالية الحالية (سنة مغلقة)؟
-        /// حماية السجلات التاريخية: نفس سياسة clsFiscalYearService/clsExpenseService.</summary>
-        private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date)
+        /// حماية السجلات التاريخية: نفس سياسة clsFiscalYearService/clsExpenseService.
+        /// nowUtc: لقطة SQL للعملية (Task 2) — احتياطي غياب الإعداد يشتق «اليوم»
+        /// بمعنى المتجر منها لا من ساعة الجهاز.</summary>
+        private async Task<bool> IsBeforeCurrentFiscalYearAsync(DateOnly date, DateTime nowUtc)
         {
             var setting = await _dbContext.Settings.FindAsync(clsFiscalYearService.KeyFiscalYearStart);
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
             return date < new DateOnly(today.Year, 1, 1);
         }
 
@@ -356,16 +367,26 @@ END";
             if (invoice == null)
                 return Result.Fail("الفاتورة المعلقة غير موجودة أو تم إكمالها بالفعل.");
 
+            // لقطة SQL واحدة للعملية (Task 2) — تُقرأ قبل حراس التاريخ لأن احتياطي
+            // الفاتورة بلا CreatedAt يأتي منها لا من ساعة الجهاز
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             // ══ حماية السنة المالية المغلقة ══
             // فاتورة معلقة تعود لسنة مُغلقة لا تُستكمَل هنا: إكمالها يُقيّد بيعًا
             // وCOGS ونقدًا في سنة مؤرشفة فيقلب نتائجها المالية. طريقها المشروع
             // الوحيد هو عملية تسوية محاسبية مصرّح بها (قيد إغلاق معتمد) — لا إكمال
             // نقطة بيع صامت. (الفواتير المعلقة داخل السنة الجارية تُحسم قبل الإغلاق
             // — فحوصات الجاهزية في clsFiscalYearService تمنع الإغلاق دون حسمها.)
-            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(invoice.CreatedAt ?? DateTime.UtcNow)))
+            // تاريخ الفاتورة المعلقة طابع UTC تاريخي — يُحوَّل بتوقيت المتجر
+            // (ToStoreLocal) لا بالتاريخ UTC الخام؛ والاحتياطي (بلا CreatedAt)
+            // لحظة SQL لهذه العملية (Task 2).
+            DateOnly invoiceBusinessDate = invoice.CreatedAt.HasValue
+                ? DateOnly.FromDateTime(_storeClock.ToStoreLocal(invoice.CreatedAt.Value))
+                : DateOnly.FromDateTime(nowUtc);
+            if (await IsBeforeCurrentFiscalYearAsync(invoiceBusinessDate, nowUtc))
             {
                 await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceRejected",
-                    $"إكمال فاتورة معلقة #{invoiceId} مرفوض: تعود لسنة مالية مغلقة (المحاسب وحده عبر قيد تسوية).");
+                    $"إكمال فاتورة معلقة #{invoiceId} مرفوض: تعود لسنة مالية مغلقة (المحاسب وحده عبر قيد تسوية).", nowUtc);
                 return Result.Fail("هذه الفاتورة المعلقة تعود لسنة مالية مغلقة — لا يمكن إكمالها إلا عبر قيد تسوية محاسبية معتمد من المحاسب.");
             }
 
@@ -376,7 +397,7 @@ END";
                 if (!AppPermissions.Has(actorRole, AppPermissions.SalesInvoices))
                 {
                     await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "SuspendedInvoiceDenied",
-                        $"إكمال فاتورة معلقة #{invoiceId} (صاحبها #{invoice.UserId}) مرفوض: يتطلب صلاحية شاشة فواتير البيع.");
+                        $"إكمال فاتورة معلقة #{invoiceId} (صاحبها #{invoice.UserId}) مرفوض: يتطلب صلاحية شاشة فواتير البيع.", nowUtc);
                     return Result.Fail("إكمال فاتورة معلقة لكاشير آخر يتطلب صلاحية شاشة فواتير البيع.");
                 }
             }
@@ -410,7 +431,7 @@ END";
                     BatchId = i.BatchId
                 }).ToList();
 
-                await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId, releaseReservation: true, invoiceItemRows);
+                await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId, releaseReservation: true, invoiceItemRows, nowUtc);
 
                 // معالجة الدفع — VULN-05: دفعات الإكمال تُنسب لدرج جلسة المستكمِل
                 // الفعلية (actorSessionId) لا لجلسة التعليق القديمة: النقد دخل درج
@@ -426,12 +447,12 @@ END";
                     // Task-3: اعتماد المدير للتجاوز — يُستهلك داخل معاملة الإكمال
                     CreditApprovalId = creditApprovalId
                 };
-                await ProcessPaymentAsync(invoice, request, paymentSessionId);
+                await ProcessPaymentAsync(invoice, request, paymentSessionId, nowUtc);
 
                 // ملاحظة: تحرير الحجز يتم داخل DeductStockAndCreateMovementsAsync
 
                 clsAudit.Log(_dbContext, invoice.UserId, "CompleteSuspendedInvoice",
-                    $"إكمال فاتورة معلقة #{invoiceId} — صافي: {invoice.NetAmount:N2}");
+                    $"إكمال فاتورة معلقة #{invoiceId} — صافي: {invoice.NetAmount:N2}", nowUtc);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -530,7 +551,7 @@ END";
         // الدوال الخاصة
         // ═════════════════════════════════════════════════
 
-        private async Task<Invoice> CreateInvoiceHeaderAsync(DtoCheckoutRequest request, bool suspend)
+        private async Task<Invoice> CreateInvoiceHeaderAsync(DtoCheckoutRequest request, bool suspend, DateTime nowUtc)
         {
 
             var ids = request.Items.Select(i => i.ProductId).Distinct().ToList();
@@ -594,13 +615,16 @@ END";
                 TaxAmount = tax,
                 NetAmount = net,
                 Notes = request.Notes,
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             };
 
             // Upgrade_19: إسناد الرقم التجاري السنوي (INV-YYYY-NNNNNN) داخل معاملة
             // البيع نفسها قبل إدراج الرأس — فشل الإسناد يفشل العملية كلها وتراجع
             // العدّاد معها (النداء داخل ExecuteCheckoutAsync المعاملة Serializable).
-            var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+            // سنة العدّاد من يوم المتجر للقطة nowUtc الملتقطة للعملية (CreatedAt
+            // نفسها) — لا ساعة العميل ولا افتراض ساكن.
+            var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(
+                _dbContext, _storeClock.GetStoreToday(nowUtc).Year);
             if (!invoiceNumber.IsSuccess)
                 throw new InvalidOperationException(invoiceNumber.Message);
             invoice.InvoiceNumber = invoiceNumber.Data;
@@ -637,7 +661,7 @@ END";
         // الحجز بملكية فاتورة: صف StockReservations لكل (فاتورة، منتج) + المجموع
         // في Inventory.QuantityReserved يُحدَّث معه في نفس المعاملة (Serializable).
         // البنود تُجمَّع حسب المنتج أولًا — سطران لنفس المنتج في السلة يصيران حجزًا واحدًا.
-        private async Task ReserveStockAsync(List<DtoCheckoutItem> items, int invoiceId)
+        private async Task ReserveStockAsync(List<DtoCheckoutItem> items, int invoiceId, DateTime nowUtc)
         {
             foreach (var group in items.GroupBy(i => i.ProductId))
             {
@@ -665,7 +689,7 @@ END";
                     InvoiceId = invoiceId,
                     ProductId = group.Key,
                     Quantity = quantity,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
                 inv.QuantityReserved += quantity;
             }
@@ -714,7 +738,8 @@ END";
         }
 
         private async Task DeductStockAndCreateMovementsAsync(
-            List<DtoCheckoutItem> items, int invoiceId, bool releaseReservation, List<InvoiceItem>? itemRows = null)
+            List<DtoCheckoutItem> items, int invoiceId, bool releaseReservation, List<InvoiceItem>? itemRows,
+            DateTime nowUtc)
         {
             // حجوزات هذه الفاتورة وحدها — الإكمال يستهلك حجزها الذاتي ولا يمس
             // حجز أي فاتورة معلقة أخرى (صف واحد لكل (فاتورة، منتج) بضمان الفهرس الفريد).
@@ -755,7 +780,8 @@ END";
                     // سياسة التكلفة: FIFO بالتكلفة الفعلية للدفعة المستهلكة (Batches.UnitCost)
                     // — FEFO يرتب الاستهلاك زمنيًا، أما التكلفة فتُقرأ من كل دفعة
                     // اقتُنيت بها فعلًا، لا من Product.CostPrice (سعر آخر شراء).
-                    DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج لا التاريخ UTC الخام */
+                    // اليوم بمعنى المتجر من لقطة SQL للعملية (Task 2) لا التاريخ UTC الخام.
+                    DateOnly today = _storeClock.GetStoreToday(nowUtc);
                     var batches = await _dbContext.Batches
                         .Where(b => b.ProductId == item.ProductId && b.BatchQuantity > 0
                                  && !b.IsQuarantined
@@ -783,7 +809,7 @@ END";
                             Quantity = -take,
                             SourceType = "Invoice",
                             SourceId = invoiceId,
-                            CreatedAt = Common.Utils.ProgramClock.UtcNow
+                            CreatedAt = nowUtc
                         });
                     }
 
@@ -840,11 +866,11 @@ END";
                     // VULN-20: نفس التشخيص — موقع القصّص الثاني (مسار الإكمال)
                     await ClampReservedWithDiagnosticAsync(inv, ownRelease, item.ProductId, invoiceId);
                 }
-                inv.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+                inv.UpdatedAt = nowUtc;
             }
         }
 
-        private async Task ProcessPaymentAsync(Invoice invoice, DtoCheckoutRequest request, int? sessionId)
+        private async Task ProcessPaymentAsync(Invoice invoice, DtoCheckoutRequest request, int? sessionId, DateTime nowUtc)
         {
             decimal net = invoice.NetAmount;
 
@@ -887,7 +913,8 @@ END";
                     PaymentDate = payment.PaymentDate,
                     PaymentMethod = payment.Method,
                     Notes = null,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    // لقطة SQL للعملية (Task 2) — كل دفعات الفاتورة لحظة فاتورتها
+                    CreatedAt = nowUtc
                 });
                 paid += payment.Amount;
             }
@@ -981,7 +1008,7 @@ END";
 
                     int consumed = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
 UPDATE CreditApprovals
-SET Status = N'consumed', ConsumedAtUtc = SYSUTCDATETIME(), ConsumedByInvoiceId = {invoice.InvoiceId}
+SET Status = N'consumed', ConsumedAtUtc = {nowUtc}, ConsumedByInvoiceId = {invoice.InvoiceId}
 WHERE ApprovalId = {request.CreditApprovalId.Value}
   AND Status = N'granted'
   AND CustomerId = {invoice.PartyId.Value}
@@ -995,7 +1022,7 @@ WHERE ApprovalId = {request.CreditApprovalId.Value}
 
                     clsAudit.Log(_dbContext, request.UserId, "CreditApprovalConsumed",
                         $"استهلاك اعتماد ائتمان #{request.CreditApprovalId.Value} بفاتورة #{invoice.InvoiceId} " +
-                        $"— العميل #{invoice.PartyId.Value} — آجل {debitAmount:N2} (مشروع {balance + debitAmount:N2} فوق الحد {creditLimit:N2}).");
+                        $"— العميل #{invoice.PartyId.Value} — آجل {debitAmount:N2} (مشروع {balance + debitAmount:N2} فوق الحد {creditLimit:N2}).", nowUtc);
                 }
 
                 // القيد الجديد يُكتب بتحديث ذري مباشر (نفس نمط clsPaymentService):

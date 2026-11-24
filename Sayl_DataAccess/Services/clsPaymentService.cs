@@ -12,10 +12,14 @@ namespace Sayl.Core.Services
     public class clsPaymentService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsPaymentService(SaylDbContext dbContext)
+        public clsPaymentService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────────
@@ -135,6 +139,9 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المبلغ أكبر من المتبقي على الفاتورة بعد الدفعات العامة والمرتجعات ({remaining:N2}).");
                 }
 
+                // لقطة SQL واحدة داخل معاملة السداد (Task 2) — من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = invoice.Type == enInvoicesType.purchase || invoice.Type == enInvoicesType.supplier_return
@@ -150,7 +157,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
 
                 // VULN-07 + التسوية: حالة السداد تُقيّم على كل ما دُفع فعليًا
@@ -245,6 +252,9 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المبلغ أكبر من رصيد العميل المستحق ({balance:N2}).");
                 }
 
+                // لقطة SQL واحدة داخل معاملة التحصيل (Task 2) — من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = enPaymentType.income,
@@ -257,7 +267,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
 
                 // التسوية الحتمية: الدفعة العامة تُخصَّص على الفواتير المستحقة
@@ -336,6 +346,9 @@ namespace Sayl.Core.Services
                     return Result.Fail($"المبلغ أكبر من رصيد المورد المستحق ({balance:N2}).");
                 }
 
+                // لقطة SQL واحدة داخل معاملة السداد (Task 2) — من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 _dbContext.Payments.Add(new Payment
                 {
                     Type = enPaymentType.outcome,
@@ -348,7 +361,7 @@ namespace Sayl.Core.Services
                     PaymentDate = request.PaymentDate,
                     PaymentMethod = request.Method,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
 
                 // التسوية الحتمية — نفس منطق تحصيل العميل أعلاه

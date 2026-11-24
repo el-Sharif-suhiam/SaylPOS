@@ -10,10 +10,14 @@ namespace Sayl.Core.Services
     public class clsProductService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsProductService(SaylDbContext dbContext)
+        public clsProductService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         private async Task<int> GetUserRoleValueAsync(int userId)
@@ -170,7 +174,8 @@ namespace Sayl.Core.Services
         /// المنتج غير المخزّن = غير محدود (بلا دفعات ولا مخزون = 0).</summary>
         public async Task<int> GetNetAvailableQuantityAsync(int productId)
         {
-            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج — FEFO والصلاحية */
+            // اليوم بمعنى المتجر من ساعة SQL (Task 2) — FEFO والصلاحية بمعنى المحل
+            DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext);
 
             int reserved = await _dbContext.Inventories
                 .Where(i => i.ProductId == productId)
@@ -194,7 +199,8 @@ namespace Sayl.Core.Services
         /// استعلامان اثنان مهما كان عدد المنتجات (لا استعلام لكل منتج).</summary>
         public async Task<Dictionary<int, int>> GetNetAvailableQuantitiesAsync(IEnumerable<int>? productIds = null)
         {
-            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج — FEFO والصلاحية */
+            // اليوم بمعنى المتجر من ساعة SQL (Task 2) — FEFO والصلاحية بمعنى المحل
+            DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext);
 
             var sellableQuery = _dbContext.Batches
                 .Where(b => b.BatchQuantity > 0
@@ -288,6 +294,9 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync();
             try
             {
+                // لقطة SQL واحدة للعملية (Task 2): المنتج والمخزون الابتدائي لحظة واحدة
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 var product = new Product
                 {
                     Name = clsValidation.ValidateString(dtoProduct.Name, "Name", 100),
@@ -298,7 +307,7 @@ namespace Sayl.Core.Services
                     CostPrice = dtoProduct.CostPrice,
                     ReorderLevel = dtoProduct.ReorderLevel,
                     IsActive = true,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 };
 
                 _dbContext.Products.Add(product);
@@ -311,7 +320,7 @@ namespace Sayl.Core.Services
                         ProductId = product.ProductId,
                         QuantityAvailable = 0,
                         QuantityReserved = 0,
-                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
+                        UpdatedAt = nowUtc
                     });
                     await _dbContext.SaveChangesAsync();
                 }

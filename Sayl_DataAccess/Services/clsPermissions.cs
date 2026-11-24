@@ -82,14 +82,17 @@ namespace Sayl.Core.Services
     /// <summary>مساعد تدقيق: يكتب في SystemLogs سجل كل عملية حساسة.</summary>
     public static class clsAudit
     {
-        public static void Log(SaylDbContext db, int userId, string action, string details)
+        /// <summary>atUtc: لقطة SQL للعملية (Task 2) — سجل التدقيق يشترك في لحظة
+        /// العملية نفسها. null = السلوك السابق (الساعة الرتيبة المرساة) لنداءات
+        /// التركيب اليدوي القديمة خارج الخدمات المُرحَّلة.</summary>
+        public static void Log(SaylDbContext db, int userId, string action, string details, DateTime? atUtc = null)
         {
             db.SystemLogs.Add(new SystemLog
             {
                 UserId = userId,
                 Action = action,
                 Details = details,
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = atUtc ?? Common.Utils.ProgramClock.UtcNow
             });
         }
 
@@ -100,13 +103,15 @@ namespace Sayl.Core.Services
         /// من تراجع معاملة العملية المرفوضة — الكتابة عبر سياق العملية نفسها
         /// تُمسح بالـrollback معها فيضل الرفض بلا أثر (الثغرة المرصودة).
         ///
+        /// • atUtc: لقطة SQL للعملية (Task 2) — سجل الرفض يشترك في لحظة العملية
+        ///   نفسها. null = السلوك السابق (الساعة الرتيبة المرساة).
         /// • userId قابل للـ null: محاولة دخول باسم مستخدم غير معروف ليس لها
         ///   فاعل (Upgrade_14 جعل SystemLogs.UserId NULL مسموحًا).
         /// • أفضل جهد: فشل كتابة التدقيق لا يُلقي ولا يُحوّل الرفض إلى نجاح —
         ///   الرفض يبقى رفضًا بلا سجل على أسوأ حال.
         /// • لا تُكتب كلمات مرور أو أسرار — المتصل يمرر سبب الرفض وحده.
         /// </summary>
-        public static async Task LogRejectedAsync(SaylDbContext db, int? userId, string action, string details)
+        public static async Task LogRejectedAsync(SaylDbContext db, int? userId, string action, string details, DateTime? atUtc = null)
         {
             if (db == null)
                 return;
@@ -127,7 +132,7 @@ namespace Sayl.Core.Services
                     UserId = userId,
                     Action = action,
                     Details = details,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = atUtc ?? Common.Utils.ProgramClock.UtcNow
                 });
                 // حفظ فوري على الاتصال المستقل — لا ينتظر التزام معاملة العملية
                 await auditDb.SaveChangesAsync();

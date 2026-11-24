@@ -10,10 +10,14 @@ namespace Sayl.Core.Services
     public class clsExpenseService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsExpenseService(SaylDbContext dbContext)
+        public clsExpenseService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         public async Task<List<DtoExpense>> GetExpensesListAsync(DateOnly? fromDate = null, DateOnly? toDate = null, string? category = null, string search = "")
@@ -128,6 +132,9 @@ namespace Sayl.Core.Services
                     return Result<int>.Fail("المستخدم غير موجود.");
             }
 
+            // لقطة SQL واحدة للعملية (Task 2): طابع الإنشاء من ساعة SQL Server.
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             var expense = new Expense
             {
                 Description = clsValidation.ValidateString(dtoExpense.Description, "Description", 255),
@@ -136,7 +143,7 @@ namespace Sayl.Core.Services
                 Category = string.IsNullOrWhiteSpace(dtoExpense.Category) ? null : dtoExpense.Category,
                 Notes = string.IsNullOrWhiteSpace(dtoExpense.Notes) ? null : dtoExpense.Notes,
                 UserId = dtoExpense.UserId,
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             };
 
             _dbContext.Expenses.Add(expense);
@@ -244,7 +251,8 @@ namespace Sayl.Core.Services
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
+            // اليوم بمعنى المتجر من ساعة SQL (Task 2) — بلا ساعة الجهاز.
+            DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext);
             return date < new DateOnly(today.Year, 1, 1);
         }
     }

@@ -24,15 +24,17 @@ namespace Sayl.Core.Services
     public class clsUsersService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
         // قفل الحساب بعد 5 محاولات فاشلة لمدة 15 دقيقة (في الذاكرة — كافٍ لتشغيل أوفلاين على جهاز واحد)
         private static readonly Dictionary<string, (int Count, DateTime LockUntil)> _failedLogins = new();
         private const int MaxLoginAttempts = 5;
         private const int LockMinutes = 15;
 
-        public clsUsersService(SaylDbContext dbContext)
+        public clsUsersService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         /// <summary>سياسة كلمة المرور: 8 أحرف على الأقل وتحتوي حروفًا وأرقامًا.</summary>
@@ -209,6 +211,9 @@ namespace Sayl.Core.Services
                     return Result.Fail("الموظف المرتبط غير موجود.");
             }
 
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             // 5. إنشاء المستخدم
             var user = new User
             {
@@ -221,7 +226,8 @@ namespace Sayl.Core.Services
 
             _dbContext.Users.Add(user);
             clsAudit.Log(_dbContext, actorUserId.Value, "AddUser",
-                $"إضافة المستخدم '{user.Username}' بدور '{role.Name}'");
+                $"إضافة المستخدم '{user.Username}' بدور '{role.Name}'",
+                nowUtc);
             bool saved = (await _dbContext.SaveChangesAsync()) > 0;
 
             return saved ? Result.Ok("تم إضافة المستخدم بنجاح.") : Result.Fail("فشل حفظ المستخدم.");
@@ -799,6 +805,10 @@ END;";
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // لقطة SQL واحدة لكل عملية إنشاء/تعافي المالك (Task 2) — سجل
+                // التدقيق يشترك في هذه اللحظة من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 // A9: قفل جدول Users نفسه (موجود في كل قاعدة) — القفل السابق على
                 // جدول Settings كان يُسقط الإنشاء بـSqlException «Invalid object name»
                 // على القواعد الأقدم التي بُنيت قبل إضافة Settings، والخطأ كان يتسرب
@@ -830,7 +840,8 @@ END;";
                         await transaction.CommitAsync();
 
                         clsAudit.Log(_dbContext, existing.UserId, "OwnerRecovered",
-                            $"إعادة تفعيل حساب المدير القديم '{existing.Username}' وتعيين كلمة مرور افتراضية.");
+                            $"إعادة تفعيل حساب المدير القديم '{existing.Username}' وتعيين كلمة مرور افتراضية.",
+                            nowUtc);
                         try
                         {
                             await _dbContext.SaveChangesAsync();
@@ -873,7 +884,8 @@ END;";
                 await transaction.CommitAsync();
 
                 clsAudit.Log(_dbContext, owner.UserId, "OwnerSetup",
-                    $"إنشاء حساب المدير الأول '{owner.Username}'");
+                    $"إنشاء حساب المدير الأول '{owner.Username}'",
+                    nowUtc);
                 try
                 {
                     await _dbContext.SaveChangesAsync();
@@ -1005,8 +1017,12 @@ END;";
                 string oldRoleName = user.Role.Name;
                 user.RoleId = newRoleId;
 
+                // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 clsAudit.Log(_dbContext, actorUserId.Value, "ChangeRole",
-                    $"تغيير دور '{user.Username}' من '{oldRoleName}' إلى '{newRole.Name}'");
+                    $"تغيير دور '{user.Username}' من '{oldRoleName}' إلى '{newRole.Name}'",
+                    nowUtc);
                 await _dbContext.SaveChangesAsync();
                 return Result.Ok("تم تغيير الدور بنجاح.");
             }
@@ -1039,8 +1055,13 @@ END;";
                 return guard;
 
             user.EmployeeId = employeeId;
+
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             clsAudit.Log(_dbContext, actorUserId.Value, "LinkEmployee",
-                $"ربط الموظف رقم {employeeId} بالحساب '{user.Username}'");
+                $"ربط الموظف رقم {employeeId} بالحساب '{user.Username}'",
+                nowUtc);
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم ربط الموظف بالمستخدم.");
         }
@@ -1072,7 +1093,12 @@ END;";
                 return guard;
 
             user.IsActive = false;
-            clsAudit.Log(_dbContext, actorUserId.Value, "DeactivateUser", $"تعطيل المستخدم '{user.Username}'");
+
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
+            clsAudit.Log(_dbContext, actorUserId.Value, "DeactivateUser", $"تعطيل المستخدم '{user.Username}'",
+                nowUtc);
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم تعطيل المستخدم.");
         }
@@ -1101,7 +1127,12 @@ END;";
                 return guard;
 
             user.IsActive = true;
-            clsAudit.Log(_dbContext, actorUserId.Value, "ActivateUser", $"تفعيل المستخدم '{user.Username}'");
+
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
+            clsAudit.Log(_dbContext, actorUserId.Value, "ActivateUser", $"تفعيل المستخدم '{user.Username}'",
+                nowUtc);
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم تفعيل المستخدم.");
         }
@@ -1113,6 +1144,11 @@ END;";
                 return Result<UserVM>.Fail("اسم المستخدم وكلمة المرور مطلوبان.");
 
             // قفل الحساب بعد المحاولات الفاشلة المتكررة
+            // ══ استثناء مقصود (Task 2) ══ قفل المحاولات مؤقّت أمني في الذاكرة
+            // (_failedLogins) لا سجل عمل يُخزَّن: يموت بانتهاء العملية، وتوقيت
+            // SQL لكل محاولة يضيف زمنًا على مسار الدخول الحساس، وهو ليس طابعًا
+            // تجاريًا محفوظًا — لذا يبقى على DateTime.UtcNow. كل الطوابع
+            // المحفوظة (سجل الدخول والتدقيق) تبقى من لقطة SQL كما في العهد.
             string lockoutKey = NormalizeLockoutKey(username);
             bool lockedOut = false;
             int lockRemainingMinutes = 0;
@@ -1124,11 +1160,17 @@ END;";
                     lockRemainingMinutes = (int)Math.Ceiling((state.LockUntil - DateTime.UtcNow).TotalMinutes);
                 }
             }
+
+            // لقطة SQL واحدة لكل عملية دخول (Task 2) — سجل الدخول وسجلات
+            // التدقيق (نجاحًا ورفضًا) كلها تشترك في هذه اللحظة
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             if (lockedOut)
             {
                 // تدقيق الرفض: محاولة دخول أثناء قفل الحساب (قد لا يكون لها فاعل معروف)
                 await clsAudit.LogRejectedAsync(_dbContext, null, "LoginDenied",
-                    $"محاولة دخول أثناء قفل مؤقت للحساب '{lockoutKey}' — حاول بعد {lockRemainingMinutes} دقيقة.");
+                    $"محاولة دخول أثناء قفل مؤقت للحساب '{lockoutKey}' — حاول بعد {lockRemainingMinutes} دقيقة.",
+                    nowUtc);
                 return Result<UserVM>.Fail($"الحساب مقفل مؤقتًا بسبب المحاولات الفاشلة. حاول بعد {lockRemainingMinutes} دقيقة.");
             }
 
@@ -1148,7 +1190,8 @@ END;";
                 _ = BCrypt.Net.BCrypt.Verify(password, dummyHash); // يعمل بنفس زمن الحقيقي
                 // تدقيق الرفض: اسم مستخدم غير معروف — بلا فاعل (UserId = null)
                 await clsAudit.LogRejectedAsync(_dbContext, null, "LoginFailed",
-                    $"محاولة دخول باسم مستخدم غير معروف: '{username}'.");
+                    $"محاولة دخول باسم مستخدم غير معروف: '{username}'.",
+                    nowUtc);
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
@@ -1157,7 +1200,8 @@ END;";
                 _ = BCrypt.Net.BCrypt.Verify(password, dummyHash);
                 // تدقيق الرفض: محاولة دخول لحساب معطل
                 await clsAudit.LogRejectedAsync(_dbContext, user.UserId, "LoginDenied",
-                    $"محاولة دخول لحساب معطل: '{user.Username}'.");
+                    $"محاولة دخول لحساب معطل: '{user.Username}'.",
+                    nowUtc);
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
@@ -1166,7 +1210,8 @@ END;";
                 RegisterFailedLogin(username);
                 // تدقيق الرفض: كلمة مرور غير صحيحة — الفاعل معروف (لا كلمة المرور أبدًا)
                 await clsAudit.LogRejectedAsync(_dbContext, user.UserId, "LoginFailed",
-                    $"محاولة دخول فاشلة بكلمة مرور غير صحيحة للحساب '{user.Username}'.");
+                    $"محاولة دخول فاشلة بكلمة مرور غير صحيحة للحساب '{user.Username}'.",
+                    nowUtc);
                 return Result<UserVM>.Fail(invalidCredentials);
             }
 
@@ -1189,7 +1234,7 @@ END;";
                     UserId = user.UserId,
                     Action = "Login",
                     Details = $"تسجيل دخول المستخدم '{user.Username}'",
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
                 await _dbContext.SaveChangesAsync();
             }
@@ -1234,12 +1279,15 @@ END;";
             if (user == null)
                 return Result.Fail("المستخدم غير موجود.");
 
+            // لقطة SQL واحدة للعملية (Task 2) — سجل الخروج من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             _dbContext.SystemLogs.Add(new SystemLog
             {
                 UserId = userId,
                 Action = "Logout",
                 Details = $"تسجيل خروج المستخدم '{user.Username}'",
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             });
             await _dbContext.SaveChangesAsync();
 
@@ -1280,12 +1328,15 @@ END;";
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
             user.MustChangePassword = false;
 
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التغيير من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             _dbContext.SystemLogs.Add(new SystemLog
             {
                 UserId = user.UserId,
                 Action = "ChangePassword",
                 Details = $"المستخدم '{user.Username}' غيّر كلمة مروره.",
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             });
             await _dbContext.SaveChangesAsync();
 
@@ -1330,12 +1381,15 @@ END;";
 
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
 
+            // لقطة SQL واحدة للعملية (Task 2) — سجل التدقيق من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             _dbContext.SystemLogs.Add(new SystemLog
             {
                 UserId = actorUserId.Value,
                 Action = "ResetPassword",
                 Details = $"مدير النظام أعاد تعيين كلمة مرور المستخدم '{user.Username}'.",
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             });
             await _dbContext.SaveChangesAsync();
 

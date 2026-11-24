@@ -13,10 +13,14 @@ namespace Sayl.Core.Services
     public class clsSettingsService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsSettingsService(SaylDbContext dbContext)
+        public clsSettingsService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         public const string KeyStoreName = "StoreName";
@@ -66,6 +70,9 @@ namespace Sayl.Core.Services
 
         public async Task SetAsync(string key, string value)
         {
+            // لقطة SQL واحدة للعملية (Task 2) — من ساعة SQL Server لا ساعة الجهاز.
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             var setting = await _dbContext.Settings.FindAsync(key);
             if (setting == null)
             {
@@ -73,13 +80,13 @@ namespace Sayl.Core.Services
                 {
                     SettingKey = key,
                     SettingValue = value,
-                    UpdatedAt = Common.Utils.ProgramClock.UtcNow
+                    UpdatedAt = nowUtc
                 });
             }
             else
             {
                 setting.SettingValue = value;
-                setting.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+                setting.UpdatedAt = nowUtc;
             }
 
             await _dbContext.SaveChangesAsync();
@@ -167,23 +174,27 @@ namespace Sayl.Core.Services
                         ? oldNum.ToString("0.##")
                         : $"«{oldRaw}» (غير رقمية)"; // قيمة تالفة تُعرض نصًا خامًا لا 0 مضللًا
 
+                // لقطة SQL واحدة داخل المعاملة (Task 2) — الإعداد وسجل التدقيق لحظة واحدة
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 if (oldRow == null)
                 {
                     _dbContext.Settings.Add(new Setting
                     {
                         SettingKey = KeyTaxPercent,
                         SettingValue = newValueStr,
-                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
+                        UpdatedAt = nowUtc
                     });
                 }
                 else
                 {
                     oldRow.SettingValue = newValueStr;
-                    oldRow.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+                    oldRow.UpdatedAt = nowUtc;
                 }
 
                 clsAudit.Log(_dbContext, actorUserId, "TaxPercentChanged",
-                    $"تعديل نسبة الضريبة: القيمة القديمة = {oldDisplay}، القيمة الجديدة = {newValueStr}.");
+                    $"تعديل نسبة الضريبة: القيمة القديمة = {oldDisplay}، القيمة الجديدة = {newValueStr}.",
+                    nowUtc);
                 await _dbContext.SaveChangesAsync();
 
                 await transaction.CommitAsync();
@@ -240,24 +251,28 @@ namespace Sayl.Core.Services
                         ? "(فارغ)"    // صف موجود بقيمة "" — حالة مختلفة عن الغياب
                         : $"«{oldRaw}»";
 
+                // لقطة SQL واحدة داخل المعاملة (Task 2) — الإعداد وسجل التدقيق لحظة واحدة
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 if (oldRow == null)
                 {
                     _dbContext.Settings.Add(new Setting
                     {
                         SettingKey = KeyVatNumber,
                         SettingValue = newValue,
-                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
+                        UpdatedAt = nowUtc
                     });
                 }
                 else
                 {
                     oldRow.SettingValue = newValue;
-                    oldRow.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+                    oldRow.UpdatedAt = nowUtc;
                 }
 
                 string newDisplay = newValue.Length == 0 ? "(فارغ)" : $"«{newValue}»";
                 clsAudit.Log(_dbContext, actorUserId, "VatNumberChanged",
-                    $"تعديل الرقم الضريبي: القيمة القديمة = {oldDisplay}، القيمة الجديدة = {newDisplay}.");
+                    $"تعديل الرقم الضريبي: القيمة القديمة = {oldDisplay}، القيمة الجديدة = {newDisplay}.",
+                    nowUtc);
                 await _dbContext.SaveChangesAsync();
 
                 await transaction.CommitAsync();

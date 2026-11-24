@@ -22,14 +22,19 @@ namespace Sayl.Core.Services
     {
         private readonly SaylDbContext _dbContext;
         private readonly clsUsersService _usersService;
+        private readonly clsStoreClockService _storeClock;
 
         /// <summary>حد طول سبب الاعتماد — اتفاقية clsValidation.ValidateString (الحد الأدنى 2).</summary>
         public const int ReasonMaxLength = 500;
 
-        public clsCreditApprovalService(SaylDbContext dbContext, clsUsersService usersService)
+        public clsCreditApprovalService(SaylDbContext dbContext, clsUsersService usersService,
+            clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
             _usersService = usersService;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -166,6 +171,10 @@ namespace Sayl.Core.Services
                         "لا اعتماد مطلوب: أعد تقييم البيع.");
                 }
 
+                // لقطة SQL واحدة للعملية (Task 2): الاعتماد وتدقيق المنح لحظة واحدة
+                // من ساعة SQL Server على معاملة الاعتماد.
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 var approval = new CreditApproval
                 {
                     CustomerId = info.CustomerId,
@@ -177,7 +186,7 @@ namespace Sayl.Core.Services
                     ExcessAmount = projected - dbLimit,
                     Reason = reason,
                     Status = "granted",
-                    ApprovedAtUtc = Common.Utils.ProgramClock.UtcNow
+                    ApprovedAtUtc = nowUtc
                 };
 
                 _dbContext.CreditApprovals.Add(approval);
@@ -188,7 +197,7 @@ namespace Sayl.Core.Services
                 clsAudit.Log(_dbContext, login.Data.UserId, "CreditApprovalGranted",
                     $"اعتماد تجاوز حد ائتمان #{approval.ApprovalId} — العميل #{info.CustomerId}: " +
                     $"الحالي {dbBalance:N2} + جديد {info.NewCreditAmount:N2} = {projected:N2} " +
-                    $"(الحد {dbLimit:N2} — الفائض {approval.ExcessAmount:N2}) — السبب: {reason}");
+                    $"(الحد {dbLimit:N2} — الفائض {approval.ExcessAmount:N2}) — السبب: {reason}", nowUtc);
                 await _dbContext.SaveChangesAsync();
 
                 await transaction.CommitAsync();

@@ -11,10 +11,14 @@ namespace Sayl.Core.Services
     public class clsPurchaseService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsPurchaseService(SaylDbContext dbContext)
+        public clsPurchaseService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────────
@@ -69,6 +73,11 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync();
             try
             {
+                // لقطة SQL واحدة للعملية كلها (Task 2): الفاتورة وبنودها ودفعاتها
+                // وحركات المخزون تشترك في اللحظة نفسها — من ساعة SQL Server
+                // على سياق/معاملة العملية لا ساعة الجهاز ولا استعلام لكل صف.
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 decimal total = request.Items.Sum(i => i.UnitCost * i.Quantity);
 
                 // ══ VULN-06: حراس المبالغ (حدود الخدمة) ══
@@ -115,12 +124,15 @@ namespace Sayl.Core.Services
                     TaxAmount = tax,
                     NetAmount = net,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 };
 
                 // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة الشراء نفسها
                 // قبل الإدراج — فشل الإسناد يفشل العملية وتراجع العدّاد معها.
-                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                // سنة العدّاد من يوم المتجر للقطة nowUtc الملتقطة للعملية (CreatedAt
+                // نفسها) — لا ساعة العميل ولا افتراض ساكن.
+                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(
+                    _dbContext, _storeClock.GetStoreToday(nowUtc).Year);
                 if (!invoiceNumber.IsSuccess)
                     throw new InvalidOperationException(invoiceNumber.Message);
                 invoice.InvoiceNumber = invoiceNumber.Data;
@@ -147,7 +159,7 @@ namespace Sayl.Core.Services
                             ExpiryDate = item.ExpiryDate,
                             BatchQuantity = item.Quantity,
                             UnitCost = unitEffectiveCost, // تكلفة الاقتناء التاريخية للدفعة
-                            CreatedAt = Common.Utils.ProgramClock.UtcNow
+                            CreatedAt = nowUtc
                         };
                         _dbContext.Batches.Add(batch);
                         // فهرس UQ_Batches_Product_Batch يمنع إنشاء دفعة مكررة عند طلبين متوازيين —
@@ -230,9 +242,10 @@ WHERE BatchId = {batch.BatchId}");
                     }
 
                     // زيادة ذرية للمخزون — محصّنة من فاتورة/استلام متوازٍ
-                    // GETUTCDATE لا GETDATE: كل كتابة Inventory.UpdatedAt بمنطقة زمنية واحدة (UTC)
+                    // UpdatedAt من لقطة SQL للعملية (Task 2): نفس لحظة الفاتورة
+                    // وبنودها — مصدر واحد SYSUTCDATETIME لا تعبير ساعة مستقل لكل صف
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = GETUTCDATE() WHERE ProductId = {item.ProductId}");
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = {nowUtc} WHERE ProductId = {item.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -242,14 +255,14 @@ WHERE BatchId = {batch.BatchId}");
                         Quantity = item.Quantity,
                         SourceType = "Invoice",
                         SourceId = invoice.InvoiceId,
-                        CreatedAt = Common.Utils.ProgramClock.UtcNow
+                        CreatedAt = nowUtc
                     });
 
                     var product = products[item.ProductId];
                     product.CostPrice = unitEffectiveCost;
                 }
 
-                await ProcessPaymentAsync(invoice, request);
+                await ProcessPaymentAsync(invoice, request, nowUtc);
 
                 // زيادة ذرية لرصيد المورد — محصّنة من سداد متوازٍ
                 decimal paidAmount = request.Payment?.Amount ?? 0;
@@ -362,7 +375,7 @@ WHERE BatchId = {batch.BatchId}");
             return result;
         }
 
-        private async Task ProcessPaymentAsync(Invoice invoice, DtoPurchaseRequest request)
+        private async Task ProcessPaymentAsync(Invoice invoice, DtoPurchaseRequest request, DateTime nowUtc)
         {
             decimal net = invoice.NetAmount;
             decimal paid = request.Payment?.Amount ?? 0;
@@ -379,7 +392,8 @@ WHERE BatchId = {batch.BatchId}");
                     PaymentDate = request.Payment!.PaymentDate,
                     PaymentMethod = request.Payment.Method,
                     Notes = null,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    // لقطة SQL للعملية نفسها (Task 2) — دفعة الشراء بلحظة فاتورتها
+                    CreatedAt = nowUtc
                 });
             }
 

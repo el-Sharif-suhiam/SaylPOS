@@ -11,10 +11,14 @@ namespace Sayl.Core.Services
     public class clsPosSessionService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsPosSessionService(SaylDbContext dbContext)
+        public clsPosSessionService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         private async Task<int> GetUserRoleValueAsync(int userId)
@@ -72,11 +76,14 @@ namespace Sayl.Core.Services
             if (hasOpenSession)
                 return Result<int>.Fail("يوجد لدى المستخدم جلسة مفتوحة بالفعل.");
 
+            // لقطة SQL واحدة للعملية (Task 2) — بدء الجلسة من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
             var session = new PosSession
             {
                 UserId = userId,
                 OpeningAmount = openingAmount,
-                StartedAt = Common.Utils.ProgramClock.UtcNow,
+                StartedAt = nowUtc,
                 Status = enPosSessionStatusType.open
             };
 
@@ -210,10 +217,13 @@ namespace Sayl.Core.Services
                                  - (cashOutcomeNew + cashOutcomeLegacy)
                                  + cashIn - cashOut;
 
+                // لقطة SQL واحدة داخل معاملة الإغلاق (Task 2) — من ساعة SQL Server
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 // B16: التقريب مرة واحدة على القيمة المخزنة — Z-report يطابق ما قُرئ
                 session.ExpectedAmount = Math.Round(expected, 2, MidpointRounding.AwayFromZero);
                 session.ClosingAmount = closingAmount;
-                session.ClosedAt = Common.Utils.ProgramClock.UtcNow;
+                session.ClosedAt = nowUtc;
                 session.Status = enPosSessionStatusType.closed;
 
                 await _dbContext.SaveChangesAsync();

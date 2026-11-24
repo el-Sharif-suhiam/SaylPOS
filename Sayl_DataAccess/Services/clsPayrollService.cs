@@ -29,11 +29,16 @@ namespace Sayl.Core.Services
     {
         private readonly SaylDbContext _dbContext;
         private readonly clsFiscalYearService _fiscalYear;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsPayrollService(SaylDbContext dbContext, clsFiscalYearService fiscalYear)
+        public clsPayrollService(SaylDbContext dbContext, clsFiscalYearService fiscalYear,
+            clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
             _fiscalYear = fiscalYear;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         private async Task<int> GetUserRoleValueAsync(int userId)
@@ -116,7 +121,12 @@ namespace Sayl.Core.Services
             if (periodTo < periodFrom)
                 return Result<int>.Fail("نهاية الفترة يجب أن تكون بعد بدايتها.");
 
-            if (periodTo > ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
+            // لقطة SQL واحدة للعملية (Task 2): «اليوم» بمعنى المتجر يُشتق من اللحظة
+            // نفسها — تحقق الفترة وكشوف الفترة كلها بلحظة SQL واحدة.
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
+
+            if (periodTo > today)
                 return Result<int>.Fail("لا يمكن توليد كشوف لفترة لم تنته بعد.");
 
             // حماية السنة المالية: فترة انتهت قبل بداية السنة الحالية = سنة مغلقة مؤرشفة —
@@ -241,7 +251,7 @@ namespace Sayl.Core.Services
                     Additions = 0,
                     Net = Math.Round(gross, 2),
                     Status = enPayrollStatus.pending,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 };
 
                 _dbContext.PayrollRecords.Add(record);
@@ -257,7 +267,8 @@ namespace Sayl.Core.Services
             }
 
             clsAudit.Log(_dbContext, actorUserId, "GeneratePayrolls",
-                $"توليد {created} كشف رواتب للفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd}");
+                $"توليد {created} كشف رواتب للفترة {periodFrom:yyyy-MM-dd} ← {periodTo:yyyy-MM-dd}",
+                nowUtc);
             try
             {
                 // حفظ واحد بعد الحلقة داخل معاملة الفحص نفسها — التداخل لا يُحقن بين فحصين متوازيين
@@ -432,6 +443,9 @@ namespace Sayl.Core.Services
             using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             try
             {
+                // لقطة SQL واحدة داخل معاملة الصرف (Task 2): المصروف والكشف لحظة واحدة
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 // انتقال ذري داخل المعاملة: يمنع صرفًا مزدوجًا متوازيًا
                 int claimed = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
                     $"UPDATE PayrollRecords SET Status = 'paid' WHERE PayrollId = {payrollId} AND Status = 'pending'");
@@ -448,17 +462,18 @@ namespace Sayl.Core.Services
                     Category = SalaryExpenseCategory,
                     Notes = $"كشف راتب #{record.PayrollId}",
                     UserId = actorUserId,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 };
                 _dbContext.Expenses.Add(expense);
                 await _dbContext.SaveChangesAsync(); // لاستخراج ExpenseId
 
                 record.Status = enPayrollStatus.paid;
-                record.PaidAt = Common.Utils.ProgramClock.UtcNow;
+                record.PaidAt = nowUtc;
                 record.ExpenseId = expense.ExpenseId;
 
                 clsAudit.Log(_dbContext, actorUserId, "PayPayroll",
-                    $"صرف راتب {employee.Name} — كشف #{payrollId} — الصافي: {record.Net:N2} — مصروف #{expense.ExpenseId}");
+                    $"صرف راتب {employee.Name} — كشف #{payrollId} — الصافي: {record.Net:N2} — مصروف #{expense.ExpenseId}",
+                    nowUtc);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();

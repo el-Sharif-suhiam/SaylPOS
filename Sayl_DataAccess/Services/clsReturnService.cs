@@ -29,10 +29,12 @@ namespace Sayl.Core.Services
     public class clsReturnService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsReturnService(SaylDbContext dbContext)
+        public clsReturnService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────────
@@ -98,11 +100,19 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة بيع مكتملة.");
 
+            // لقطة SQL واحدة لكل عملية المرتجع (Task 2) — من ساعة SQL Server:
+            // فاتورة المرتجع وبنودها ودفعات الاسترداد وحركات المخزون والتدقيق
+            // كلها تشترك في هذه اللحظة الواحدة
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
+
             // ══ حماية السنة المالية المغلقة ══
             // مرتجع على فاتورة سنة مغلقة كان يعيد للفترة القديمة مخزونًا واستردادًا
             // فيقلب نتائج سنة مؤرشفة بصمت. سياسة التسوية: الاعتراف بالمرتجع في
             // الفترة الحالية عبر قيد محاسبي معتمد — لا إعادة فعل على السجلات القديمة.
-            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(originalInvoice.CreatedAt ?? DateTime.UtcNow)))
+            // الطابع التاريخي يُحوَّل بيوم المتجر بتوقيته (لا التاريخ UTC الخام)،
+            // واحتياط غياب الطابع يكون لقطة SQL الملتقطة لا ساعة الجهاز (Task 2)
+            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(_storeClock.ToStoreLocal(originalInvoice.CreatedAt ?? nowUtc))))
                 return Result<int>.Fail("الفاتورة الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
@@ -202,7 +212,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow,
+                    CreatedAt = nowUtc,
                     TotalAmount = -returnedGross,
                     DiscountAmount = -returnedDiscount,
                     TaxAmount = -returnedTax,
@@ -211,7 +221,10 @@ namespace Sayl.Core.Services
 
                 // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة المرتجع نفسها
                 // قبل الإدراج — فشل الإسناد يفشل المرتجع وتراجع العدّاد معه.
-                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                // سنة العدّاد من يوم المتجر للقطة nowUtc الملتقطة للعملية (CreatedAt
+                // نفسها) — لا ساعة العميل ولا افتراض ساكن.
+                var invoiceNumber = await clsInvoiceNumberGenerator.NextAsync(
+                    _dbContext, _storeClock.GetStoreToday(nowUtc).Year);
                 if (!invoiceNumber.IsSuccess)
                     throw new InvalidOperationException(invoiceNumber.Message);
                 returnInvoice.InvoiceNumber = invoiceNumber.Data;
@@ -241,14 +254,15 @@ namespace Sayl.Core.Services
                             ItemCost = a.ItemCost
                         });
 
-                        await RestockProductAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
+                        await RestockProductAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice, nowUtc);
                     }
                 }
 
-                await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
+                await ProcessCustomerRefundAsync(originalInvoice, returnInvoice, total, request.SessionId, nowUtc);
 
                 clsAudit.Log(_dbContext, request.UserId, "CustomerReturn",
-                    $"مرتجع بيع على الفاتورة #{originalInvoice.InvoiceId} — القيمة: {total:N2}");
+                    $"مرتجع بيع على الفاتورة #{originalInvoice.InvoiceId} — القيمة: {total:N2}",
+                    nowUtc);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -289,8 +303,12 @@ namespace Sayl.Core.Services
             if (originalInvoice == null)
                 return Result<int>.Fail("الفاتورة الأصلية غير موجودة أو ليست فاتورة شراء مكتملة.");
 
+            // لقطة SQL واحدة لكل عملية المرتجع (Task 2) — من ساعة SQL Server
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
+
             // ══ حماية السنة المالية المغلقة ══ (نفس سياسة مرتجع العميل أعلاه)
-            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(originalInvoice.CreatedAt ?? DateTime.UtcNow)))
+            if (await IsBeforeCurrentFiscalYearAsync(DateOnly.FromDateTime(_storeClock.ToStoreLocal(originalInvoice.CreatedAt ?? nowUtc))))
                 return Result<int>.Fail("فاتورة الشراء الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
@@ -370,7 +388,7 @@ namespace Sayl.Core.Services
                     SessionId = request.SessionId,
                     OriginalInvoiceId = originalInvoice.InvoiceId,
                     Notes = request.Notes,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow,
+                    CreatedAt = nowUtc,
                     TotalAmount = -returnedGrossSup,
                     DiscountAmount = -returnedDiscountSup,
                     TaxAmount = -returnedTaxSup,
@@ -379,7 +397,10 @@ namespace Sayl.Core.Services
 
                 // Upgrade_19: إسناد الرقم التجاري السنوي داخل معاملة المرتجع نفسها
                 // قبل الإدراج — فشل الإسناد يفشل المرتجع وتراجع العدّاد معه.
-                var invoiceNumberSup = await clsInvoiceNumberGenerator.NextAsync(_dbContext);
+                // سنة العدّاد من يوم المتجر للقطة nowUtc الملتقطة للعملية (CreatedAt
+                // نفسها) — لا ساعة العميل ولا افتراض ساكن.
+                var invoiceNumberSup = await clsInvoiceNumberGenerator.NextAsync(
+                    _dbContext, _storeClock.GetStoreToday(nowUtc).Year);
                 if (!invoiceNumberSup.IsSuccess)
                     throw new InvalidOperationException(invoiceNumberSup.Message);
                 returnInvoice.InvoiceNumber = invoiceNumberSup.Data;
@@ -409,11 +430,11 @@ namespace Sayl.Core.Services
                             ItemCost = a.ItemCost
                         });
 
-                        await DeductProductStockAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice);
+                        await DeductProductStockAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice, nowUtc);
                     }
                 }
 
-                await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total, request.SessionId);
+                await ProcessSupplierRefundAsync(originalInvoice, returnInvoice, total, request.SessionId, nowUtc);
 
                 await _dbContext.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -446,7 +467,7 @@ namespace Sayl.Core.Services
             if (setting != null && DateOnly.TryParse(setting.SettingValue, out var fiscalYearStart))
                 return date < fiscalYearStart;
 
-            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 — مصدر موحّد */
+            var today = await _storeClock.GetStoreTodayAsync(_dbContext); /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */
             return date < new DateOnly(today.Year, 1, 1);
         }
 
@@ -556,7 +577,7 @@ namespace Sayl.Core.Services
             return returnedItems.ToDictionary(x => (x.ProductId, x.BatchId), x => x.Quantity);
         }
 
-        private async Task RestockProductAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
+        private async Task RestockProductAsync(int productId, int quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
         {
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null || product.Type != "stock") return;
@@ -575,9 +596,9 @@ namespace Sayl.Core.Services
 
             // B5 + التوازن: كل زيادة مخزون تمر عبر دفعة تحملها — لا مخزون قابل
             // للبيع بلا مصدر دفعة صالح.
-            // VULN-45: اليوم بتوقيت البرنامج (UTC+3) لا التاريخ UTC الخام —
-            // وإلا بقيت دفعة منتهية أمس قابلة للبيع حتى 03:00 فجرًا.
-            DateOnly today = ProgramClock.Today;
+            // اليوم بمعنى المتجر من لقطة SQL الملتقطة للعملية (Task 2) لا التاريخ
+            // UTC الخام — وإلا بقيت دفعة منتهية أمس قابلة للبيع حتى 03:00 فجرًا.
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
             Batch? batch = null;
 
             if (batchId.HasValue)
@@ -608,11 +629,13 @@ namespace Sayl.Core.Services
                 batch = new Batch
                 {
                     ProductId = productId,
-                    BatchNumber = $"RET-{returnInvoice.InvoiceId}-{productId}-{DateTime.UtcNow.Ticks}",
+                    // معرّف المرتجع من لقطة SQL الملتقطة (Task 2) — التفرد مضمون
+                    // أصلًا بمعرّف الفاتورة ومعرّف المنتج فالتيكس توثيق اللحظة فقط
+                    BatchNumber = $"RET-{returnInvoice.InvoiceId}-{productId}-{nowUtc.Ticks}",
                     ExpiryDate = null,
                     BatchQuantity = quantity,
                     IsQuarantined = true,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 };
                 _dbContext.Batches.Add(batch);
             }
@@ -625,14 +648,14 @@ namespace Sayl.Core.Services
                 Quantity = quantity,
                 SourceType = "Invoice",
                 SourceId = returnInvoice.InvoiceId,
-                CreatedAt = Common.Utils.ProgramClock.UtcNow
+                CreatedAt = nowUtc
             });
 
             inventory.QuantityAvailable += quantity;
-            inventory.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+            inventory.UpdatedAt = nowUtc;
         }
 
-        private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice)
+        private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
         {
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null || product.Type != "stock") return;
@@ -663,31 +686,31 @@ namespace Sayl.Core.Services
                         Quantity = -quantity,
                         SourceType = "Invoice",
                         SourceId = returnInvoice.InvoiceId,
-                        CreatedAt = Common.Utils.ProgramClock.UtcNow
+                        CreatedAt = nowUtc
                     });
                 }
                 else
                 {
-                    await DeductAcrossBatchesAsync(productId, quantity, returnInvoice);
+                    await DeductAcrossBatchesAsync(productId, quantity, returnInvoice, nowUtc);
                 }
             }
             else
             {
                 // بند بلا دفعة مصدر: الخصم يمر عبر الدفعات حصرًا (FEFO) — خصم
                 // Inventory وحده يترك الدفعات أعلى من المخزون الكلي (مخزون شبح).
-                await DeductAcrossBatchesAsync(productId, quantity, returnInvoice);
+                await DeductAcrossBatchesAsync(productId, quantity, returnInvoice, nowUtc);
             }
 
             inventory.QuantityAvailable -= quantity;
-            inventory.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+            inventory.UpdatedAt = nowUtc;
         }
 
         /// <summary>خصم عبر الدفعات FEFO (الأقرب انتهاءً ثم المحجوبة أولًا) —
         /// يضمن أن كل نقصان مخزون يحمل من دفعة فعلية فتبقى معادلة
         /// «مجموع الدفعات = المخزون الكلي» قائمة.</summary>
-        private async Task DeductAcrossBatchesAsync(int productId, int quantity, Invoice returnInvoice)
+        private async Task DeductAcrossBatchesAsync(int productId, int quantity, Invoice returnInvoice, DateTime nowUtc)
         {
-            DateOnly today = ProgramClock.Today; /* VULN-45: يوم البرنامج لا التاريخ UTC الخام */
+            DateOnly today = _storeClock.GetStoreToday(nowUtc); /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */
             var batches = await _dbContext.Batches
                 .Where(b => b.ProductId == productId && b.BatchQuantity > 0)
                 .OrderBy(b => b.ExpiryDate.HasValue ? b.ExpiryDate.Value : DateOnly.MaxValue)
@@ -711,7 +734,7 @@ namespace Sayl.Core.Services
                     Quantity = -take,
                     SourceType = "Invoice",
                     SourceId = returnInvoice.InvoiceId,
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
             }
 
@@ -722,7 +745,7 @@ namespace Sayl.Core.Services
         // VULN-05: refundSessionId = درج الجلسة التي تُخرج نقد الاسترداد —
         // تقرير Z لليوم يرى المرتجع الذي دُفع اليوم، لا يُحمَّل على جلسة مجمدة.
         //
-        private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
+        private async Task ProcessCustomerRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId, DateTime nowUtc)
         {
             var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
 
@@ -744,14 +767,14 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = refund.Amount,
-                    // VULN-45 + سجل الز: PaymentDate = يوم البرنامج (UTC+3) لا
+                    // PaymentDate = يوم المتجر من لقطة SQL الملتقطة (Task 2) لا
                     // التاريخ UTC الخام — استرداد بعد منتصف الليل المحلي (00:00–03:00)
                     // كان يُختَم بتاريخ الأمس فيختفي من تقرير Z لليوم الفعلي
-                    // (clsReportService يصفّي Payments على PaymentDate = يوم البرنامج).
-                    PaymentDate = ProgramClock.Today,
+                    // (clsReportService يصفّي Payments على PaymentDate = يوم المتجر).
+                    PaymentDate = _storeClock.GetStoreToday(nowUtc),
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
             }
 
@@ -768,7 +791,7 @@ namespace Sayl.Core.Services
         }
 
         // VULN-05: نفس توجيه مرتجع العميل — نقد الاسترداد يعود لدرج جلسة الفعل.
-        private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId)
+        private async Task ProcessSupplierRefundAsync(Invoice originalInvoice, Invoice returnInvoice, decimal refundTotal, int? refundSessionId, DateTime nowUtc)
         {
             var refundPlan = await BuildRefundPlanAsync(originalInvoice, returnInvoice.InvoiceId, refundTotal);
 
@@ -788,11 +811,11 @@ namespace Sayl.Core.Services
                     PartyId = originalInvoice.PartyId,
                     SessionId = refundSessionId, // VULN-05: درج الفعل
                     Amount = refund.Amount,
-                    // VULN-45: نفس توجيه استرداد العميل — يوم البرنامج (UTC+3) لا التاريخ UTC الخام.
-                    PaymentDate = ProgramClock.Today,
+                    // PaymentDate = يوم المتجر من لقطة SQL الملتقطة (Task 2) لا التاريخ UTC الخام.
+                    PaymentDate = _storeClock.GetStoreToday(nowUtc),
                     PaymentMethod = refund.Method,
                     Notes = $"قيد استرداد من المورد عن الفاتورة {originalInvoice.InvoiceId}",
-                    CreatedAt = Common.Utils.ProgramClock.UtcNow
+                    CreatedAt = nowUtc
                 });
             }
 
