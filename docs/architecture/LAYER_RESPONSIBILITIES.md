@@ -32,7 +32,7 @@ flowchart TB
 | Transactions | `Sayl.Core.Services` | Per-operation EF Core transactions + app locks + CAS updates |
 | Persistence | EF Core 10 over `SaylDbContext` | No stored procedures; see [STORED_PROCEDURES.md](../database/STORED_PROCEDURES.md) |
 | Referential integrity, amount guards | SQL Server | CHECK constraints and filtered unique indexes are the last line of defense |
-| Cross-cutting time | `Common.Utils.ProgramClock` | UTC storage; program day = UTC+3 |
+| Cross-cutting time | `Common.Utils.ProgramClock` | UTC storage (SQL `SYSUTCDATETIME()` captured via the store clock service); store day from stored `StoreTimeZoneId` — no fixed offset |
 
 ## 2. Common (shared contracts)
 
@@ -42,7 +42,7 @@ flowchart TB
 - `DTOs/ViewModel` — screen models (`InvoiceVM`, `DashboardSummaryVM`,
   `InventoryStatusVM`, `PaymentVM`, `StockCountVM`, and others).
 - `Results` — `Result` and `Result<T>`: `IsSuccess`, `Message`, optional `Data`.
-- `Utils` — `AppPermissions` (bitmask contract), `ProgramClock` (UTC+3 program day),
+- `Utils` - `AppPermissions` (bitmask contract), `ProgramClock` (SQL-anchored monotonic clock, fail-closed; store day from the store timezone),
   `clsValidation`, `clsCompare`.
 - `Enums` — invoice type/status, payment type/status, stock-movement type, POS
   session status, salary type, trend grouping.

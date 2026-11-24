@@ -15,10 +15,14 @@ namespace Sayl.Core.Services
     public class clsEmployeeService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsEmployeeService(SaylDbContext dbContext)
+        public clsEmployeeService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 5): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اليوم بمعنى المتجر من ساعة SQL لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         private static readonly string[] ValidStatuses = { "active", "on_leave", "resigned" };
@@ -201,7 +205,9 @@ namespace Sayl.Core.Services
                 if (newStatus == "resigned")
                 {
                     employee.Status = newStatus;
-                    employee.ResignDate ??= dtoEmployee.ResignDate ?? ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+                    // تاريخ الاستقالة الافتراضي = «اليوم» بمعنى المتجر من ساعة SQL
+                    // الموثقة (Task 5) — التاريخ المرسل من الواجهة (اختيار المستخدم) أولى.
+                    employee.ResignDate ??= dtoEmployee.ResignDate ?? await _storeClock.GetStoreTodayAsync(_dbContext);
                 }
                 else
                 {

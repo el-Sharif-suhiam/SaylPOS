@@ -134,8 +134,8 @@ product (Serializable transaction):
 - `Batches.IsQuarantined` marks stock that physically exists but must not be sold
   (e.g., expired returns). Quarantined batches are excluded from sale FEFO selection
   and from net-available; they remain included in total valuation.
-- FEFO expiry comparison uses the program day (`ProgramClock.Today`, UTC+3), so a
-  batch expiring yesterday is unsellable from the first program minute of today.
+- FEFO expiry comparison uses the store day from the central store clock, so a
+  batch expiring yesterday is unsellable from the first store minute of today.
 - The dashboard and reports surface expiring batches (`GetExpiringBatchesAsync`,
   default window 90 days).
 

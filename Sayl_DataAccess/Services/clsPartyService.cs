@@ -11,10 +11,14 @@ namespace Sayl.Core.Services
     public class clsPartyService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsPartyService(SaylDbContext dbContext)
+        public clsPartyService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 5): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
 
@@ -216,7 +220,11 @@ namespace Sayl.Core.Services
             if (!string.IsNullOrWhiteSpace(dtoParty.Notes))
                 party.Notes = dtoParty.Notes;
 
-            party.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
+            // لقطة واحدة لساعة SQL للعملية كلها (Task 5) — طابع تعديل المحفوظ
+            // من مصدر موثوق لا من ساعة الجهاز ولا من المرساة الساكنة.
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
+            party.UpdatedAt = nowUtc;
 
             // ══ إنشاء السجل الناقص عند التحويل إلى 'B' ══
             // نفس PartyId في الجدولين — السجلات المالية القائمة (فواتير، مدفوعات،

@@ -15,10 +15,14 @@ namespace Sayl.Core.Services
     public class clsShiftService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsShiftService(SaylDbContext dbContext)
+        public clsShiftService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 5): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اليوم بمعنى المتجر من ساعة SQL لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────
@@ -192,7 +196,9 @@ namespace Sayl.Core.Services
             if (assignment.EffectiveTo != null)
                 return Result.Fail("التعيين منتهٍ بالفعل.");
 
-            assignment.EffectiveTo = ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
+            // تاريخ الإنهاء = «اليوم» بمعنى المتجر من ساعة SQL الموثقة (Task 5)
+            // لا اليوم الافتراضي القديم المشتق من ساكن البرنامج.
+            assignment.EffectiveTo = await _storeClock.GetStoreTodayAsync(_dbContext);
             await _dbContext.SaveChangesAsync();
             return Result.Ok("تم إنهاء تعيين الشفت.");
         }

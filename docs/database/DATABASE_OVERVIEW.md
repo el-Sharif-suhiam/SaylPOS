@@ -12,9 +12,12 @@ the idempotent `Upgrade_09` … `Upgrade_13` scripts in the repository root.
 
 ## 1. Time Policy (Program Clock)
 
-All transactional timestamps are stored in UTC: `DateTime.UtcNow` from EF writes and
-`GETUTCDATE()` in raw SQL. The "shop day" used by daily reports, FEFO expiry checks,
-payment dates and fiscal boundaries is derived via `ProgramClock` (UTC + fixed +3 h).
+All transactional timestamps are stored in UTC: stamps are captured from the SQL
+Server clock (`SYSUTCDATETIME()`) via `clsStoreClockService.GetUtcNowAsync(db)` —
+never from the terminal's wall clock. The "shop day" used by daily reports, FEFO
+expiry checks, payment dates and fiscal boundaries is derived from the stored
+store timezone (`StoreTimeZoneId`, written by the host at startup) via the store
+clock service — no fixed +3 h fallback.
 Column defaults are `SYSUTCDATETIME()` (Upgrade_15; see §7).
 
 ## 2. Table Catalog

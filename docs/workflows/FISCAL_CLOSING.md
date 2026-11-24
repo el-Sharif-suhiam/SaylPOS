@@ -52,7 +52,7 @@ covered by a return is no longer falsely reported as debt
    the stock count is a pillar of the close, matching the UI button's gate in
    `SettingsControl`.
 2. Guard rails: `newYearStart` must be after the current start and not in the future
-   (program day, UTC+3).
+   (store day from the central store clock).
 3. Serializable transaction:
    - Readiness checks run **before** any write, against the *previous* period
      `[current, newYearStart)`. (On a first close the stored start row may not exist;

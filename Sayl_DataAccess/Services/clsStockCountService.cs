@@ -38,10 +38,14 @@ namespace Sayl.Core.Services
     public class clsStockCountService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsStockCountService(SaylDbContext dbContext)
+        public clsStockCountService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 5): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────────
@@ -173,6 +177,10 @@ END";
                     return Result<int>.Fail("لا توجد منتجات مخزنية نشطة للجرد.");
                 }
 
+                // لقطة واحدة لساعة SQL تشترك فيها كل أسطر الجلسة (Task 2/5) —
+                // لقطة بدء الجلسة نفسها لا قراءة مستقلة لكل صف.
+                DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+
                 // معرف الجلسة = أعلى جلسة سابقة + 1 (0 لأول جرد) — آمن داخل القفل
                 int sessionId = await _dbContext.StockCounts.MaxAsync(sc => (int?)sc.CountSessionId) ?? 0;
                 sessionId += 1;
@@ -190,7 +198,7 @@ END";
                         // لا بهذا العمود — انظر COSTING.md وGetOpenSessionAsync.
                         UnitCost = p.CostPrice,
                         CountedBy = userId,
-                        CreatedAt = Common.Utils.ProgramClock.UtcNow
+                        CreatedAt = nowUtc
                     });
                 }
 
@@ -409,7 +417,8 @@ END";
                         .AsNoTracking()
                         .FirstOrDefaultAsync(i => i.ProductId == line.ProductId);
                     line.BookQuantityAtCount = inventory?.QuantityAvailable ?? 0;
-                    line.CountedAt = Common.Utils.ProgramClock.UtcNow;
+                    // لقطة وقت العد من ساعة SQL الموثقة لا ساعة الجهاز (Task 5)
+                    line.CountedAt = await _storeClock.GetUtcNowAsync(_dbContext);
                     line.CountedQuantity = counted;
                 }
                 else

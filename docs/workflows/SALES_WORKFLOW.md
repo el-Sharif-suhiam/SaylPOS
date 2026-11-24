@@ -49,7 +49,8 @@ Execution (single Serializable transaction, deadlock-retried up to 3 times):
 3. Insert `InvoiceItems` rows (`ItemPrice` = basket snapshot price; `ItemCost` is
    written later from the batches actually consumed).
 4. Deduct stock with **FEFO**: batches ordered by earliest expiry (null expiry last),
-   excluding expired and quarantined batches, using the program day (UTC+3). Each
+   excluding expired and quarantined batches, using the store day from the central
+   store clock. Each
    consumed batch gets a `StockMovements` row (`sale`, negative quantity,
    `SourceType = 'Invoice'`, `SourceId = invoiceId`). A line that consumed several
    batches is split into one `InvoiceItem` row per batch with its own `ItemCost`
