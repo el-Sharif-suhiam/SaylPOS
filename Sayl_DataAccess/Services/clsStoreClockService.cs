@@ -36,12 +36,6 @@ namespace Sayl.Core.Services
         /// <summary>هل تعمل العملية على جهاز خادم SQL نفسه — يُحدَّد عند الإقلاع.</summary>
         public bool IsSqlHost { get; private set; }
 
-        /// <summary>انحراف ساعة العميل عن ساعة SQL Server = ساعة SQL − ساعة
-        /// العميل — يُلتقط عند نجاح الإقلاع (SYSUTCDATETIME − DateTime.UtcNow)
-        /// ويُحدَّث مع كل قراءة GetUtcNowAsync ناجحة (زحل ساعة العميل الذاتي
-        /// بين القراءات). صفر قبل الإقلاع — كتابة TimeSpan عادية بلا أقفال.</summary>
-        public TimeSpan ClientClockSkew { get; private set; }
-
         private bool _initialized;
 
         public clsStoreClockService(IServiceScopeFactory scopeFactory)
@@ -59,6 +53,13 @@ namespace Sayl.Core.Services
             _dbContextForTests = dbContext;
             _injectedTimeZone = timeZoneInfo;
             _forcedHost = forceHost;
+            // بذر التوقيت من المنشور مركزيًا (Task 2): الخدمات تُبنى يدويًا في
+            // الاختبارات/التركيب الداخلي بـ new clsStoreClockService(db) — فيلتقط
+            // التوقيت المنشور للساعات الموحدة (Test/FixedPlus3 في الاختبارات، توقيت
+            // المتجر بعد إقلاع المضيف في التشغيل) فيعمل GetStoreTodayAsync(db)
+            // حتميًا بلا نداء إقلاع. بلا توقيت منشور = فشل مغلق كما هو.
+            _storeTimeZone = timeZoneInfo ?? Common.Utils.ProgramClock.StoreTimeZone;
+            _initialized = _storeTimeZone != null;
         }
 
         // ══ بذور مسار الاختبار (الإقلاع قبل فتح النوافذ — بلا أقفال) ══
@@ -118,31 +119,15 @@ namespace Sayl.Core.Services
 
             IsSqlHost = forceHost ?? IsSameHostIgnoringCase(sqlHost ?? "", Environment.MachineName);
 
+            // 2) حلّ التوقيت المركزي والتحقق منه قبل أي قراءة وقت أو أي كتابة:
             if (IsSqlHost)
             {
-                // 2) فرع المضيف: معرّف التوقيت المحلي يُكتب في الإعدادات (يُحدَّث عند كل إقلاع)
-                string hostTzId = _injectedTimeZone?.Id ?? TimeZoneInfo.Local.Id;
-                var setting = await db.Settings.FindAsync(clsSettingsService.KeyStoreTimeZoneId);
-                if (setting == null)
-                {
-                    db.Settings.Add(new Sayl.Core.Models.Setting
-                    {
-                        SettingKey = clsSettingsService.KeyStoreTimeZoneId,
-                        SettingValue = hostTzId,
-                        UpdatedAt = Common.Utils.ProgramClock.UtcNow
-                    });
-                }
-                else
-                {
-                    setting.SettingValue = hostTzId;
-                    setting.UpdatedAt = Common.Utils.ProgramClock.UtcNow;
-                }
-                await db.SaveChangesAsync();
+                // فرع المضيف: معرّف التوقيت المحلي هو المصدر (يُكتب في الإعدادات لاحقًا)
                 _storeTimeZone = _injectedTimeZone ?? TimeZoneInfo.Local;
             }
             else
             {
-                // 3) فرع الطرفي: قراءة المعرّف فقط — لا كتابة ولا رجوع للتوقيت المحلي
+                // فرع الطرفي: قراءة المعرّف فقط — لا كتابة ولا رجوع للتوقيت المحلي
                 string? storedId = (await db.Settings.AsNoTracking()
                     .FirstOrDefaultAsync(s => s.SettingKey == clsSettingsService.KeyStoreTimeZoneId))?.SettingValue;
                 if (string.IsNullOrWhiteSpace(storedId))
@@ -161,12 +146,37 @@ namespace Sayl.Core.Services
                 }
             }
 
-            // التقاط انحراف ساعة العميل عن ساعة SQL (كلا الفرعين بعد نجاحهما):
-            // ساعة الخادم هي المصدر الموثق — الفارق يصحح كل الطوابع المكتوبة من هذا الجهاز
-            ClientClockSkew = await GetUtcNowAsync() - DateTime.UtcNow;
+            // 3) اللحظة الأولى تُقرأ مباشرة من ساعة SQL Server على سياق الإقلاع
+            //    نفسه — نجاح القراءة ينشر مرساة SQL (المصدر الموثق للساعة الرتيبة).
+            DateTime sqlNow = await GetUtcNowAsync(db);
 
-            // نشر التوقيت المركزي والانحراف للساعات الموحدة (ProgramClock/AppClock) — نجاح الإقلاع فقط؛ الفشل ينشر شيئًا فتبقى الساعات على الاحتياطي الإرثي (+3) وبانحراف صفري
-            Common.Utils.ProgramClock.ConfigureStoreClock(_storeTimeZone, ClientClockSkew);
+            if (IsSqlHost)
+            {
+                // 4) فرع المضيف: معرّف التوقيت المحلي يُكتب في الإعدادات (يُحدَّث عند
+                //    كل إقلاع) — الطابع الزمني من ساعة SQL الموثقة لا من الجهاز.
+                string hostTzId = _injectedTimeZone?.Id ?? TimeZoneInfo.Local.Id;
+                var setting = await db.Settings.FindAsync(clsSettingsService.KeyStoreTimeZoneId);
+                if (setting == null)
+                {
+                    db.Settings.Add(new Sayl.Core.Models.Setting
+                    {
+                        SettingKey = clsSettingsService.KeyStoreTimeZoneId,
+                        SettingValue = hostTzId,
+                        UpdatedAt = sqlNow
+                    });
+                }
+                else
+                {
+                    setting.SettingValue = hostTzId;
+                    setting.UpdatedAt = sqlNow;
+                }
+                await db.SaveChangesAsync();
+            }
+
+            // 5) نشر التوقيت المركزي للساعات الموحدة (ProgramClock/AppClock) —
+            //    المرساة نُشرت مع القراءة في الخطوة 3. فشل أي خطوة سابقة ينشر
+            //    شيئًا فتبقى الساعات على الفشل المغلق (بلا احتياطي +3 ولا ساعة جهاز).
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(_storeTimeZone);
 
             _initialized = true;
         }
@@ -174,19 +184,25 @@ namespace Sayl.Core.Services
         // ══ الساعة ══
 
         /// <summary>الوقت الحالي UTC من خادم SQL (SYSUTCDATETIME) — المصدر الموحّد.
-        /// يُقرأ Unspecified فيُطبَّع إلى Kind=Utc صراحةً. كل قراءة ناجحة تُحدِّث
-        /// انحراف ساعة العميل المنشور (ClientClockSkew) كي يلاحق الزحل الذاتي
-        /// لساعة العميل على العمليات طويلة العمر.</summary>
+        /// يفتح نطاقًا خاصًا به (بنية الكود المحيطة) ثم يفوّض للنسخة الواعية
+        /// بالسياق. يُقرأ Unspecified فيُطبَّع إلى Kind=Utc صراحةً.</summary>
         public async Task<DateTime> GetUtcNowAsync()
         {
-            DateTime now;
             if (_dbContextForTests != null)
-                now = await ReadSqlUtcNowAsync(_dbContextForTests);
-            else
-                await using (var scope = _scopeFactory.CreateAsyncScope())
-                    now = await ReadSqlUtcNowAsync(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
-            // تحديث فرصة الانحراف: فرق القراءتين — كتابة TimeSpan بسيطة بلا أقفال (بنية الكود المحيطة)
-            ClientClockSkew = now - DateTime.UtcNow;
+                return await GetUtcNowAsync(_dbContextForTests);
+            await using (var scope = _scopeFactory.CreateAsyncScope())
+                return await GetUtcNowAsync(scope.ServiceProvider.GetRequiredService<SaylDbContext>());
+        }
+
+        /// <summary>الوقت الحالي UTC من خادم SQL على السياق المعطى نفسه —
+        /// يمر عبر اتصال/معاملة المستدعي النشطة (لا نطاق جديد ولا سياق جديد).
+        /// كل قراءة ناجحة تنشر «مرساة ساعة SQL» في ProgramClock (لحظة الخادم +
+        /// لقطة Stopwatch) كي تتقدم الساعة الرتيبة الموحدة من الخادم الموثق.</summary>
+        public async Task<DateTime> GetUtcNowAsync(SaylDbContext db)
+        {
+            DateTime now = await ReadSqlUtcNowAsync(db);
+            // نشر المرساة مع كل قراءة ناجحة — الإقلاع والقراءات اللاحقة على حد سواء
+            Common.Utils.ProgramClock.PublishSqlAnchor(now);
             return now;
         }
 
@@ -215,8 +231,17 @@ namespace Sayl.Core.Services
         /// <summary>«اليوم» بمعنى المحل من طابع UTC معطى (للاختبارات والحدود الثابتة).</summary>
         public DateOnly GetStoreToday(DateTime utc) => DateOnly.FromDateTime(ToStoreLocal(utc));
 
-        /// <summary>«اليوم» بمعنى المحل من ساعة SQL الحالية.</summary>
+        /// <summary>«اليوم» بمعنى المحل من ساعة SQL الحالية (نطاق خاص).</summary>
         public async Task<DateOnly> GetStoreTodayAsync() => GetStoreToday(await GetUtcNowAsync());
+
+        /// <summary>«اليوم» بمعنى المحل من ساعة SQL الحالية على السياق المعطى —
+        /// اللحظة تُقرأ من اتصال/معاملة المستدعي النشطة، ثم تُحوَّل بالتوقيت
+        /// المركزي المهيَّأ (بلا إقلاع = فشل مغلق عبر RequireTimeZone()).</summary>
+        public async Task<DateOnly> GetStoreTodayAsync(SaylDbContext db)
+        {
+            RequireTimeZone(); // حرس الفشل المغلق قبل نداء SQL غير اللازم
+            return GetStoreToday(await GetUtcNowAsync(db));
+        }
 
         /// <summary>حدود اليوم بمعنى المتجر لليوم المعطى بمعنى UTC: منتصفا ليل اليوم
         /// والتالي محوَّلين عائدًا إلى UTC — شامل البداية وحصري النهاية. طول اليوم

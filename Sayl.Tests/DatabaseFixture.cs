@@ -44,6 +44,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
     {
         try
         {
+            // ساعة الاختبار المركزية: توقيت ثابت +3 ومرساة UTC جديدة — مرة
+            // واحدة لكل رَن (حالة معيارية لكل اختبارات المساعدين والفشل المغلق)
+            TestClockConfig.Configure();
             // تنظيف اليتامى (أسماء قديمة تخص رَن سابق) ثم البناء من الصفر
             DropOrphanedTestDatabases();
             DropDatabase(DbName);

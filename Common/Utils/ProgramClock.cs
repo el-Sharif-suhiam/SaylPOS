@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Common.Utils
 {
     /// <summary>
@@ -5,15 +7,11 @@ namespace Common.Utils
     ///
     /// 📖 السياسة الموحدة:
     ///  • التخزين: كل الطوابع الزمنية المعاملية في قاعدة البيانات UTC
-    ///    (DateTime.UtcNow في EF، GETUTCDATE()/SYSUTCDATETIME() في SQL الخام).
+    ///    (ساعة SQL الموثقة في EF، GETUTCDATE()/SYSUTCDATETIME() في SQL الخام).
     ///  • «اليوم» المفهوم للمحل (تقارير Z، حدود FEFO، الاستردادات، الفترات
     ///    المالية) = تاريخ ساعة البرنامج — مشتق من UTC بتوقيت المتجر المركزي
     ///    (إعداد StoreTimeZoneId الذي ينشره جهاز المضيف عند الإقلاع عبر
-    ///    clsStoreClockService ← ProgramClock.ConfigureStoreClock).
-    ///  • الإزاحة الثابتة (+3 السعودية) هي احتياطي إرثي فقط: يعمل قبل ضبط
-    ///    التوقيت المركزي (فترة الانتقال بين النشرات أو عند فشل إقلاع
-    ///    ساعة المتجر — برسالة تحذير وإكمال إقلاع) — ولا يُستخدم أبدًا
-    ///    التوقيت المحلي لويندوز على جهاز البيع.
+    ///    clsStoreClockService ← ProgramClock).
     ///
     /// طبقة الوصول للبيانات (Sayl.Core) لا ترى AppClock (Sayl.UI داخلي)،
     /// فهذا هو المصدر الموحّد لليوم البرمجي في الخدمات — ويشترك AppClock
@@ -27,75 +25,145 @@ namespace Common.Utils
     ///    بأي إزاحة مكتوبة بشريًا، فلا يتفرق رقمان بين أي طرفين أبدًا.
     /// بلا اعتماديات EF/قاعدة بيانات — طبقة مشتركة نقية (Common).
     ///
-    /// 📖 مصدر الوقت الموثق = ساعة SQL Server (قرار المالك — Task 6):
-    ///  • UtcNow = DateTime.UtcNow + انحراف ساعة العميل عن ساعة SQL
-    ///    (ClientClockSkew) — يُلتقط عند إقلاع ساعة المتجر من SYSUTCDATETIME
-    ///    ويُحدَّث مع كل قراءة GetUtcNowAsync ناجحة، فتُكتب الطوابع الزمنية
-    ///    المعاملية من ساعة الخادم الموثقة لا من ساعة كل طرفية منحرفة.
-    ///  • قبل الإقلاع (انحراف صفري) UtcNow ≡ DateTime.UtcNow — الاحتياطي الإرثي.
-    ///  • الانحراف بين التحديثات على عملية طويلة العمر انحراف ساعة العميل
-    ///    الذاتي فقط (زحل بطيء) — مقايضة موثقة مقبولة.
+    /// 📖 مصدر الوقت الموثق = ساعة SQL Server + مرساة رتيبة (قرار المالك — Task 1):
+    ///  • clsStoreClockService يقرأ SYSUTCDATETIME عند الإقلاع ومع كل قراءة
+    ///    ناجحة فينشر «مرساة SQL»: لحظة UTC من الخادم + لقطة Stopwatch لحظة
+    ///    النشر معًا (تحت قفل — لا يمزج القارئ مرساة قديمة بلقطة جديدة).
+    ///  • UtcNow = المرساة + الزمن الرتيب المنقضي (Stopwatch) — لا ساعة حائط
+    ///    للعميل إطلاقًا: انحراف الأجهزة وتراجع الساعة مستحيلان بين القراءات.
+    ///  • قبل النشر (بلا إقلاع ناجح) كل العمليات ترمي استثناء الفشل المغلق
+    ///    (ClockNotInitializedException) — لا احتياطي +3 ولا ساعة جهاز أبدًا.
+    ///  • هذه المرساة للعرض والتقدم الرتيب بين القراءات؛ الطوابع المعاملية
+    ///    المحفوظة (Task 5) تلتقط ساعة SQL مباشرة عبر
+    ///    clsStoreClockService.GetUtcNowAsync(db) — لا خدمة تحفظ من ساكن.
     /// </summary>
     public static class ProgramClock
     {
-        /// <summary>إزاحة توقيت البرنامج عن UTC (ساعات). +3 = توقيت السعودية.
-        /// قيمة الاحتياطي الإرثي فقط — تُستخدم حين لا يُضبط التوقيت المركزي.
-        /// التوقيت الفعّال بعد الإقلاع يأتي من التوقيت المنشور (StoreTimeZone).</summary>
-        public const int UtcOffsetHours = 3;
-
-        /// <summary>التوقيت المركزي المنشور لساعة المتجر — null = الاحتياطي الإرثي
-        /// (UTC + الإزاحة الثابتة). يُضبط عند نجاح إقلاع clsStoreClockService.</summary>
-        private static TimeZoneInfo? _storeTimeZone;
-
-        /// <summary>انحراف ساعة العميل عن ساعة SQL Server المنشور (S ← O):
-        /// ClientClockSkew = ساعة SQL − ساعة العميل، يُلتقط عند إقلاع ساعة
-        /// المتجر ويُحدَّث مع كل قراءة GetUtcNowAsync ناجحة. صفر قبل الضبط —
-        /// حينها UtcNow ≡ DateTime.UtcNow (الاحتياطي الإرثي).</summary>
-        private static TimeSpan _clientClockSkew;
-
-        /// <summary>ضبط (أو تصفير) التوقيت المركزي لساعة المتجر وانحراف ساعة
-        /// العميل عن ساعة SQL معًا. يُنادى من clsStoreClockService عند نجاح
-        /// الإقلاع؛ null = رجوع للاحتياطي الإرثي زمنيًا (الانحراف يبقى كما
-        /// مُرِّر — الغلاف الإرثي يمرر صفرًا فلا يتسرب انحراف بين الاختبارات).</summary>
-        public static void ConfigureStoreClock(TimeZoneInfo? timeZone, TimeSpan clientClockSkew)
+        /// <summary>استثناء الفشل المغلق: عملية ساعة قبل نشر التوقيت المركزي
+        /// والمرساة (بلا إقلاع ناجح لساعة المتجر) — رسالة عربية إرشادية.
+        /// بديل الاحتياطي الإرثي الملغى (+3): لا وقت افتراضي بعد اليوم.</summary>
+        public class ClockNotInitializedException : Exception
         {
-            _storeTimeZone = timeZone;
-            _clientClockSkew = clientClockSkew;
+            public ClockNotInitializedException(string message)
+                : base(message) { }
         }
 
-        /// <summary>الغلاف الإرثي — تكافئ ConfigureStoreClock(timeZone, TimeSpan.Zero).
-        /// أبقيته لأي مستدعٍ خارجي؛ المسار الجديد يمرر الانحراف صراحةً.</summary>
+        /// <summary>التوقيت المركزي المنشور لساعة المتجر — null قبل الإقلاع
+        /// الناجح (كل عمليات التحويل ترمي ClockNotInitializedException حينها).</summary>
+        private static TimeZoneInfo? _storeTimeZone;
+
+        // ══ مرساة ساعة SQL + الزمن الرتيب (النشر تحت قفل واحد) ══
+        /// <summary>قفل النشر/القراءة — يضمن ذرّية الزوج (لحظة SQL + لقطة
+        /// Stopwatch) كي لا يمزج قارئ مرساة قديمة بلقطة Stopwatch جديدة.</summary>
+        private static readonly object _anchorGate = new();
+
+        /// <summary>آخر لحظة UTC مقروءة من ساعة SQL Server (SYSUTCDATETIME).</summary>
+        private static DateTime _sqlAnchorUtc;
+
+        /// <summary>لقطة Stopwatch.GetTimestamp() لحظة نشر المرساة — الإزاحة
+        /// الرتيبة منها هي «المنقضي منذ آخر قراءة SQL» لا ساعة الحائط.</summary>
+        private static long _anchorStopwatchTicks;
+
+        /// <summary>هل نُشرت المرساة والتوقيت (نجاح إقلاع) — القراءة تحت القفل.</summary>
+        private static bool _anchorPublished;
+
+        /// <summary>ضبط التوقيت المركزي لساعة المتجر. يُنادى من
+        /// clsStoreClockService بعد نجاح الإقلاع (التوقيت + المرساة معًا) —
+        /// وnull يصفّر الحالة كليًا (نشر شيئًا = فشل مغلق، كما في الاختبارات).</summary>
         public static void ConfigureStoreTimeZone(TimeZoneInfo? timeZone)
-            => ConfigureStoreClock(timeZone, TimeSpan.Zero);
+        {
+            if (timeZone == null)
+            {
+                // تصفير كامل: بلا توقيت فلا مرساة — الفشل المغلق هو الحالة الوحيدة
+                lock (_anchorGate)
+                {
+                    _storeTimeZone = null;
+                    _anchorPublished = false;
+                    _sqlAnchorUtc = default;
+                    _anchorStopwatchTicks = 0;
+                }
+                return;
+            }
+            // نشر توقيت فقط (بلا مرساة جديدة) — المستخدم في الاختبارات المحلية
+            lock (_anchorGate) { _storeTimeZone = timeZone; }
+        }
+
+        /// <summary>نشر مرساة ساعة SQL: آخر لحظة UTC من الخادم + لقطة Stopwatch
+        /// لحظة النشر — ذرّيًا تحت القفل. يُنادى من clsStoreClockService عند
+        /// الإقلاع ومع كل قراءة GetUtcNowAsync ناجحة (لاحق الزحل الذاتي).</summary>
+        public static void PublishSqlAnchor(DateTime sqlUtc)
+        {
+            lock (_anchorGate)
+            {
+                if (sqlUtc.Kind != DateTimeKind.Utc)
+                    sqlUtc = new DateTime(sqlUtc.Ticks, DateTimeKind.Utc);
+                _sqlAnchorUtc = sqlUtc;
+                _anchorStopwatchTicks = Stopwatch.GetTimestamp();
+                _anchorPublished = true;
+            }
+        }
+
+        /// <summary>بذرة الاختبارات (داخلي): توقيت + مرساة اصطناعية بلقطة
+        /// Stopwatch معطاة — يسمح بمحاكاة «مرساة في الماضي» لاختبار التقدم
+        /// الرتيب بشكل محدد لا معتمد على ساعة الحائط.</summary>
+        internal static void ConfigureForTests(TimeZoneInfo timeZone, DateTime sqlAnchorUtc, long stopwatchTicks)
+        {
+            lock (_anchorGate)
+            {
+                _storeTimeZone = timeZone;
+                _sqlAnchorUtc = new DateTime(sqlAnchorUtc.Ticks, DateTimeKind.Utc);
+                _anchorStopwatchTicks = stopwatchTicks;
+                _anchorPublished = true;
+            }
+        }
 
         /// <summary>التوقيت المركزي المنشور حاليًا (للتشخيص والاختبارات) —
-        /// null يعني الاحتياطي الإرثي (لم يُضبط التوقيت المركزي بعد).</summary>
+        /// null يعني بلا إقلاع ناجح بعد (الفشل المغلق).</summary>
         public static TimeZoneInfo? StoreTimeZone => _storeTimeZone;
 
+        /// <summary>الوقت الحالي الموثق: مرساة ساعة SQL + الزمن الرتيب المنقضي
+        /// منذ نشرها (Stopwatch — لا ساعة الحائط أبدًا، فتراجع ساعة الجهاز
+        /// أو قفزاته لا تلمس هذه الساعة). قبل النشر: فشل مغلق (استثناء).</summary>
+        public static DateTime UtcNow
+        {
+            get
+            {
+                lock (_anchorGate)
+                {
+                    if (!_anchorPublished)
+                        throw new ClockNotInitializedException(
+                            "لم تُهيَّأ ساعة البرنامج بعد — يجب نجاح إقلاع ساعة المتجر (InitializeAsync) قبل أي قراءة للوقت.");
+                    long elapsedTicks = Stopwatch.GetTimestamp() - _anchorStopwatchTicks;
+                    return _sqlAnchorUtc.AddTicks(StopwatchTicksToTimeSpan(elapsedTicks).Ticks);
+                }
+            }
+        }
+
+        /// <summary>تحويل تردد Stopwatch إلى TimeSpan (مقسوم على التردد — دقيق).</summary>
+        private static TimeSpan StopwatchTicksToTimeSpan(long elapsedStopwatchTicks)
+        {
+            // Stopwatch.Frequency تردد ثابت للعملية؛ الضرب أولًا يقلل خطأ القسمة
+            return TimeSpan.FromTicks(elapsedStopwatchTicks * TimeSpan.TicksPerSecond / Stopwatch.Frequency);
+        }
+
         /// <summary>تحويل طابع UTC مخزّن إلى توقيت البرنامج: بالتوقيت المركزي
-        /// المنشور إن ضُبط، وإلا بالإزاحة الثابتة (+3 الاحتياطي الإرثي).
+        /// المنشور — وبلا توقيت منشور: فشل مغلق (استثناء). الاستثناء الوحيد:
         /// Kind==Local تُعاد كما هي (بيانات قديمة قبل الترحيل — عُرضت محلية
-        /// دائمًا فلا تُزاح مرتين)، وUnspecified/Utc تُعامل UTC (نفس عهد التخزين).</summary>
+        /// دائمًا فلا تُزاح مرتين) — قاعدة توافق تاريخية لا إذن توقيت ثابت.
+        /// Unspecified/Utc تُعامل UTC (نفس عهد التخزين).</summary>
         public static DateTime ToLocal(DateTime utc)
         {
             if (utc.Kind == DateTimeKind.Local)
                 return utc; // بيانات قديمة قبل الترحيل — عُرضت محلية دائمًا فلا تُزاح مرتين
-            if (_storeTimeZone != null)
-                return TimeZoneInfo.ConvertTimeFromUtc(
-                    new DateTime(utc.Ticks, DateTimeKind.Utc), _storeTimeZone); // Unspecified -> Utc
-            return utc.AddHours(UtcOffsetHours);
+            TimeZoneInfo? tz = _storeTimeZone
+                ?? throw new ClockNotInitializedException(
+                    "لم يُضبط توقيت المتجر المركزي بعد — لا يمكن تحويل الوقت دون إقلاع ساعة المتجر ناجحًا.");
+            return TimeZoneInfo.ConvertTimeFromUtc(
+                new DateTime(utc.Ticks, DateTimeKind.Utc), tz); // Unspecified -> Utc
         }
 
-        /// <summary>الوقت الحالي الموثق من ساعة SQL Server (بصفر تكلفة نداء):
-        /// ساعة العميل UTC + انحراف ساعة SQL المنشور (ClientClockSkew) —
-        /// Kind=Utc. الانحراف يُلتقط عند إقلاع ساعة المتجر (SYSUTCDATETIME)
-        /// ويُحدَّث مع كل قراءة GetUtcNowAsync ناجحة؛ بين التحديثات على عملية
-        /// طويلة العمر يبقى انحراف ساعة العميل الذاتي الزحل البطيء — مقايضة
-        /// موثقة. قبل الضبط انحراف صفري فتساوي DateTime.UtcNow تمامًا.</summary>
-        public static DateTime UtcNow => DateTime.UtcNow + _clientClockSkew;
-
-        /// <summary>الوقت الحالي بتوقيت البرنامج (الساعة الموثقة من SQL +
-        /// التوقيت المركزي، أو + الإزاحة الإرثية قبل الضبط).</summary>
+        /// <summary>الوقت الحالي بتوقيت البرنامج (مرساة SQL الرتيبة + التوقيت
+        /// المركزي) — قبل الإقلاع يرمي فشلًا مغلقًا عبر UtcNow/ToLocal.</summary>
         public static DateTime NowLocal => ToLocal(UtcNow);
 
         /// <summary>«اليوم» بمعنى المحل: تاريخ ساعة البرنامج — حدود اليوم
@@ -144,18 +212,12 @@ namespace Common.Utils
         /// اليوم والتالي محوَّلان عائدًا إلى UTC — شامل البداية وحصري النهاية
         /// (قارِن بـ ≥ البداية و < النهاية). طول اليوم (23/24/25 ساعة) تُحسبه
         /// قواعد ويندوز الديناميكية تلقائيًا مع التوقيت المركزي المنشور.
-        /// الاحتياطي الإرثي (بلا توقيت مركزي): إزاحة ثابتة حسابية صرفة (+3) —
-        /// الإزاحة الثابتة لا تنتج أوقاتًا غير صالحة أو ملتبسة أبدًا فلا حاجة
-        /// لقواعد المنطقة.</summary>
+        /// قبل الإقلاع الناجح: فشل مغلق (استثناء) — لا إزاحة ثابتة بديلة أبدًا.</summary>
         public static (DateTime StartUtc, DateTime EndUtc) LocalDayBoundsUtc(DateOnly localDate)
         {
-            TimeZoneInfo? tz = _storeTimeZone;
-            if (tz == null)
-            {
-                // الاحتياطي الإرثي: +3 ثابتة — حساب صرف
-                return (localDate.ToDateTime(TimeOnly.MinValue).AddHours(-UtcOffsetHours),
-                        localDate.AddDays(1).ToDateTime(TimeOnly.MinValue).AddHours(-UtcOffsetHours));
-            }
+            TimeZoneInfo tz = _storeTimeZone
+                ?? throw new ClockNotInitializedException(
+                    "لم يُضبط توقيت المتجر المركزي بعد — لا يمكن حساب حدود اليوم دون إقلاع ساعة المتجر ناجحًا.");
             return (ConvertLocalToUtc(localDate.ToDateTime(TimeOnly.MinValue), tz),
                     ConvertLocalToUtc(localDate.AddDays(1).ToDateTime(TimeOnly.MinValue), tz));
         }
