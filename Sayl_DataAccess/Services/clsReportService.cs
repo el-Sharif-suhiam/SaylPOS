@@ -11,10 +11,14 @@ namespace Sayl.Core.Services
     public class clsReportService
     {
         private readonly SaylDbContext _dbContext;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsReportService(SaylDbContext dbContext)
+        public clsReportService(SaylDbContext dbContext, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
+            // ساعة المتجر (Task 2): مُمرَّرة عبر DI أو نسخة على السياق نفسه في
+            // التركيب اليدوي/الاختبارات — اللحظة دائمًا من SQL Server لا ساعة الجهاز.
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         // ─────────────────────────────────────────────────
@@ -450,7 +454,10 @@ namespace Sayl.Core.Services
                             DiscountAmount = inv.DiscountAmount,
                             TaxAmount = inv.TaxAmount,
                             NetAmount = inv.NetAmount,
-                            CreatedAt = inv.Day.ToDateTime(TimeOnly.MinValue)
+                            // عهد «CreatedAt = لحظة UTC»: يوم المتجر يُعاد تجسيده
+                            // كبداية يومه بمعنى UTC (VULN-45) — عرضه عبر AppClock.ToLocal
+                            // يعود لمنتصف ليل يوم المتجر نفسه بلا إزاحة.
+                            CreatedAt = _storeClock.GetStoreDayBoundsUtc(inv.Day).StartUtc
                         };
                         invoiceDetails.Add(detail);
                     }
@@ -859,38 +866,29 @@ namespace Sayl.Core.Services
             var (start, _) = ProgramClock.LocalDayBoundsUtc(fromDate);
             var (_, endEx) = ProgramClock.LocalDayBoundsUtc(toDate);
 
-            // تجميع يومي داخل قاعدة البيانات ثم دمج الفترات (أسبوع/شهر) في الذاكرة
+            // تجميع يومي بمعنى المتجر: نُسقط الأعمدة المطلوبة فقط (الطابع + النوع +
+            // قيمتا المال) ثم نحوّل كل طابع UTC إلى يوم المتجر في الذاكرة عبر
+            // ProgramDay (نفس تحويل بقية التقارير — لا تحويل توقيت داخل SQL أبدًا)
+            // فتُجمَّع الأيام بمعنى المحل لا بمعنى UTC: فاتورة 22:00Z يوم 31 ديسمبر
+            // مع توقيت +3 تندرج تحت يوم 1 يناير المحلي. بعدها يُدمَج أسبوع/شهر في
+            // الذاكرة على مفاتيح يوم المتجر نفسها.
             var rows = await _dbContext.Invoices
                 .Where(i => i.Status == enInvoicesStatus.completed
                          && i.CreatedAt >= start && i.CreatedAt < endEx
                          && (i.Type == enInvoicesType.sale || i.Type == enInvoicesType.customer_return))
-                .GroupBy(i => new { Day = i.CreatedAt!.Value.Date, i.Type })
-                .Select(g => new
-                {
-                    g.Key.Day,
-                    g.Key.Type,
-                    Count = g.Count(),
-                    Gross = g.Sum(i => i.TotalAmount),
-                    Net = g.Sum(i => i.NetAmount)
-                })
+                .Select(i => new { i.CreatedAt, i.Type, i.TotalAmount, i.NetAmount })
                 .ToListAsync();
 
             var dailyPoints = rows
-                .GroupBy(r => r.Day.Date)
-                .Select(g =>
+                .GroupBy(r => ProgramDay(r.CreatedAt!.Value))
+                .Select(g => new SalesTrendPointVM
                 {
-                    decimal salesNet = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Net);
-                    decimal returnsNet = g.Where(x => x.Type == enInvoicesType.customer_return).Sum(x => x.Net); // قيمتها سالبة
-
-                    return new SalesTrendPointVM
-                    {
-                        PeriodStart = DateOnly.FromDateTime(g.Key),
-                        PeriodEnd = DateOnly.FromDateTime(g.Key),
-                        InvoiceCount = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Count),
-                        GrossSales = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.Gross),
-                        ReturnsAmount = returnsNet,
-                        NetSales = salesNet + returnsNet
-                    };
+                    PeriodStart = g.Key,
+                    PeriodEnd = g.Key,
+                    InvoiceCount = g.Count(x => x.Type == enInvoicesType.sale),
+                    GrossSales = g.Where(x => x.Type == enInvoicesType.sale).Sum(x => x.TotalAmount),
+                    ReturnsAmount = g.Where(x => x.Type == enInvoicesType.customer_return).Sum(x => x.NetAmount), // قيمتها سالبة
+                    NetSales = g.Sum(x => x.NetAmount)
                 })
                 .ToList();
 
@@ -937,7 +935,7 @@ namespace Sayl.Core.Services
             if (withinDays <= 0)
                 withinDays = 90;
 
-            DateOnly today = ProgramDay(DateTime.UtcNow);
+            DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext); /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */
             DateOnly until = today.AddDays(withinDays);
 
             var result = await _dbContext.Batches
@@ -1206,7 +1204,11 @@ namespace Sayl.Core.Services
                 decimal remaining = inv.NetAmount - paid + returned;
                 if (remaining <= 0) continue;
 
-                int ageDays = asOf.DayNumber - DateOnly.FromDateTime(inv.CreatedAt!.Value).DayNumber;
+                // عمر الدين: يوم الفاتورة بمعنى المتجر — الطابع المخزَّن UTC يُحوَّل
+                // إلى توقيت المتجر (ProgramDay — نفس تحويل بقية التقارير) قبل
+                // حساب العمر، لا تاريخ UTC الخام (فاتورة 22:00Z مع +3 عمرها يُحسب
+                // من يوم 1 يناير المحلي لا 31 ديسمبر).
+                int ageDays = asOf.DayNumber - ProgramDay(inv.CreatedAt!.Value).DayNumber;
                 if (!invoicesByParty.TryGetValue(inv.PartyId!.Value, out var list2))
                 {
                     list2 = new List<(decimal, int)>();
