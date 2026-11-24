@@ -44,6 +44,23 @@ public class FiscalYearCloseTests
     private static async Task ResetFiscalYearStartAsync(SaylDbContext db)
         => await SetFiscalYearStartAsync(db, new DateOnly(Today.Year, 1, 1));
 
+    /// <summary>كتابة/مسح إعداد توقيت المتجر (StoreTimeZoneId) — لاختبارات الحدود
+    /// بتوقيت مخصص: مسار الطرفي في الإقلاع يتطلب إعدادًا صالحًا.</summary>
+    private static async Task WriteStoreTzSettingAsync(SaylDbContext db, string? value)
+    {
+        var row = await db.Settings.FindAsync(clsSettingsService.KeyStoreTimeZoneId);
+        if (row == null)
+            db.Settings.Add(new Setting
+            {
+                SettingKey = clsSettingsService.KeyStoreTimeZoneId,
+                SettingValue = value,
+                UpdatedAt = DateTime.UtcNow
+            });
+        else
+            row.SettingValue = value;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Close leftover blockers in the shared integration DB so readiness can pass.</summary>
     private static async Task ClearCloseBlockersAsync(SaylDbContext db)
     {
@@ -1657,6 +1674,193 @@ UPDATE PayrollRecords SET Status = 'paid' WHERE Status = 'pending';");
         }
         finally
         {
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    // ─────────────────────────────────────────────────
+    // 14) حدود الفترة المغلقة UTC حقيقية (Task 3): منتصف ليل المتجر لا 00:00 كما هي
+    // التوقيت +5 ثابت بلا DST — حتمي تمامًا (بلا توقيت جهاز CI)
+    // ─────────────────────────────────────────────────
+
+    /// <summary>فاتورة معلقة عند اللحظة الحقيقية UTC لمنتصف ليل بداية السنة
+    /// (بمعنى المتجر) تُحسب داخل الفترة — الكود القديم كان يفسّر منتصف الليل
+    /// المحلي كـ UTC فتفلت الفاتورة الفعليًا الأولى في السنة (هنا: 19:00Z اليوم السابق).</summary>
+    [Fact]
+    public async Task CloseReadiness_InvoiceAtTrueUtcInstantOfLocalMidnightStart_Counts()
+    {
+        var tz = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/FiscalPlus5", TimeSpan.FromHours(5), "Test/FiscalPlus5", "Test/FiscalPlus5");
+        string marker = $"fy14a-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = new(2026, 6, 1);
+        DateOnly closingTo = new(2026, 6, 11);
+        try
+        {
+            await WriteStoreTzSettingAsync(db, tz.Id); // مسار الطرفي يحتاج إعدادًا صالحًا
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync(); // ينشر التوقيت — حدود اليوم تقرأه
+
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db), clock);
+
+            // حرس الفرضية: منتصف ليل بداية السنة بمعنى المتجر = 19:00Z اليوم السابق
+            DateTime startUtc = clock.GetStoreDayBoundsUtc(start).StartUtc;
+            Assert.Equal(new DateTime(2026, 5, 31, 19, 0, 0, DateTimeKind.Utc), startUtc);
+
+            await SeedSuspendedInvoiceAsync(db, seed, startUtc);
+
+            var vm = await fiscal.GetCloseReadinessAsync(closingTo);
+
+            // الكود القديم كان يقارن مع 00:00 كما هي → الفاتورة 19:00Z تفلت خطأً
+            Assert.Equal(1, vm.OldSuspendedInvoices);
+            Assert.False(vm.CanClose);
+        }
+        finally
+        {
+            TestClockConfig.Configure(); // استعادة الحالة المعيارية — لا تسرب للتوقيت
+            await WriteStoreTzSettingAsync(db, null);
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>النهاية حصرية عند اللحظة الحقيقية أيضًا: فاتورة عند منتصف ليل
+    /// closingTo بمعنى المتجر (لحظته الحقيقية UTC) تعود للفترة الجديدة — لا تُحسب.</summary>
+    [Fact]
+    public async Task CloseReadiness_InvoiceAtTrueUtcInstantOfClosingToStart_Excluded()
+    {
+        var tz = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/FiscalPlus5", TimeSpan.FromHours(5), "Test/FiscalPlus5", "Test/FiscalPlus5");
+        string marker = $"fy14b-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = new(2026, 6, 1);
+        DateOnly closingTo = new(2026, 6, 11);
+        try
+        {
+            await WriteStoreTzSettingAsync(db, tz.Id);
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync();
+
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db), clock);
+
+            // منتصف ليل closingTo بمعنى المتجر = 19:00Z اليوم السابق — حدّ حصري
+            DateTime closingStartUtc = clock.GetStoreDayBoundsUtc(closingTo).StartUtc;
+            Assert.Equal(new DateTime(2026, 6, 10, 19, 0, 0, DateTimeKind.Utc), closingStartUtc);
+
+            await SeedSuspendedInvoiceAsync(db, seed, closingStartUtc);
+
+            var vm = await fiscal.GetCloseReadinessAsync(closingTo);
+
+            Assert.Equal(0, vm.OldSuspendedInvoices);
+            Assert.DoesNotContain(vm.Errors, e => e.Contains("معلقة"));
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteStoreTzSettingAsync(db, null);
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>فاتورة فورًا قبل الحد الحقيقي UTC (آخر دقيقة قبل منتصف ليل
+    /// closingTo بمعنى المتجر) تُحسب داخل الفترة المغلقة.</summary>
+    [Fact]
+    public async Task CloseReadiness_InvoiceJustBeforeTrueUtcEndBoundary_Counts()
+    {
+        var tz = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/FiscalPlus5", TimeSpan.FromHours(5), "Test/FiscalPlus5", "Test/FiscalPlus5");
+        string marker = $"fy14c-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = new(2026, 6, 1);
+        DateOnly closingTo = new(2026, 6, 11);
+        try
+        {
+            await WriteStoreTzSettingAsync(db, tz.Id);
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync();
+
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db), clock);
+
+            DateTime closingStartUtc = clock.GetStoreDayBoundsUtc(closingTo).StartUtc;
+            await SeedSuspendedInvoiceAsync(db, seed, closingStartUtc.AddMinutes(-1));
+
+            var vm = await fiscal.GetCloseReadinessAsync(closingTo);
+
+            // 18:59Z = 23:59 محليًا ليوم closingTo السابق — آخر دقيقة في الفترة
+            Assert.Equal(1, vm.OldSuspendedInvoices);
+            Assert.False(vm.CanClose);
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteStoreTzSettingAsync(db, null);
+            await ClearCloseBlockersAsync(db);
+            await ResetFiscalYearStartAsync(db);
+        }
+    }
+
+    /// <summary>توقيت صيفي داخل الفترة المغلقة: الحدان يحترمان قواعد DST —
+    /// توقيت مخصص ثابت التواريخ (أساس -5، دلتا صيفية +1، DST من 1 يونيو إلى
+    /// 1 نوفمبر كل سنة): بداية الفترة 1 مايو قياسية 05:00Z، نهايتها 1 أكتوبر
+    /// صيفية 04:00Z — فاتورة 03:30Z (23:30 محليًا 30 سبتمبر) داخل الفترة،
+    /// وفاتورة 04:30Z (00:30 محليًا من 1 أكتوبر) بعدها. الكود القديم
+    /// (حد 00:00 كما هي) كان يُخرج الأولى ويُدخل الثانية.</summary>
+    [Fact]
+    public async Task CloseReadiness_DstInsidePeriod_BoundariesFollowDstRules()
+    {
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+            DateTime.MinValue.Date, DateTime.MaxValue.Date,
+            TimeSpan.FromHours(1), // دلتا صيفية +1
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 0, 0, 0), month: 6, day: 1),  // بدء DST: 1 يونيو 00:00
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(new DateTime(1, 1, 1, 0, 0, 0), month: 11, day: 1)); // نهاية DST: 1 نوفمبر 00:00
+        var tz = TimeZoneInfo.CreateCustomTimeZone(
+            "Test/FiscalDst", TimeSpan.FromHours(-5), "Test/FiscalDst", "Test Standard", "Test Daylight", new[] { rule });
+        string marker = $"fy14d-{Guid.NewGuid():N}"[..12];
+        await using var db = _fx.CreateContext();
+        var seed = await TestSeed.SeedAsync(db, marker);
+
+        DateOnly start = new(2026, 5, 1);
+        DateOnly closingTo = new(2026, 10, 1); // DST بدأ داخل الفترة (1 يونيو)
+        try
+        {
+            await WriteStoreTzSettingAsync(db, tz.Id);
+            var clock = new clsStoreClockService(db, tz, forceHost: false);
+            await clock.InitializeAsync();
+
+            await SetFiscalYearStartAsync(db, start);
+            var fiscal = new clsFiscalYearService(db, new clsSettingsService(db), clock);
+
+            // حرس الفرضية: البداية قياسية 05:00Z والنهاية صيفية 04:00Z (طول اليوم
+            // عند النهاية يراعي الإزاحة الصيفية القائمة لحظتها)
+            DateTime startUtc = clock.GetStoreDayBoundsUtc(start).StartUtc;
+            DateTime endUtc = clock.GetStoreDayBoundsUtc(closingTo).StartUtc;
+            Assert.Equal(new DateTime(2026, 5, 1, 5, 0, 0, DateTimeKind.Utc), startUtc);
+            Assert.Equal(new DateTime(2026, 10, 1, 4, 0, 0, DateTimeKind.Utc), endUtc);
+
+            // داخل النهاية بـ30 دقيقة (23:30 محليًا 30 سبتمبر صيفيًا) — تُحسب
+            await SeedSuspendedInvoiceAsync(db, seed, endUtc.AddMinutes(-30));
+            // بعد النهاية بـ30 دقيقة (00:30 محليًا 1 أكتوبر صيفيًا) — لا تُحسب
+            await SeedSuspendedInvoiceAsync(db, seed, endUtc.AddMinutes(30));
+
+            var vm = await fiscal.GetCloseReadinessAsync(closingTo);
+
+            Assert.Equal(1, vm.OldSuspendedInvoices);
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteStoreTzSettingAsync(db, null);
             await ClearCloseBlockersAsync(db);
             await ResetFiscalYearStartAsync(db);
         }

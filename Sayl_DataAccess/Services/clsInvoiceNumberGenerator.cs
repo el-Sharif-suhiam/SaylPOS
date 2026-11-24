@@ -1,7 +1,6 @@
 using System.Data;
 using System.Globalization;
 using System.Text;
-using Common.Utils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -20,7 +19,9 @@ namespace Sayl.Core.Services
     ///    التسلسل المشترك نفسها (تسلسل واحد لكل سنة برمجية).
     ///  • تصفير سنوي = صف عدّاد مستقل لكل سنة (dbo.InvoiceNumberCounters —
     ///    المفتاح NumberYear) لا منطق إعادة تعيين: كل سنة تبدأ من 000001.
-    ///  • السنة مصدرها وحيد ProgramClock.Today.Year (UTC+3) — لا DateTime مباشر.
+    ///  • السنة مصدرها وحيد يوم المتجر من لقطة SQL الملتقطة للعملية (CreatedAt
+    ///    نفسها) عبر ساعة المتجر — وسيط إلزامي بلا احتياطي ساكن (لا DateTime
+    ///    مباشر ولا ProgramClock.Today من داخل المولّد).
     ///  • القفل تطبيقي مسمّى sp_getapplock بمالك المعاملة (Transaction) ومفتاحه
     ///    «InvoiceNumber:YYYY» — عمر القفل عمر معاملة المستدعي نفسها: الـcommit
     ///    يُفرجه، والـrollback يُفرجه كذلك بلا أي تنظيف يدوي.
@@ -49,10 +50,13 @@ namespace Sayl.Core.Services
         /// لا يقرأ جدول Invoices أبدًا — العدّاد + الفهرس الفريد يكفيان.
         /// </summary>
         /// <param name="db">سياق المستدعي — يجب أن يكون داخل معاملة نشطة.</param>
-        /// <param name="programYear">سنة العدّاد — الافتراضي ProgramClock.Today.Year
-        /// (UTC+3). وسيلة حقن للاختبارات فقط؛ مستدعو الإنتاج لا يمررونها أبدًا.</param>
+        /// <param name="programYear">سنة العدّاد — إلزامية بلا احتياطي: مصدرها
+        /// اليوم بمعنى المتجر (من لقطة SQL الملتقطة للعملية — CreatedAt نفسها)
+        /// عبر _storeClock.GetStoreToday(nowUtc).Year، لا ساعة العميل ولا
+        /// افتراض ساكن قديم. عند قرب رأس السنة بمنطقة المتجر يطابق رقم السنة
+        /// سنة CreatedAt دائمًا.</param>
         public static async Task<Common.Results.Result<string>> NextAsync(
-            SaylDbContext db, int? programYear = null)
+            SaylDbContext db, int programYear)
         {
             // شرط المعاملة يُفحص من Database.CurrentTransaction (لا اتصال raw)
             // — الرفض قبل أي SQL أو قفل.
@@ -62,7 +66,7 @@ namespace Sayl.Core.Services
                     "يجب أن يُنادى المولّد داخل معاملة قاعدة بيانات نشطة");
             }
 
-            int year = programYear ?? ProgramClock.Today.Year;
+            int year = programYear; /* السنة إلزامية من المستدعي — لا احتياطي ساكن قديم */
 
             // الدفعة الواحدة: قفل (مالك المعاملة) → تحديث العدّاد → إدراج إن
             // غاب الصف → قراءة القيمة الجديدة. RETURN بعد فشل القفل كي لا يُمس

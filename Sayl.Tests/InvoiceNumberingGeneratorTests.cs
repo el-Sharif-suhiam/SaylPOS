@@ -311,4 +311,56 @@ public class InvoiceNumberingGeneratorTests
         }
         finally { await CleanupCountersAsync(db, year); }
     }
+
+    // ══ 9) سنة العدّاد من يوم المتجر لا من طابع UTC/ساعة الطرفية (Task 3):
+    // التوقيت المنشور للرَن +3 ثابت — فاتورة 22:00 UTC من 31 ديسمبر هي محليًا
+    // 01:00 من 1 يناير: الاشتقاق كما في مواقع الإنتاج (_storeClock.GetStoreToday(
+    // nowUtc).Year) يعطي السنة الجديدة، وسلسلة السنة الجديدة تبدأ من 000001.
+    // الكود القديم (احتياطي ProgramClock.Today.Year الساكن) كان يعطي سنة UTC. ══
+    [Fact]
+    public async Task YearDerivedFromStoreDate_AtPlus3_NewYearSequenceWins()
+    {
+        int utcYear = SynthYear(9); // سنة 31 ديسمبر بالطابع UTC
+        DateTime nowUtc = new(utcYear, 12, 31, 22, 0, 0, DateTimeKind.Utc);
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var clock = new clsStoreClockService(db); // يلتقط التوقيت المنشور (+3)
+
+            // نفس الاشتقاق المستخدم في مواقع الإنتاج الثلاثة
+            DateOnly storeToday = clock.GetStoreToday(nowUtc);
+            Assert.Equal(new DateOnly(utcYear + 1, 1, 1), storeToday); // محليًا 1 يناير
+            Assert.Equal(utcYear + 1, storeToday.Year);
+            Assert.NotEqual(nowUtc.Year, storeToday.Year); // ليست سنة UTC
+
+            var r = await AllocateAsync(db, storeToday.Year, commit: true);
+            Assert.True(r.IsSuccess, r.Message);
+            Assert.Equal($"INV-{utcYear + 1}-{Seq(1)}", r.Data); // سلسلة السنة الجديدة
+        }
+        finally { await CleanupCountersAsync(db, utcYear + 1); }
+    }
+
+    // ══ 10) حدّ رأس السنة: التسلسل يبدأ جديدًا من 000001 للسنة الجديدة —
+    // صف عدّاد مستقل لكل سنة (تصفير سنوي لا منطق إعادة تعيين) ══
+    [Fact]
+    public async Task NewYearBoundary_SequenceStartsFreshAt000001()
+    {
+        int oldYear = SynthYear(10);
+        int newYear = SynthYear(11); // = oldYear + 1 — متتاليتان كما في رأس السنة
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var lastOfOldYear = await AllocateAsync(db, oldYear, commit: true);
+            Assert.True(lastOfOldYear.IsSuccess, lastOfOldYear.Message);
+            Assert.Equal($"INV-{oldYear}-{Seq(1)}", lastOfOldYear.Data);
+
+            var firstOfNewYear = await AllocateAsync(db, newYear, commit: true);
+            Assert.True(firstOfNewYear.IsSuccess, firstOfNewYear.Message);
+            // السنة الجديدة تفتح عدّادها الخاص من 000001 — لا تكملة للقديمة
+            Assert.Equal($"INV-{newYear}-{Seq(1)}", firstOfNewYear.Data);
+            Assert.Equal(1, await CounterAsync(db, newYear));
+            Assert.Equal(1, await CounterAsync(db, oldYear));
+        }
+        finally { await CleanupCountersAsync(db, oldYear, newYear); }
+    }
 }

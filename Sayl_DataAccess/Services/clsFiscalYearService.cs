@@ -20,11 +20,13 @@ namespace Sayl.Core.Services
 
         private readonly SaylDbContext _dbContext;
         private readonly clsSettingsService _settings;
+        private readonly clsStoreClockService _storeClock;
 
-        public clsFiscalYearService(SaylDbContext dbContext, clsSettingsService settings)
+        public clsFiscalYearService(SaylDbContext dbContext, clsSettingsService settings, clsStoreClockService? storeClock = null)
         {
             _dbContext = dbContext;
             _settings = settings;
+            _storeClock = storeClock ?? new clsStoreClockService(dbContext);
         }
 
         /// <summary>بداية السنة المالية الحالية (تُستخدم كحد أدنى افتراضي للتقارير الجارية والقفل).</summary>
@@ -35,7 +37,7 @@ namespace Sayl.Core.Services
                 return d;
 
             // الافتراضي: بداية السنة الميلادية الجارية عند أول تشغيل
-            var today = ProgramClock.Today; /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */
+            var today = await _storeClock.GetStoreTodayAsync(_dbContext); /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */
             return new DateOnly(today.Year, 1, 1);
         }
 
@@ -62,8 +64,12 @@ namespace Sayl.Core.Services
                 FiscalYearStart = await GetFiscalYearStartAsync()
             };
 
-            DateOnly periodEnd = closingTo ?? ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */;
-            DateTime periodEndUtc = periodEnd.ToDateTime(TimeOnly.MinValue);
+            DateOnly periodEnd = closingTo ?? await _storeClock.GetStoreTodayAsync(_dbContext) /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */;
+            // منتصف ليل closingTo بمعنى المتجر محوَّلًا إلى لحظته الحقيقية UTC
+            // (حد يوم المتجر عبر ساعة المتجر — بلا فخ «منتصف الليل المحلي كـ UTC»).
+            // StartUtc لا EndUtc: النهاية حصرية [FiscalYearStart, closingTo) —
+            // فاتورة عند منتصف ليل closingTo نفسه تعود للفترة الجديدة.
+            DateTime periodEndUtc = _storeClock.GetStoreDayBoundsUtc(periodEnd).StartUtc;
 
             // 1) جلسات POS مفتوحة — خطأ مانع
             vm.OpenSessions = await _dbContext.PosSessions.CountAsync(s => s.Status == enPosSessionStatusType.open);
@@ -76,7 +82,10 @@ namespace Sayl.Core.Services
             //    الحدان معًا: فاتورة معلقة من سنة أقدم مغلقة سلفًا (قبل FiscalYearStart)
             //    لا تعود لهذه الفترة — لا يصح أن تسدّ إغلاق سنة لا تعنيها.
             var fys = vm.FiscalYearStart;
-            DateTime fysUtc = fys.ToDateTime(TimeOnly.MinValue);
+            // منتصف ليل بداية السنة بمعنى المتجر محوَّلًا إلى لحظته الحقيقية UTC
+            // (حد يوم المتجر — لا تفسير منتصف الليل المحلي كـ UTC): فاتورة أُنشئت
+            // عند اللحظة الحقيقية لبداية السنة تُحسب داخلها لا تُفلت.
+            DateTime fysUtc = _storeClock.GetStoreDayBoundsUtc(fys).StartUtc;
             vm.OldSuspendedInvoices = await _dbContext.Invoices
                 .CountAsync(i => i.Status == enInvoicesStatus.suspended
                               && i.CreatedAt >= fysUtc
@@ -184,13 +193,19 @@ namespace Sayl.Core.Services
         /// </summary>
         public async Task<Result> CloseYearAsync(int userId, DateOnly newYearStart)
         {
+            // لقطة SQL واحدة لكل عملية الإغلاق (Task 2) — من ساعة SQL Server:
+            // الحروب والتدقيق وطوابع Settings كلها تشترك في هذه اللحظة
+            DateTime nowUtc = await _storeClock.GetUtcNowAsync(_dbContext);
+            DateOnly today = _storeClock.GetStoreToday(nowUtc);
+
             // 0) بوابة الصلاحية: شاشة المخزون (الجرد ركن الإغلاق السنوي) —
             //    مطابقة لبوابة الزر في SettingsControl؛ المستخدم بلا دور نشط (-1) يُرفض.
             int actorRole = await clsPermissions.GetUserRoleValueAsync(_dbContext, userId);
             if (!AppPermissions.Has(actorRole, AppPermissions.Inventory))
             {
                 await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseDenied",
-                    "إغلاق السنة المالية مرفوض: يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).");
+                    "إغلاق السنة المالية مرفوض: يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).",
+                    nowUtc);
                 return Result.Fail("إغلاق السنة المالية يتطلب صلاحية شاشة المخزون (الجرد ركن الإغلاق السنوي).");
             }
 
@@ -198,14 +213,16 @@ namespace Sayl.Core.Services
             if (newYearStart <= current)
             {
                 await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
-                    $"إغلاق مرفوض: تاريخ السنة الجديدة {newYearStart:yyyy-MM-dd} ليس بعد بداية السنة الحالية ({current:yyyy-MM-dd}).");
+                    $"إغلاق مرفوض: تاريخ السنة الجديدة {newYearStart:yyyy-MM-dd} ليس بعد بداية السنة الحالية ({current:yyyy-MM-dd}).",
+                    nowUtc);
                 return Result.Fail($"تاريخ السنة الجديدة يجب أن يكون بعد {current:yyyy-MM-dd} (بداية السنة الحالية).");
             }
 
-            if (newYearStart > ProgramClock.Today /* VULN-45: اليوم بتوقيت البرنامج UTC+3 */)
+            if (newYearStart > today /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */)
             {
                 await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
-                    $"إغلاق مرفوض: تاريخ سنة مالية في المستقبل ({newYearStart:yyyy-MM-dd}).");
+                    $"إغلاق مرفوض: تاريخ سنة مالية في المستقبل ({newYearStart:yyyy-MM-dd}).",
+                    nowUtc);
                 return Result.Fail("لا يمكن بدء سنة مالية في المستقبل.");
             }
 
@@ -223,7 +240,8 @@ namespace Sayl.Core.Services
                 {
                     // تدقيق الرفض داخل المعاملة — كتابة مستقلة تنجو من التراجع
                     await clsAudit.LogRejectedAsync(_dbContext, userId, "FiscalYearCloseRejected",
-                        $"إغلاق مرفوض: فحوصات الجاهزية لم تكتمل ({string.Join("؛ ", readiness.Errors)}).");
+                        $"إغلاق مرفوض: فحوصات الجاهزية لم تكتمل ({string.Join("؛ ", readiness.Errors)}).",
+                        nowUtc);
                     return Result.Fail("فحوصات الجاهزية لم تكتمل:\n- " + string.Join("\n- ", readiness.Errors));
                 }
 
@@ -232,10 +250,10 @@ namespace Sayl.Core.Services
                 //    صفوف متأثرة فيفشل بأمان (لا إغلاق مزدوج).
                 string currentStr = current.ToString("yyyy-MM-dd");
                 string newStr = newYearStart.ToString("yyyy-MM-dd");
-                // GETUTCDATE لا GETDATE: Settings.UpdatedAt منطقة زمنية واحدة (UTC) —
-                // clsSettingsService يكتبها DateTime.UtcNow (VULN-45).
+                // UpdatedAt من لقطة SQL الملتقطة للعملية (Task 2) — نفس اللحظة لكل
+                // كتابات الإغلاق، من ساعة SQL Server لا من ساعة العميل.
                 int swapped = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Settings SET SettingValue = {newStr}, UpdatedAt = GETUTCDATE() WHERE SettingKey = {KeyFiscalYearStart} AND SettingValue = {currentStr}");
+                    $"UPDATE Settings SET SettingValue = {newStr}, UpdatedAt = {nowUtc} WHERE SettingKey = {KeyFiscalYearStart} AND SettingValue = {currentStr}");
 
                 bool startRowExists = await _dbContext.Settings
                     .AnyAsync(s => s.SettingKey == KeyFiscalYearStart);
@@ -247,7 +265,7 @@ namespace Sayl.Core.Services
 
                     // أول إغلاق على الإطلاق: صف البداية غير موجود — يُدرج من الصفر
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyFiscalYearStart}, {newStr}, GETUTCDATE())");
+                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyFiscalYearStart}, {newStr}, {nowUtc})");
                 }
 
                 // 3) تفريغ المتتبع قبل أي كيان جديد: قيم Settings (وربما بيانات أخرى)
@@ -257,15 +275,16 @@ namespace Sayl.Core.Services
                 _dbContext.ChangeTracker.Clear();
 
                 // 4) تاريخ الإغلاق — UPSERT داخل نفس المعاملة
-                string closeDateStr = ProgramClock.Today.ToString("yyyy-MM-dd"); /* VULN-45: يوم البرنامج */
+                string closeDateStr = today.ToString("yyyy-MM-dd"); /* يوم المتجر من لقطة SQL (Task 2) */
                 int closeUpdated = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Settings SET SettingValue = {closeDateStr}, UpdatedAt = GETUTCDATE() WHERE SettingKey = {KeyLastCloseDate}");
+                    $"UPDATE Settings SET SettingValue = {closeDateStr}, UpdatedAt = {nowUtc} WHERE SettingKey = {KeyLastCloseDate}");
                 if (closeUpdated == 0)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyLastCloseDate}, {closeDateStr}, GETUTCDATE())");
+                        $"INSERT INTO Settings (SettingKey, SettingValue, UpdatedAt) VALUES ({KeyLastCloseDate}, {closeDateStr}, {nowUtc})");
 
                 clsAudit.Log(_dbContext, userId, "CloseFiscalYear",
-                    $"إغلاق السنة المالية: من {current:yyyy-MM-dd} إلى {newYearStart:yyyy-MM-dd} — ديون محمولة: {readiness.OldDebtCarried:N2}");
+                    $"إغلاق السنة المالية: من {current:yyyy-MM-dd} إلى {newYearStart:yyyy-MM-dd} — ديون محمولة: {readiness.OldDebtCarried:N2}",
+                    nowUtc);
                 await _dbContext.SaveChangesAsync();
 
                 await transaction.CommitAsync();
