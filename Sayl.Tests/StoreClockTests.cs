@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Sayl.Core.Data;
 using Sayl.Core.Services;
 using Xunit;
@@ -723,6 +724,127 @@ public class StoreClockTests
         finally
         {
             TestClockConfig.Configure(); // النشر الجانبي للساعات الموحدة لا يتسرب لاختبارات أخرى
+        }
+    }
+
+    // ══ 26) ذرّية الإقلاع: فشل حفظ StoreTimeZoneId على المضيف لا ينشر شيئًا ══
+    // آلية الفشل الحتمية: اعتراض EF Core (SaveChangesInterceptor) يرمي على
+    // SavingChangesAsync — بلا تغيير مخطط ولا أقفال جداول. قبل الإصلاح كانت
+    // الخطوة 3 تنشر المرساة عبر GetUtcNowAsync قبل الحفظ، فبقي التوقيت/المرساة
+    // منشورين رغم فشل الإقلاع. الآن لا يصل التنفيذ إلى النشر أصلًا.
+    private sealed class ThrowingSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("فشل حفظ محسوس لأغراض الاختبار (ذرّية إقلاع ساعة المتجر)");
+    }
+
+    [Fact]
+    public async Task Host_Init_FailedSettingPersistence_PublishesNothing()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            // نبدأ من الحالة غير المهيأة (بلا توقيت ولا مرساة) لنعزل نشر هذا الإقلاع
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+            await WriteSettingAsync(db, "Bogus/Stale_2"); // قيمة قديمة — المضيف سيحاول تحديثها
+
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var options = new DbContextOptionsBuilder<SaylDbContext>()
+                .UseSqlServer(DatabaseFixture.ConnectionString)
+                .AddInterceptors(new ThrowingSaveChangesInterceptor())
+                .Options;
+            await using var failingDb = new SaylDbContext(options);
+            var clock = new clsStoreClockService(failingDb, ny, forceHost: true);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => clock.InitializeAsync());
+
+            // الفشل المغلق كاملًا: لا توقيت منشور ولا مرساة — كل عمليات الساعة ترمي
+            Assert.Null(Common.Utils.ProgramClock.StoreTimeZone);
+            Assert.Throws<Common.Utils.ProgramClock.ClockNotInitializedException>(
+                () => Common.Utils.ProgramClock.UtcNow);
+            Assert.Throws<Common.Utils.ProgramClock.ClockNotInitializedException>(
+                () => Common.Utils.ProgramClock.Today);
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 27) حرس القارئ العام: GetUtcNowAsync(db) قبل الإقلاع ترمي ولا تنشر ══
+    [Fact]
+    public async Task GetUtcNowAsync_OnContext_BeforeInit_Throws_AndPublishesNothing()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            // الحالة غير المهيأة (نمط التصفير القائم — الفشل المغلق): بذرة مُنشئ
+            // الاختبارات تجد التوقيت null فيبدأ الخدمة غير مهيأة
+            Common.Utils.ProgramClock.ConfigureStoreTimeZone(null);
+            var clock = new clsStoreClockService(db, forceHost: false);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => clock.GetUtcNowAsync(db));
+
+            // البرهان على عدم النشر: المرساة لم تُكتب — UtcNow ما زال فشلًا مغلقًا
+            Assert.Throws<Common.Utils.ProgramClock.ClockNotInitializedException>(
+                () => Common.Utils.ProgramClock.UtcNow);
+        }
+        finally { TestClockConfig.Configure(); }
+    }
+
+    // ══ 28) نجاح إقلاع المضيف كاملًا ينشر التوقيت والمرساة معًا ══
+    [Fact]
+    public async Task Host_Init_Success_PublishesTimeZoneAndAnchor()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            var ny = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var clock = new clsStoreClockService(db, ny, forceHost: true);
+            await clock.InitializeAsync();
+
+            Assert.Equal("America/New_York", Common.Utils.ProgramClock.StoreTimeZone?.Id);
+
+            // المرساة منشورة: UtcNow ≈ ساعة SQL (Kind=Utc) و«اليوم» يعمل
+            DateTime published = Common.Utils.ProgramClock.UtcNow;
+            Assert.Equal(DateTimeKind.Utc, published.Kind);
+            Assert.True(Math.Abs((published - DateTime.UtcNow).TotalMinutes) < 2,
+                $"المرساة بعد الإقلاع الناجح بعيدة عن ساعة SQL: {published:O}");
+            Assert.Equal(DateOnly.FromDateTime(Common.Utils.ProgramClock.ToLocal(published)),
+                Common.Utils.ProgramClock.Today);
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteSettingAsync(db, null);
+        }
+    }
+
+    // ══ 29) نجاح إقلاع الطرفي كاملًا ينشر التوقيت المقروء والمرساة معًا ══
+    [Fact]
+    public async Task Terminal_Init_Success_PublishesTimeZoneAndAnchor()
+    {
+        await using var db = _fx.CreateContext();
+        try
+        {
+            await WriteSettingAsync(db, "America/New_York"); // الطرفي يقرأ المعرّف ولا يكتب
+            var clock = new clsStoreClockService(db, forceHost: false); // بلا توقيت محقون
+            await clock.InitializeAsync();
+
+            Assert.Equal("America/New_York", Common.Utils.ProgramClock.StoreTimeZone?.Id);
+
+            DateTime published = Common.Utils.ProgramClock.UtcNow;
+            Assert.Equal(DateTimeKind.Utc, published.Kind);
+            Assert.True(Math.Abs((published - DateTime.UtcNow).TotalMinutes) < 2,
+                $"المرساة بعد الإقلاع الناجح بعيدة عن ساعة SQL: {published:O}");
+        }
+        finally
+        {
+            TestClockConfig.Configure();
+            await WriteSettingAsync(db, null);
         }
     }
 }

@@ -147,8 +147,10 @@ namespace Sayl.Core.Services
             }
 
             // 3) اللحظة الأولى تُقرأ مباشرة من ساعة SQL Server على سياق الإقلاع
-            //    نفسه — نجاح القراءة ينشر مرساة SQL (المصدر الموثق للساعة الرتيبة).
-            DateTime sqlNow = await GetUtcNowAsync(db);
+            //    نفسه — عبر القارئ الخاص غير المنشِر: القراءة أثناء الإقلاع يجب
+            //    ألّا تنشر شيئًا (النشر يأتي ذرّيًا في الخطوة 5 بعد نجاح كل
+            //    الخطوات — فشل لاحق لا يجد مرساة منشورة مسبقًا).
+            DateTime sqlNow = await ReadSqlUtcNowAsync(db);
 
             if (IsSqlHost)
             {
@@ -173,10 +175,15 @@ namespace Sayl.Core.Services
                 await db.SaveChangesAsync();
             }
 
-            // 5) نشر التوقيت المركزي للساعات الموحدة (ProgramClock/AppClock) —
-            //    المرساة نُشرت مع القراءة في الخطوة 3. فشل أي خطوة سابقة ينشر
-            //    شيئًا فتبقى الساعات على الفشل المغلق (بلا احتياطي +3 ولا ساعة جهاز).
+            // 5) النشر الذرّي بعد نجاح كل خطوات الإقلاع بلا استثناء: التوقيت
+            //    المركزي ثم مرساة SQL (sqlNow المقروءة في الخطوة 3) ثم
+            //    _initialized — وصول التنفيذ إلى هنا يعني نجاح كشف المضيف وحلّ
+            //    التوقيت والقراءة وحفظ الإعداد معًا. فشل أي خطوة سابقة (قراءة
+            //    SQL، توقيت طرفي مفقود/تالف، فشل حفظ StoreTimeZoneId) يقذف قبل
+            //    هذا السطر فلا يُنشر التوقيت ولا المرساة — وتبقى الساعات على
+            //    الفشل المغلق (بلا احتياطي +3 ولا ساعة جهاز).
             Common.Utils.ProgramClock.ConfigureStoreTimeZone(_storeTimeZone);
+            Common.Utils.ProgramClock.PublishSqlAnchor(sqlNow);
 
             _initialized = true;
         }
@@ -196,10 +203,14 @@ namespace Sayl.Core.Services
 
         /// <summary>الوقت الحالي UTC من خادم SQL على السياق المعطى نفسه —
         /// يمر عبر اتصال/معاملة المستدعي النشطة (لا نطاق جديد ولا سياق جديد).
-        /// كل قراءة ناجحة تنشر «مرساة ساعة SQL» في ProgramClock (لحظة الخادم +
-        /// لقطة Stopwatch) كي تتقدم الساعة الرتيبة الموحدة من الخادم الموثق.</summary>
+        /// حرس الفشل المغلق أولًا: بلا إقلاع ناجح لا قراءة ولا نشر — استدعاء
+        /// قبل الإقلاع ترمي InvalidOperationException فلا يمكنها نشر مرساة.
+        /// كل قراءة ناجحة بعدها تنشر «مرساة ساعة SQL» في ProgramClock (لحظة
+        /// الخادم + لقطة Stopwatch) كي تتقدم الساعة الرتيبة الموحدة من الخادم
+        /// الموثق — الإقلاع والقراءات اللاحقة على حد سواء.</summary>
         public async Task<DateTime> GetUtcNowAsync(SaylDbContext db)
         {
+            RequireTimeZone(); // حرس الفشل المغلق قبل أي نداء SQL أو نشر مرساة
             DateTime now = await ReadSqlUtcNowAsync(db);
             // نشر المرساة مع كل قراءة ناجحة — الإقلاع والقراءات اللاحقة على حد سواء
             Common.Utils.ProgramClock.PublishSqlAnchor(now);
@@ -236,10 +247,10 @@ namespace Sayl.Core.Services
 
         /// <summary>«اليوم» بمعنى المحل من ساعة SQL الحالية على السياق المعطى —
         /// اللحظة تُقرأ من اتصال/معاملة المستدعي النشطة، ثم تُحوَّل بالتوقيت
-        /// المركزي المهيَّأ (بلا إقلاع = فشل مغلق عبر RequireTimeZone()).</summary>
+        /// المركزي المهيَّأ. حرس الفشل المغلق موروث من GetUtcNowAsync(db)
+        /// نفسه (بلا إقلاع = استثناء قبل أي نداء SQL) فلا حرس مكرر هنا.</summary>
         public async Task<DateOnly> GetStoreTodayAsync(SaylDbContext db)
         {
-            RequireTimeZone(); // حرس الفشل المغلق قبل نداء SQL غير اللازم
             return GetStoreToday(await GetUtcNowAsync(db));
         }
 
