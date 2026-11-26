@@ -245,6 +245,36 @@ CREATE TABLE Inventory
 GO
 
 -----------------------------------------------------------
+-- 11b) Create ProductUnits
+--      وحدات المنتج: صف أساس واحد لكل منتج (IsBase=1, FactorToBase=1)
+--      هو المرآة القانونية لـ Product.Unit، ووحدات بديلة اختيارية بعامل
+--      تحويل (1 كرتون = 12 حبة). المرحلة 3: مخطط خامل فقط.
+--      NO ACTION على المفتاح الأجنبي: اللقطات التاريخية قد تشير للوحدة.
+-----------------------------------------------------------
+CREATE TABLE ProductUnits
+(
+    ProductUnitId INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ProductUnits PRIMARY KEY,
+    ProductId INT NOT NULL,
+    Name NVARCHAR(20) NOT NULL,              -- اسم الوحدة كما يُدخل ويُعرض (نفس عرض Products.Unit)
+    FactorToBase DECIMAL(18,6) NOT NULL,     -- 1 وحدة بديلة = FactorToBase وحدة أساس؛ صف الأساس = 1
+    IsBase BIT NOT NULL CONSTRAINT DF_ProductUnits_IsBase DEFAULT (0),   -- صف الأساس الوحيد لكل منتج
+    PricePerUnit DECIMAL(10,2) NULL,         -- سعر بيع افتراضي اختياري لهذه الوحدة
+    IsActive BIT NOT NULL CONSTRAINT DF_ProductUnits_IsActive DEFAULT (1),
+    CreatedAt DATETIME2 CONSTRAINT DF_ProductUnits_CreatedAt DEFAULT (SYSUTCDATETIME()),
+
+    CONSTRAINT FK_ProductUnits_Product FOREIGN KEY (ProductId) REFERENCES Products(ProductId),
+    CONSTRAINT CK_ProductUnits_Factor CHECK (FactorToBase > 0),
+    CONSTRAINT CK_ProductUnits_BaseFactor CHECK (IsBase = 0 OR FactorToBase = 1),
+    CONSTRAINT UQ_ProductUnits_Product_Name UNIQUE (ProductId, Name)
+);
+GO
+-- أساس واحد بالضبط لكل منتج: فهرس فريد مُرشَّح (نمط UQ_Products_Barcode)
+CREATE UNIQUE INDEX UQ_ProductUnits_Base
+ON dbo.ProductUnits(ProductId)
+WHERE IsBase = 1;
+GO
+
+-----------------------------------------------------------
 -- 12) Create Invoices
 --     Unified table for sales, purchases and returns
 -----------------------------------------------------------
@@ -295,10 +325,16 @@ CREATE TABLE InvoiceItems
     BatchId INT NULL,
     ItemPrice DECIMAL(10,2) NOT NULL,
     ItemCost DECIMAL(10,2) NULL,
+    -- Upgrade_21: لقطات وحدة الإدخال — NULL = صف إرثي/وحدة أساس (لا تُختلق تاريخيًا)
+    UnitName NVARCHAR(20) NULL,              -- الوحدة كما أُدخلت ('كرتون')
+    UnitFactorToBase DECIMAL(18,6) NULL,     -- عامل التحويل لحظة الحركة
+    EnteredQuantity DECIMAL(10,3) NULL,      -- الكمية كما أُدخلت في وحدة الإدخال
+    ProductUnitId INT NULL,                  -- مؤشر اختياري للتقارير — ليس حمولة حرجة
 
     CONSTRAINT FK_InvoiceItems_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES Invoices(InvoiceId),
     CONSTRAINT FK_InvoicesItems_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId),
-    CONSTRAINT FK_InvoicesItems_BatchId FOREIGN KEY (BatchId) REFERENCES Batches(BatchId)
+    CONSTRAINT FK_InvoicesItems_BatchId FOREIGN KEY (BatchId) REFERENCES Batches(BatchId),
+    CONSTRAINT FK_ProductUnits_ProductUnitId FOREIGN KEY (ProductUnitId) REFERENCES ProductUnits(ProductUnitId)
 );
 GO
 
@@ -749,6 +785,11 @@ CREATE INDEX IX_Invoices_CreatedAt ON Invoices(CreatedAt);
 CREATE INDEX IX_InvoiceItems_InvoiceId ON InvoiceItems(InvoiceId);
 CREATE INDEX IX_InvoiceItems_ProductId ON InvoiceItems(ProductId);
 CREATE INDEX IX_InvoiceItems_BatchId ON InvoiceItems(BatchId);
+-- Upgrade_21: مؤشر وحدة الإدخال — الصفوف الجديدة فقط (الإرثي ProductUnitId = NULL)
+CREATE INDEX IX_InvoiceItems_ProductUnitId ON InvoiceItems(ProductUnitId) WHERE ProductUnitId IS NOT NULL;
+
+-- ProductUnits
+CREATE INDEX IX_ProductUnits_Product ON ProductUnits(ProductId);
 
 -- Payments
 CREATE INDEX IX_Payments_InvoiceId ON Payments(InvoiceId);
@@ -825,6 +866,10 @@ INSERT INTO Roles (Name, RoleValue, IsActive) VALUES
 -- Demo stock product (delete after real catalog import)
 INSERT INTO Products (Name, Barcode, Unit, Type, BasePrice, CostPrice, ReorderLevel, IsActive, CreatedAt)
 VALUES (N'منتج تجريبي', N'6281002123450', N'قطعة', 'stock', 12.50, 6.00, 5, 1, GETUTCDATE());
+
+-- Upgrade_20 (CONFIG-ONLY): صف الأساس الوحيد للمنتج التجريبي — المرآة القانونية لـ Product.Unit
+INSERT INTO ProductUnits (ProductId, Name, FactorToBase, IsBase, IsActive)
+VALUES (SCOPE_IDENTITY(), ISNULL(NULLIF(LTRIM(RTRIM(N'قطعة')), N''), N'وحدة'), 1, 1, 1);
 
 -- Opening inventory for the demo product
 INSERT INTO Inventory (ProductId, QuantityAvailable, QuantityReserved, UpdatedAt)

@@ -32,4 +32,7 @@ public partial class Product
     public virtual ICollection<InvoiceItem> InvoiceItems { get; set; } = new List<InvoiceItem>();
 
     public virtual ICollection<StockMovement> StockMovements { get; set; } = new List<StockMovement>();
+
+    /// <summary>وحدات المنتج (المرحلة 3): صف الأساس المرآة القانونية لـ Unit + وحدات بديلة.</summary>
+    public virtual ICollection<ProductUnit> Units { get; set; } = new List<ProductUnit>();
 }

@@ -71,6 +71,10 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade18Script());
             // الترقيم التجاري السنوي INV-YYYY-NNNNNN: عمود + فهرس فريد مُرشَّح + عدّاد + ترحيل (Task-2)
             ExecuteBatches(LoadUpgrade19Script());
+            // وحدات المنتج: جدول ProductUnits + صف أساس لكل منتج (تكوين فقط — المرحلة 3)
+            ExecuteBatches(LoadUpgrade20Script());
+            // لقطات وحدة الإدخال على بنود الفواتير: أعمدة NULL بلا ترحيل (المرحلة 3)
+            ExecuteBatches(LoadUpgrade21Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -170,6 +174,12 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade19Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_19_AnnualInvoiceNumbering.sql"));
+
+    private static string LoadUpgrade20Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_20_ProductUnits.sql"));
+
+    private static string LoadUpgrade21Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_21_TransactionUnitSnapshots.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

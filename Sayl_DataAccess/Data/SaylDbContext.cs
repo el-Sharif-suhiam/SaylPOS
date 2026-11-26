@@ -45,6 +45,8 @@ public partial class SaylDbContext : DbContext
 
     public virtual DbSet<Product> Products { get; set; }
 
+    public virtual DbSet<ProductUnit> ProductUnits { get; set; }
+
     public virtual DbSet<Role> Roles { get; set; }
 
     public virtual DbSet<Setting> Settings { get; set; }
@@ -430,9 +432,18 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => e.ProductId, "IX_InvoiceItems_ProductId");
 
+            // Upgrade_21: مؤشر مُرشَّح للصفوف الجديدة فقط — الانضمام الاختياري للتقارير
+            entity.HasIndex(e => e.ProductUnitId, "IX_InvoiceItems_ProductUnitId")
+                .HasFilter("[ProductUnitId] IS NOT NULL");
+
             entity.Property(e => e.ItemPrice).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.ItemCost).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.Quantity).HasDefaultValue(1);
+
+            // لقطات وحدة الإدخال (Upgrade_21) — NULL = صف إرثي، لا افتراضيات ولا تحويل
+            entity.Property(e => e.UnitName).HasMaxLength(20);
+            entity.Property(e => e.UnitFactorToBase).HasColumnType("decimal(18, 6)");
+            entity.Property(e => e.EnteredQuantity).HasColumnType("decimal(10, 3)");
 
             entity.HasOne(d => d.Batch).WithMany(p => p.InvoiceItems)
                 .HasForeignKey(d => d.BatchId)
@@ -447,6 +458,12 @@ public partial class SaylDbContext : DbContext
                 .HasForeignKey(d => d.ProductId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_InvoicesItems_ProductId");
+
+            // Upgrade_21: مؤشر اختياري للوحدة — Restrict (اللقطات التاريخية قد تشير إليها)
+            entity.HasOne(d => d.ProductUnit).WithMany(p => p.InvoiceItems)
+                .HasForeignKey(d => d.ProductUnitId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_ProductUnits_ProductUnitId");
         });
 
         modelBuilder.Entity<Party>(entity =>
@@ -563,6 +580,36 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.ReorderLevel).HasDefaultValue(0);
             entity.Property(e => e.Type).HasMaxLength(20);
             entity.Property(e => e.Unit).HasMaxLength(20);
+        });
+
+        modelBuilder.Entity<ProductUnit>(entity =>
+        {
+            // وحدات المنتج (المرحلة 3 — مخطط خامل): صف الأساس المرآة القانونية
+            // لـ Product.Unit + وحدات بديلة بعامل تحويل. الفهرس الفريد المُرشَّح
+            // يضمن أساسًا واحدًا بالضبط لكل منتج على مستوى المحرك (نمط UQ_Products_Barcode).
+            entity.HasKey(e => e.ProductUnitId).HasName("PK_ProductUnits");
+
+            entity.HasIndex(e => e.ProductId, "IX_ProductUnits_Product");
+
+            entity.HasIndex(e => new { e.ProductId, e.Name }, "UQ_ProductUnits_Product_Name").IsUnique();
+
+            entity.HasIndex(e => e.ProductId, "UQ_ProductUnits_Base")
+                .IsUnique()
+                .HasFilter("[IsBase] = 1");
+
+            entity.Property(e => e.ProductUnitId).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(20);
+            entity.Property(e => e.FactorToBase).HasColumnType("decimal(18, 6)");
+            entity.Property(e => e.IsBase).HasDefaultValue(false);
+            entity.Property(e => e.PricePerUnit).HasColumnType("decimal(10, 2)");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
+
+            // NO ACTION (Restrict): اللقطات التاريخية قد تشير إلى الوحدة
+            entity.HasOne(d => d.Product).WithMany(p => p.Units)
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_ProductUnits_Product");
         });
 
         modelBuilder.Entity<Role>(entity =>

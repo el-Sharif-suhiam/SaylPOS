@@ -33,6 +33,113 @@ namespace Sayl.Core.Services
 
         private static readonly string[] ValidTypes = { "stock", "service", "manufactured" };
 
+        // ═══ ترقية مخطط وحدات المنتج (المرحلة 3 — idempotent، مخطط خامل) ═══
+        // جدول ProductUnits: صف أساس واحد لكل منتج (IsBase = 1, FactorToBase = 1)
+        // هو المرآة القانونية لـ Product.Unit — لا سلوك جديد في هذه المرحلة.
+        // نفس DDL لسكربت Upgrade_20_ProductUnits.sql (المصدران يُثبَّتان متطابقَين
+        // باختبار تكافؤ الترقية). لاحظ: دفعة واحدة بلا GO — CREATE TABLE ثم
+        // INSERT يعمل بحل الأسماء المؤجَّل (نمط EnsureReservationSchemaSql).
+        public const string EnsureProductUnitsSchemaSql = @"
+IF OBJECT_ID(N'dbo.ProductUnits', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ProductUnits
+    (
+        ProductUnitId INT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_ProductUnits PRIMARY KEY,
+        ProductId INT NOT NULL,
+        Name NVARCHAR(20) NOT NULL,
+        FactorToBase DECIMAL(18,6) NOT NULL,
+        IsBase BIT NOT NULL CONSTRAINT DF_ProductUnits_IsBase DEFAULT (0),
+        PricePerUnit DECIMAL(10,2) NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_ProductUnits_IsActive DEFAULT (1),
+        CreatedAt DATETIME2 NULL CONSTRAINT DF_ProductUnits_CreatedAt DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT FK_ProductUnits_Product FOREIGN KEY (ProductId) REFERENCES dbo.Products(ProductId),
+        CONSTRAINT CK_ProductUnits_Factor CHECK (FactorToBase > 0),
+        CONSTRAINT CK_ProductUnits_BaseFactor CHECK (IsBase = 0 OR FactorToBase = 1),
+        CONSTRAINT UQ_ProductUnits_Product_Name UNIQUE (ProductId, Name)
+    );
+
+    CREATE UNIQUE INDEX UQ_ProductUnits_Base ON dbo.ProductUnits(ProductId) WHERE IsBase = 1;
+    CREATE INDEX IX_ProductUnits_Product ON dbo.ProductUnits(ProductId);
+END
+
+/* ترحيل التكوين (لا اختراع تاريخ): لكل منتج بلا صف أساس — صف أساس واحد
+   باسم وحدته الحالية (أو 'وحدة' إن كانت فارغة). الحارس الثاني يمنع
+   اصطدام UQ_ProductUnits_Product_Name إن كان الاسم محجوزًا لصف آخر. */
+INSERT INTO dbo.ProductUnits (ProductId, Name, FactorToBase, IsBase, IsActive)
+SELECT p.ProductId,
+       ISNULL(NULLIF(LTRIM(RTRIM(p.Unit)), N''), N'وحدة'),
+       1, 1, 1
+FROM dbo.Products p
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.ProductUnits pu
+    WHERE pu.ProductId = p.ProductId AND pu.IsBase = 1)
+  AND NOT EXISTS (
+    SELECT 1 FROM dbo.ProductUnits pu
+    WHERE pu.ProductId = p.ProductId
+      AND pu.Name = ISNULL(NULLIF(LTRIM(RTRIM(p.Unit)), N''), N'وحدة'))";
+
+        /// <summary>يضمن جدول وحدات المنتج + صفوف الأساس على أي قاعدة (قديمة أو جديدة) — يُنادى عند الإقلاع.</summary>
+        public async Task EnsureProductUnitsSchemaAsync()
+            => await _dbContext.Database.ExecuteSqlRawAsync(EnsureProductUnitsSchemaSql);
+
+        // ═══ ترقية لقطات وحدة الإدخال على InvoiceItems (المرحلة 3 — idempotent) ═══
+        // أعمدة NULL فقط: الصفوف الإرثية تبقى NULL ولا تُختلق لها وحدة (لا backfill).
+        // نفس DDL لسكربت Upgrade_21_TransactionUnitSnapshots.sql. الفهرس المُرشَّح
+        // يُنشأ عبر EXEC كي تُرى الأعمدة المضافة في نفس الدفعة (نمط EnsureCountSchemaSql).
+        // يشترط وجود dbo.ProductUnits — يُنادى بعده في مسار الإقلاع.
+        public const string EnsureInvoiceItemSnapshotSchemaSql = @"
+IF OBJECT_ID(N'dbo.InvoiceItems', N'U') IS NOT NULL
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems') AND name = N'UnitName'
+    )
+    BEGIN
+        ALTER TABLE dbo.InvoiceItems ADD UnitName NVARCHAR(20) NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems') AND name = N'UnitFactorToBase'
+    )
+    BEGIN
+        ALTER TABLE dbo.InvoiceItems ADD UnitFactorToBase DECIMAL(18,6) NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems') AND name = N'EnteredQuantity'
+    )
+    BEGIN
+        ALTER TABLE dbo.InvoiceItems ADD EnteredQuantity DECIMAL(10,3) NULL;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems') AND name = N'ProductUnitId'
+    )
+    BEGIN
+        ALTER TABLE dbo.InvoiceItems ADD ProductUnitId INT NULL
+            CONSTRAINT FK_ProductUnits_ProductUnitId REFERENCES dbo.ProductUnits(ProductUnitId);
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems')
+          AND name = N'IX_InvoiceItems_ProductUnitId'
+    )
+    BEGIN
+        EXEC(N'CREATE NONCLUSTERED INDEX IX_InvoiceItems_ProductUnitId ON dbo.InvoiceItems(ProductUnitId) WHERE ProductUnitId IS NOT NULL');
+    END;
+END";
+
+        /// <summary>يضمن أعمدة لقطات الوحدة على بنود الفواتير — يُنادى عند الإقلاع بعد EnsureProductUnitsSchemaAsync.</summary>
+        public async Task EnsureInvoiceItemSnapshotSchemaAsync()
+            => await _dbContext.Database.ExecuteSqlRawAsync(EnsureInvoiceItemSnapshotSchemaSql);
+
+
         public async Task<List<DtoProduct>> GetProductsListAsync(string search = "", string? type = null, bool includeInactive = false, int take = 0)
         {
             var query = _dbContext.Products.AsQueryable();
@@ -325,6 +432,19 @@ namespace Sayl.Core.Services
                     await _dbContext.SaveChangesAsync();
                 }
 
+                // المرحلة 3 (تكوين فقط): صف الأساس الوحيد — المرآة القانونية لـ
+                // Product.Unit (عامل 1). وحدة فارغة تأخذ الافتراضي مثل الترحيل.
+                _dbContext.ProductUnits.Add(new ProductUnit
+                {
+                    ProductId = product.ProductId,
+                    Name = string.IsNullOrWhiteSpace(product.Unit) ? "وحدة" : product.Unit,
+                    FactorToBase = 1m,
+                    IsBase = true,
+                    IsActive = true,
+                    CreatedAt = nowUtc
+                });
+                await _dbContext.SaveChangesAsync();
+
                 await transaction.CommitAsync();
                 return Result<int>.Ok(product.ProductId, "تمت إضافة المنتج بنجاح.");
             }
@@ -365,7 +485,20 @@ namespace Sayl.Core.Services
             }
 
             if (!string.IsNullOrWhiteSpace(dtoProduct.Unit))
+            {
+                bool unitChanged = product.Unit != dtoProduct.Unit;
                 product.Unit = dtoProduct.Unit;
+
+                // المرحلة 3 (تكوين فقط): صف الأساس مرآة لـ Unit — إعادة تسمية الصف
+                // القائم فقط، لا إنشاء بديل (التكوين تُدار عند الإضافة/الترحيل).
+                if (unitChanged)
+                {
+                    var baseUnit = await _dbContext.ProductUnits
+                        .FirstOrDefaultAsync(u => u.ProductId == product.ProductId && u.IsBase);
+                    if (baseUnit != null && baseUnit.Name != dtoProduct.Unit)
+                        baseUnit.Name = dtoProduct.Unit;
+                }
+            }
 
             if (!string.IsNullOrWhiteSpace(dtoProduct.Type))
             {

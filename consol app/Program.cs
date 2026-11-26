@@ -94,6 +94,11 @@ namespace consol_app
                     await Svc<clsCheckoutService>(ws).EnsureReservationSchemaAsync();
                     // فهرس جلسة الجرد المفتوحة الفريدة — idempotent كذلك
                     await Svc<clsStockCountService>(ws).EnsureCountSchemaAsync();
+                    // وحدات المنتج + لقطات وحدة الإدخال (المرحلة 3) — idempotent كذلك،
+                    // ولقطات البنود تشترط وجود جدول الوحدات فتُنادى بعده
+                    var productsSvc = Svc<clsProductService>(ws);
+                    await productsSvc.EnsureProductUnitsSchemaAsync();
+                    await productsSvc.EnsureInvoiceItemSnapshotSchemaAsync();
                     // ساعة المتجر المركزية: فشلها حرج — الهارنس لا يدير دورات تشغيلية
                     // بلا ساعة مركزية صالحة (الحدود اليومية ستُحسب بخطأ). يُطبع الفشل
                     // بوضوح ثم يُجهض الإقلاع بأمان (تنظيف قاعدة الخربشة في finally).

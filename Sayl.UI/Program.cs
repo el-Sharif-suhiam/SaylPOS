@@ -182,6 +182,13 @@ namespace Sayl.UI
                         scope.ServiceProvider.GetRequiredService<Core.Services.clsStockCountService>()
                             .EnsureCountSchemaAsync().GetAwaiter().GetResult();
 
+                        // وحدات المنتج (ProductUnits + صفوف الأساس) ثم لقطات وحدة
+                        // الإدخال على بنود الفواتير (المرحلة 3) — idempotent كذلك،
+                        // ولقطات البنود تشترط وجود جدول الوحدات فتُنادى بعده.
+                        var productService = scope.ServiceProvider.GetRequiredService<Core.Services.clsProductService>();
+                        productService.EnsureProductUnitsSchemaAsync().GetAwaiter().GetResult();
+                        productService.EnsureInvoiceItemSnapshotSchemaAsync().GetAwaiter().GetResult();
+
                         // ساعة المتجر المركزية: المضيف يسجّل توقيته، والطرفي يقرأه —
                         // فشل الساعة حرج (fail-closed): لا يعمل البرنامج إطلاقًا على
                         // الاحتياطي الإرثي (+3) بعد إقلاع ساعة فاشل، لأن حدود اليوم
