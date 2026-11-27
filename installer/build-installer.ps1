@@ -95,7 +95,8 @@ $sqlSources = @(
     (Join-Path $repoRoot "Upgrade_18_CreditApprovalGrantPolicy.sql"),
     (Join-Path $repoRoot "Upgrade_19_AnnualInvoiceNumbering.sql"),
     (Join-Path $repoRoot "Upgrade_20_ProductUnits.sql"),
-    (Join-Path $repoRoot "Upgrade_21_TransactionUnitSnapshots.sql")
+    (Join-Path $repoRoot "Upgrade_21_TransactionUnitSnapshots.sql"),
+    (Join-Path $repoRoot "Upgrade_22_QuantityColumnsDecimal.sql")
 )
 $stagingXml = Join-Path $stagingDb "xml"
 New-Item -ItemType Directory -Path $stagingXml -Force | Out-Null

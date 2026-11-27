@@ -32,18 +32,18 @@ namespace Sayl.UI.Forms
             public int ProductId { get; init; }
             public string ProductName { get; init; } = "";
             public decimal Price { get; init; }
-            public int Quantity { get; set; }
+            public decimal Quantity { get; set; }
             public decimal Total => Price * Quantity;
         }
 
         private sealed class SearchItem
         {
             public DtoProduct Product { get; init; } = null!;
-            public int Stock { get; init; }
+            public decimal Stock { get; init; }
         }
 
         private readonly List<CartItem> _cart = new();
-        private Dictionary<int, int> _stockByProduct = new();
+        private Dictionary<int, decimal> _stockByProduct = new();
         private int? _sessionId;
 
         // شريط العلوي
@@ -626,7 +626,7 @@ namespace Sayl.UI.Forms
                     .Select(p => new SearchItem
                     {
                         Product = p,
-                        Stock = _stockByProduct.TryGetValue(p.ProductId, out int st) ? st : 0
+                        Stock = _stockByProduct.TryGetValue(p.ProductId, out decimal st) ? st : 0m
                     })
                     .ToList();
 
@@ -909,12 +909,15 @@ namespace Sayl.UI.Forms
 
             var item = _cart[e.RowIndex];
             string raw = _gridCart[e.ColumnIndex, e.RowIndex].Value?.ToString() ?? "";
-            int qty = decimal.TryParse(raw.Trim(), out decimal d) ? (int)Math.Round(d) : item.Quantity;
+            // كميات عشرية: تقريب إلى 3 منازل (AwayFromZero) — بلا اقتطاع صحيح
+            decimal qty = decimal.TryParse(raw.Trim(), out decimal d)
+                ? Math.Round(d, 3, MidpointRounding.AwayFromZero)
+                : item.Quantity;
 
-            if (qty < 1) qty = 1;
+            if (qty <= 0) qty = 1;
 
             // حد أقصى صلب: لا تجاوز الكمية المتاحة
-            if (_stockByProduct.TryGetValue(item.ProductId, out int stock) &&
+            if (_stockByProduct.TryGetValue(item.ProductId, out decimal stock) &&
                 stock > 0 && qty > stock)
             {
                 qty = stock;
@@ -951,17 +954,17 @@ namespace Sayl.UI.Forms
             switch (colName)
             {
                 case "colPlus":
-                    if (_stockByProduct.TryGetValue(item.ProductId, out int stockPlus) &&
+                    if (_stockByProduct.TryGetValue(item.ProductId, out decimal stockPlus) &&
                         stockPlus > 0 && item.Quantity >= stockPlus)
                     {
                         ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", item.ProductName, stockPlus));
                         return;
                     }
-                    item.Quantity++;
+                    item.Quantity += 1m;
                     break;
 
                 case "colMinus":
-                    if (item.Quantity > 1) item.Quantity--;
+                    if (item.Quantity > 1m) item.Quantity -= 1m;
                     break;
 
                 case "colDelete":
@@ -1303,13 +1306,13 @@ namespace Sayl.UI.Forms
                     {
                         // فتح كامل للشاشة — لقطة جديدة كاملة
                         _stockByProduct = result.Data.ToDictionary(x => x.ProductId,
-                            x => Math.Max(0, x.QuantityAvailable - x.QuantityReserved));
+                            x => Math.Max(0m, x.QuantityAvailable - x.QuantityReserved));
                     }
                     else
                     {
                         // C1: بعد بيع/تعليق — تحديث أصناف السلة الملموسة فقط
                         foreach (var x in result.Data)
-                            _stockByProduct[x.ProductId] = Math.Max(0, x.QuantityAvailable - x.QuantityReserved);
+                            _stockByProduct[x.ProductId] = Math.Max(0m, x.QuantityAvailable - x.QuantityReserved);
                     }
                 }
             }
@@ -1331,7 +1334,7 @@ namespace Sayl.UI.Forms
         //     بالصفر أو السالب، وزر «−» يتوقف عند 1.
         private async Task AddToCartAsync(DtoProduct product)
         {
-            int stock = -1; // غير مخزّن = بلا سقف (خدمات/مصنّع)
+            decimal stock = -1m; // غير مخزّن = بلا سقف (خدمات/مصنّع)
             if (product.Type == "stock")
             {
                 try
@@ -1347,11 +1350,11 @@ namespace Sayl.UI.Forms
                     // انقطاع لحظي للقاعدة: نرجع لسقف الجلسة إن وُجد — وإلا بلا سقف
                     // (لا نوقف عمل الكاشير؛ الحسم النهائي في السداد بالمعاملة)
                     if (!_stockByProduct.TryGetValue(product.ProductId, out stock))
-                        stock = -1;
+                        stock = -1m;
                 }
             }
 
-            if (stock == 0)
+            if (stock == 0m)
             {
                 ShowStockWarn(AppLang.T("Pos.Warn.NoStock", product.Name));
                 return;
@@ -1365,7 +1368,7 @@ namespace Sayl.UI.Forms
                     ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stock));
                     return;
                 }
-                existing.Quantity++;
+                existing.Quantity += 1m;
             }
             else
                 _cart.Add(new CartItem
@@ -1391,10 +1394,10 @@ namespace Sayl.UI.Forms
         {
             _gridCart.Rows.Clear();
             foreach (var item in _cart)
-                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity, "+", UiHelpers.Money(item.Total), AppLang.T("Pos.Cart.Delete"));
+                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity.ToString("0.###"), "+", UiHelpers.Money(item.Total), AppLang.T("Pos.Cart.Delete"));
 
-            int totalUnits = _cart.Sum(i => i.Quantity);
-            _lblItemsBadge.Text = _cart.Count == 0 ? AppLang.T("Pos.Cart.Empty") : AppLang.T("Pos.Cart.ItemsBadge", _cart.Count, totalUnits);
+            decimal totalUnits = _cart.Sum(i => i.Quantity);
+            _lblItemsBadge.Text = _cart.Count == 0 ? AppLang.T("Pos.Cart.Empty") : AppLang.T("Pos.Cart.ItemsBadge", _cart.Count, totalUnits.ToString("0.###"));
             _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Accent;
 
             RefreshTotals();

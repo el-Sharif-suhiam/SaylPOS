@@ -19,7 +19,7 @@ namespace Common.DTOs.RequestModels
     {
         public int ProductId { get; set; }
         public string BatchNumber { get; set; } = null!;
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public decimal UnitCost { get; set; }
         public DateOnly? ExpiryDate { get; set; }
     }

@@ -84,6 +84,9 @@ namespace Sayl.Core.Services
             {
                 if (item.Quantity <= 0)
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+                item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
             }
 
             var permissionCheck = await CheckCustomerReturnPermissionAsync(request.UserId);
@@ -127,8 +130,8 @@ namespace Sayl.Core.Services
                 if (originalItems.Count == 0)
                     return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                long sold = originalItems.Sum(ii => (long)ii.Quantity);
-                long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                decimal sold = originalItems.Sum(ii => ii.Quantity);
+                decimal returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
                 if (g.Quantity > sold - returnedSoFar)
                     return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
             }
@@ -151,8 +154,8 @@ namespace Sayl.Core.Services
                 foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
-                    long sold = originalItems.Sum(ii => (long)ii.Quantity);
-                    long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                    decimal sold = originalItems.Sum(ii => ii.Quantity);
+                    decimal returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
                     if (g.Quantity > sold - returnedSoFar)
                         throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
                 }
@@ -287,6 +290,9 @@ namespace Sayl.Core.Services
             {
                 if (item.Quantity <= 0)
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+                item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
             }
 
             var permissionCheck = await CheckSupplierReturnPermissionAsync(request.UserId);
@@ -320,8 +326,8 @@ namespace Sayl.Core.Services
                 if (originalItems.Count == 0)
                     return Result<int>.Fail($"المنتج {g.ProductId} غير موجود في الفاتورة الأصلية.");
 
-                long sold = originalItems.Sum(ii => (long)ii.Quantity);
-                long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                decimal sold = originalItems.Sum(ii => ii.Quantity);
+                decimal returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
                 if (g.Quantity > sold - returnedSoFar)
                     return Result<int>.Fail($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
             }
@@ -342,8 +348,8 @@ namespace Sayl.Core.Services
                 foreach (var g in GroupRequestItems(request.Items))
                 {
                     var originalItems = originalInvoice.InvoiceItems.Where(ii => ii.ProductId == g.ProductId).ToList();
-                    long sold = originalItems.Sum(ii => (long)ii.Quantity);
-                    long returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
+                    decimal sold = originalItems.Sum(ii => ii.Quantity);
+                    decimal returnedSoFar = alreadyReturned.GetValueOrDefault(g.ProductId);
                     if (g.Quantity > sold - returnedSoFar)
                         throw new InvalidOperationException($"الكمية المرتجعة أكبر من الكمية المتبقية للمنتج {g.ProductId} (المتبقي: {sold - returnedSoFar}).");
                 }
@@ -455,7 +461,7 @@ namespace Sayl.Core.Services
         /// شاشة المرتجع: المباع والمرتجع سابقًا والمتبقي. عرض وحسب: الفيصل النهائي
         /// في الصلاحية يبقى حارس CreateCustomerReturnAsync/CreateSupplierReturnAsync
         /// داخل المعاملة، فلا يُعتمد على الواجهة وحدها أبدًا.</summary>
-        public async Task<Dictionary<int, int>> GetPreviouslyReturnedQuantitiesAsync(
+        public async Task<Dictionary<int, decimal>> GetPreviouslyReturnedQuantitiesAsync(
             int originalInvoiceId, enInvoicesType returnType) =>
             await GetReturnedQuantitiesAsync(originalInvoiceId, returnType);
 
@@ -476,7 +482,7 @@ namespace Sayl.Core.Services
         /// يُستعمل في كل فحوص الكميات وبناء البنود في المرتجعين معًا،
         /// فلا يمر طلب ببنود مزدوجة حتى لو تكرر المنتخ عشر مرات.
         /// </summary>
-        private static IEnumerable<(int ProductId, int Quantity)> GroupRequestItems(
+        private static IEnumerable<(int ProductId, decimal Quantity)> GroupRequestItems(
             List<DtoReturnItem> items) =>
             items
                 .GroupBy(i => i.ProductId)
@@ -495,10 +501,10 @@ namespace Sayl.Core.Services
         /// السطر صفًا لكل دفعة، فقد تكرر الدفعة نفسها على أكثر من سطر).
         /// الحارس الإجمالي لكل منتج يبقى مسؤول الرفض النهائي خارج هذه الدالة.
         /// </summary>
-        private static List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)> AllocateAcrossOriginalLines(
+        private static List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)> AllocateAcrossOriginalLines(
             IEnumerable<InvoiceItem> originalItems,
-            IEnumerable<(int ProductId, int Quantity)> groupedRequest,
-            IReadOnlyDictionary<(int ProductId, int? BatchId), int> returnedByBatch)
+            IEnumerable<(int ProductId, decimal Quantity)> groupedRequest,
+            IReadOnlyDictionary<(int ProductId, int? BatchId), decimal> returnedByBatch)
         {
             var ordered = originalItems
                 .Select((ii, index) => (Item: ii, Index: index))
@@ -519,18 +525,18 @@ namespace Sayl.Core.Services
                          - returnedByBatch.GetValueOrDefault(g.Key));
 
             var request = groupedRequest.ToDictionary(g => g.ProductId, g => g.Quantity);
-            var result = new List<(int LineIndex, int ProductId, int Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)>();
+            var result = new List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)>();
 
             foreach (var x in ordered)
             {
-                if (!request.TryGetValue(x.Item.ProductId, out int remaining) || remaining <= 0)
+                if (!request.TryGetValue(x.Item.ProductId, out decimal remaining) || remaining <= 0)
                     continue;
 
                 var key = (x.Item.ProductId, x.Item.BatchId);
-                if (!batchRemaining.TryGetValue(key, out int lineCapacity) || lineCapacity <= 0)
+                if (!batchRemaining.TryGetValue(key, out decimal lineCapacity) || lineCapacity <= 0)
                     continue;
 
-                int take = Math.Min(remaining, lineCapacity);
+                decimal take = Math.Min(remaining, lineCapacity);
                 if (take <= 0)
                     continue;
 
@@ -542,7 +548,7 @@ namespace Sayl.Core.Services
             return result;
         }
 
-        private async Task<Dictionary<int, int>> GetReturnedQuantitiesAsync(int originalInvoiceId, enInvoicesType returnType)
+        private async Task<Dictionary<int, decimal>> GetReturnedQuantitiesAsync(int originalInvoiceId, enInvoicesType returnType)
         {
             var returnedItems = await _dbContext.InvoiceItems
                 .Where(ii => ii.Invoice.OriginalInvoiceId == originalInvoiceId
@@ -563,7 +569,7 @@ namespace Sayl.Core.Services
         /// سطر/دفعة في AllocateAcrossOriginalLines: التوزيع لا يعيد إلى دفعة
         /// أكثر مما بِيع منها أصلًا عند تكرار المرتجعات الجزئية.
         /// </summary>
-        private async Task<Dictionary<(int ProductId, int? BatchId), int>> GetReturnedQuantitiesByBatchAsync(
+        private async Task<Dictionary<(int ProductId, int? BatchId), decimal>> GetReturnedQuantitiesByBatchAsync(
             int originalInvoiceId, enInvoicesType returnType)
         {
             var returnedItems = await _dbContext.InvoiceItems
@@ -577,7 +583,7 @@ namespace Sayl.Core.Services
             return returnedItems.ToDictionary(x => (x.ProductId, x.BatchId), x => x.Quantity);
         }
 
-        private async Task RestockProductAsync(int productId, int quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
+        private async Task RestockProductAsync(int productId, decimal quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
         {
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null || product.Type != "stock") return;
@@ -655,7 +661,7 @@ namespace Sayl.Core.Services
             inventory.UpdatedAt = nowUtc;
         }
 
-        private async Task DeductProductStockAsync(int productId, int quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
+        private async Task DeductProductStockAsync(int productId, decimal quantity, int? batchId, Invoice returnInvoice, DateTime nowUtc)
         {
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null || product.Type != "stock") return;
@@ -664,7 +670,7 @@ namespace Sayl.Core.Services
             if (inventory == null)
                 throw new InvalidOperationException($"لا يوجد سجل مخزون للمنتج {productId}");
 
-            int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
+            decimal available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
             if (available < quantity)
                 throw new InvalidOperationException($"المخزون غير كافٍ لمرتجع المورد للمنتج {product.Name}");
 
@@ -708,7 +714,7 @@ namespace Sayl.Core.Services
         /// <summary>خصم عبر الدفعات FEFO (الأقرب انتهاءً ثم المحجوبة أولًا) —
         /// يضمن أن كل نقصان مخزون يحمل من دفعة فعلية فتبقى معادلة
         /// «مجموع الدفعات = المخزون الكلي» قائمة.</summary>
-        private async Task DeductAcrossBatchesAsync(int productId, int quantity, Invoice returnInvoice, DateTime nowUtc)
+        private async Task DeductAcrossBatchesAsync(int productId, decimal quantity, Invoice returnInvoice, DateTime nowUtc)
         {
             DateOnly today = _storeClock.GetStoreToday(nowUtc); /* اليوم بمعنى المتجر من لقطة SQL (Task 2) */
             var batches = await _dbContext.Batches
@@ -718,11 +724,11 @@ namespace Sayl.Core.Services
                 .ThenBy(b => b.CreatedAt)
                 .ToListAsync();
 
-            int remaining = quantity;
+            decimal remaining = quantity;
             foreach (var b in batches)
             {
                 if (remaining <= 0) break;
-                int take = Math.Min(remaining, b.BatchQuantity);
+                decimal take = Math.Min(remaining, b.BatchQuantity);
                 b.BatchQuantity -= take;
                 remaining -= take;
 

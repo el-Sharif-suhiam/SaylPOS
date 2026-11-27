@@ -8,7 +8,7 @@ namespace Common.DTOs.ViewModel
     {
         public int ProductId { get; set; }
         public string ProductName { get; set; } = null!;
-        public int TotalQuantitySold { get; set; }
+        public decimal TotalQuantitySold { get; set; }
         public decimal TotalRevenue { get; set; }
     }
 }

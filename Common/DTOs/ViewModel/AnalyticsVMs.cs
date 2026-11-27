@@ -9,7 +9,7 @@ namespace Common.DTOs.ViewModel
     {
         public int ProductId { get; set; }
         public string ProductName { get; set; } = null!;
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public decimal Revenue { get; set; }
         public decimal Cost { get; set; }
         public decimal Profit { get; set; }
@@ -73,15 +73,15 @@ namespace Common.DTOs.ViewModel
         public int CountSessionId { get; set; }
         public int ProductId { get; set; }
         public string ProductName { get; set; } = null!;
-        public int BookQuantity { get; set; }
+        public decimal BookQuantity { get; set; }
         /// <summary>null = لم يُعد بعد.</summary>
-        public int? CountedQuantity { get; set; }
+        public decimal? CountedQuantity { get; set; }
         /// <summary>لحظة العد — null إن لم يُعد بعد.</summary>
         public DateTime? CountedAt { get; set; }
         public decimal UnitCost { get; set; }
         public bool IsPosted { get; set; }
         /// <summary>الفرق = المعدود − BookQuantity (المطابق لما سيُرحَّل بالضبط).</summary>
-        public int? Difference => CountedQuantity - BookQuantity;
+        public decimal? Difference => CountedQuantity - BookQuantity;
         /// <summary>التكلفة المالية للفرق — تحسبها الخدمة بتكاليف الدفعات المتأثرة فعلًا
         /// (COSTING.md): العجز عبر الدفعات FEFO بتكلفة كل دفعة، والفائض بتكلفة الاحتياط
         /// الموثقة Product.CostPrice. لا تُشتق من UnitCost العامة للسطر.</summary>
@@ -98,9 +98,9 @@ namespace Common.DTOs.ViewModel
         public int SurplusLines { get; set; }
         public int ShortageLines { get; set; }
         /// <summary>مجموع الفروق المطلقة بالكميات.</summary>
-        public int AbsolutDiff { get; set; }
+        public decimal AbsolutDiff { get; set; }
         /// <summary>صافي الفروق (+فائض/−عجز).</summary>
-        public int NetDiff { get; set; }
+        public decimal NetDiff { get; set; }
         /// <summary>التكلفة المالية لصافي الفروق (سالب = عجز).</summary>
         public decimal CostOfDifferences { get; set; }
     }

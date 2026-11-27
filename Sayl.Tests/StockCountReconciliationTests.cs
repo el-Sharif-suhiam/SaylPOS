@@ -106,11 +106,11 @@ public class StockCountReconciliationTests
         await db.SaveChangesAsync();
     }
 
-    private async Task<int> AvailableAsync(int productId)
+    private async Task<decimal> AvailableAsync(int productId)
     {
         await using var db = _fx.CreateContext();
         var inv = await db.Inventories.AsNoTracking().SingleAsync(i => i.ProductId == productId);
-        return inv.QuantityAvailable ?? 0;
+        return inv.QuantityAvailable ?? 0m;
     }
 
     private async Task<StockCount?> LineAsync(int countId)
@@ -120,7 +120,7 @@ public class StockCountReconciliationTests
     }
 
     /// <summary>فتح جلسة وعدّ كل السطور: قيم مخصصة للمنتجات المستهدفة، وقيمة الكتيب الحي للبقية (فرق صفر).</summary>
-    private async Task StartAndCountAsync(int userId, Dictionary<int, int> countedByProduct)
+    private async Task StartAndCountAsync(int userId, Dictionary<int, decimal> countedByProduct)
     {
         await using var db = _fx.CreateContext();
         var svc = new clsStockCountService(db);
@@ -129,7 +129,7 @@ public class StockCountReconciliationTests
 
         foreach (var line in await svc.GetOpenSessionAsync())
         {
-            int counted = countedByProduct.TryGetValue(line.ProductId, out int v) ? v : line.BookQuantity;
+            decimal counted = countedByProduct.TryGetValue(line.ProductId, out decimal v) ? v : line.BookQuantity;
             var r = await svc.SetCountedAsync(line.CountId, counted, userId);
             Assert.True(r.IsSuccess, r.Message);
         }

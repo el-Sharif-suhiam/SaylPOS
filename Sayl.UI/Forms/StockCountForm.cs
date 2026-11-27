@@ -221,9 +221,9 @@ namespace Sayl.UI.Forms
                     status = mark + AppClock.ToLocal(l.CountedAt.Value).ToString("HH:mm");
                 }
 
-                int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString(),
-                    l.CountedQuantity?.ToString() ?? "",
-                    l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "",
+                int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString("0.###"),
+                    l.CountedQuantity?.ToString("0.###") ?? "",
+                    l.Difference > 0 ? "+" + l.Difference!.Value.ToString("0.###") : l.Difference?.ToString("0.###") ?? "",
                     l.CountedQuantity.HasValue ? UiHelpers.Money(l.DifferenceCost) : "",
                     status);
                 _grid.Rows[row].Tag = l;
@@ -280,16 +280,17 @@ namespace Sayl.UI.Forms
             var line = _lines[pi];
             string? raw = _grid.Rows[args.RowIndex].Cells["colCounted"].Value?.ToString()?.Trim();
 
-            int? counted = null;
+            // كميات عشرية: تحليل عشري + تقريب إلى 3 منازل (AwayFromZero) — الصفر معدود صالح
+            decimal? counted = null;
             if (!string.IsNullOrEmpty(raw))
             {
-                if (!int.TryParse(raw, out int value) || value < 0)
+                if (!decimal.TryParse(raw, out decimal value) || value < 0)
                 {
                     UiHelpers.ShowError(this, AppLang.T("StockCount.Msg.CountedInvalid"));
                     await LoadSessionAsync();
                     return;
                 }
-                counted = value;
+                counted = Math.Round(value, 3, MidpointRounding.AwayFromZero);
             }
 
             try
@@ -388,10 +389,10 @@ namespace Sayl.UI.Forms
             var rows = _lines.Select(l => new[]
             {
                 l.ProductName,
-                l.BookQuantity.ToString(),
-                l.CountedQuantity?.ToString() ?? "-",
+                l.BookQuantity.ToString("0.###"),
+                l.CountedQuantity?.ToString("0.###") ?? "-",
                 l.CountedAt.HasValue ? AppClock.ToLocal(l.CountedAt.Value).ToString("yyyy-MM-dd HH:mm") : "-",
-                l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
+                l.Difference > 0 ? "+" + l.Difference!.Value.ToString("0.###") : l.Difference?.ToString("0.###") ?? "-",
                 l.CountedQuantity.HasValue ? l.DifferenceCost.ToString("N2") : "-"
             }).ToList();
             return (headers, rows);

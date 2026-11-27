@@ -77,7 +77,7 @@ public class ExpiredBatchRestockTests
         await db.Batches.Where(b => b.BatchId == sourceBatchId)
             .ExecuteUpdateAsync(u => u.SetProperty(b => b.ExpiryDate, Today.AddDays(-1)));
 
-        int batchQtyBefore = await db.Batches.AsNoTracking()
+        decimal batchQtyBefore = await db.Batches.AsNoTracking()
             .Where(b => b.BatchId == sourceBatchId).Select(b => b.BatchQuantity).SingleAsync();
 
         var result = await new clsReturnService(db).CreateCustomerReturnAsync(new DtoReturnRequest
@@ -105,7 +105,7 @@ public class ExpiredBatchRestockTests
         Assert.False(blocked.IsSuccess, "expired restocked stock must remain unsellable");
 
         // المتاح الصافي يستثني المنتهي: كل المخزون (9) داخل دفعة منتهية ← صافي 0
-        int net = await new clsProductService(db).GetNetAvailableQuantityAsync(productId);
+        decimal net = await new clsProductService(db).GetNetAvailableQuantityAsync(productId);
         Assert.Equal(0, net);
     }
 
@@ -155,10 +155,10 @@ public class ExpiredBatchRestockTests
         Assert.Equal(1, retBatch.BatchQuantity);
 
         // المخزون الكلي زاد لكن المتاح الصافي يستثني المحجوب
-        int inventory = await db.Inventories.AsNoTracking()
+        decimal inventory = await db.Inventories.AsNoTracking()
             .Where(i => i.ProductId == seed.ProductId).Select(i => i.QuantityAvailable ?? 0).SingleAsync();
         Assert.Equal(1, inventory);
-        int net = await new clsProductService(db).GetNetAvailableQuantityAsync(seed.ProductId);
+        decimal net = await new clsProductService(db).GetNetAvailableQuantityAsync(seed.ProductId);
         Assert.Equal(0, net);
 
         // والبيع من المخزون المحجوب مرفوض

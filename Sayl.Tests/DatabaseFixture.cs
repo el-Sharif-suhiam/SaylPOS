@@ -75,6 +75,8 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
             ExecuteBatches(LoadUpgrade20Script());
             // لقطات وحدة الإدخال على بنود الفواتير: أعمدة NULL بلا ترحيل (المرحلة 3)
             ExecuteBatches(LoadUpgrade21Script());
+            // الكميات العشرية: 10 أعمدة كمية -> DECIMAL(10,3) + فحص الحجز (المرحلة 4)
+            ExecuteBatches(LoadUpgrade22Script());
             // بوابة فشل-آمن: الهوية يجب أن تُتحقق قبل أن يلمس أي اختبار البيانات
             VerifyTestDatabaseIdentity();
             return Task.CompletedTask;
@@ -180,6 +182,9 @@ public sealed partial class DatabaseFixture : IAsyncLifetime
 
     private static string LoadUpgrade21Script() =>
         File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_21_TransactionUnitSnapshots.sql"));
+
+    private static string LoadUpgrade22Script() =>
+        File.ReadAllText(Path.Combine(RepoRoot, "Upgrade_22_QuantityColumnsDecimal.sql"));
 
     /// <summary>
     /// إسقاط قاعدة اختبار بالاسم المطلوب — بعد حاجزين إلزاميين:

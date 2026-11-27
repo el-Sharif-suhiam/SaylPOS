@@ -33,7 +33,7 @@ namespace Common.DTOs.RequestModels
     {
         public int ProductId { get; set; }
         public string ProductName { get; set; } = string.Empty;
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public int? BatchId { get; set; }
 
         /// <summary>VULN-14: سعر الوحدة وقت إضافة البند للسلة (snapshot) —

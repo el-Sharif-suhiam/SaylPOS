@@ -18,11 +18,11 @@ namespace Sayl.Core.Models
 
         public string ProductName { get; set; } = null!;
 
-        /// <summary>الكمية الدفترية لحظة بدء الجرد (Snapshot — لا تتغير بعده).</summary>
-        public int BookQuantity { get; set; }
+        /// <summary>الكمية الدفترية لحظة بدء الجرد (Snapshot — لا تتغير بعده). Upgrade_22: كسرية.</summary>
+        public decimal BookQuantity { get; set; }
 
         /// <summary>الكمية المعدودة فعليًا — nullable حتى يُعدّ المنتج.</summary>
-        public int? CountedQuantity { get; set; }
+        public decimal? CountedQuantity { get; set; }
 
         public decimal UnitCost { get; set; }
 
@@ -30,7 +30,7 @@ namespace Sayl.Core.Models
         /// الفرق = المعدود − الدفتري عند لحظة العد الفعلي (BookQuantityAtCount).
         /// يحافظ على أي حركات حصلت بعد العد في الرصيد النهائي.
         /// </summary>
-        public int? Difference => CountedQuantity - (BookQuantityAtCount ?? BookQuantity);
+        public decimal? Difference => CountedQuantity - (BookQuantityAtCount ?? BookQuantity);
 
         /// <summary>عرض تقريبي قديم من UnitCost المخزنة (سعر آخر شراء لحظة بدء الجلسة) —
         /// لا يُستخدم في التقييم. التقييم الرسمي بتكاليف الدفعات الفعلية تُحسبه الخدمة
@@ -50,7 +50,7 @@ namespace Sayl.Core.Models
         /// الكمية الدفترية لحظة العد الفعلي (snapshot). تُستخدم لحساب الفرق عند الترحيل —
         /// لا لقطة قديمة من بدء الجلسة. null يعني أنه لم يُعد بعد.
         /// </summary>
-        public int? BookQuantityAtCount { get; set; }
+        public decimal? BookQuantityAtCount { get; set; }
 
         /// <summary>
         /// STOCK COUNT IDEMPOTENCY: معرّف حركة التسوية (StockMovement) المرتبطة بهذا السطر.

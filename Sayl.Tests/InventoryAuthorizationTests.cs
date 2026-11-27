@@ -98,9 +98,9 @@ public class InventoryAuthorizationTests
     /// <summary>لقطة كاملة لحالة المنتج المخزنية: الدفعات + المخزون + الحركات —
     /// تُقارن قبل/بعد المحاولة غير المصرَّحة لتثبت «لا أثر إطلاقًا».</summary>
     private sealed record ProductSnapshot(
-        List<(int BatchId, string BatchNumber, int Quantity, decimal? UnitCost, DateOnly? Expiry, bool Quarantined)> Batches,
-        (int? Available, int? Reserved)? Inventory,
-        List<(string MovementType, int Quantity, string SourceType, int? BatchId)> Movements);
+        List<(int BatchId, string BatchNumber, decimal Quantity, decimal? UnitCost, DateOnly? Expiry, bool Quarantined)> Batches,
+        (decimal? Available, decimal? Reserved)? Inventory,
+        List<(string MovementType, decimal Quantity, string SourceType, int? BatchId)> Movements);
 
     private async Task<ProductSnapshot> SnapshotAsync(int productId)
     {

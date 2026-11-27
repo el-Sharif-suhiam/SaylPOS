@@ -200,7 +200,7 @@ namespace Sayl.UI.Forms
                 _gridItems.Rows.Clear();
                 foreach (var item in inv.Items)
                     _gridItems.Rows.Add(item.ProductName, item.BatchNumber ?? "-",
-                        item.Quantity, UiHelpers.Money(item.ItemPrice),
+                        item.Quantity.ToString("0.###"), UiHelpers.Money(item.ItemPrice),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
 
                 _gridPayments.Rows.Clear();

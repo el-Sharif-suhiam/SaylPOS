@@ -93,7 +93,8 @@ BEGIN
         WHERE object_id = OBJECT_ID(N'dbo.StockCounts') AND name = N'BookQuantityAtCount'
     )
     BEGIN
-        ALTER TABLE dbo.StockCounts ADD BookQuantityAtCount INT NULL;
+        -- Upgrade_22: decimal من الأول — عمود قائم INT يحوّله سكربت Upgrade_22
+        ALTER TABLE dbo.StockCounts ADD BookQuantityAtCount DECIMAL(10,3) NULL;
     END;
 
     -- عمود PostedMovementId (IDEMPOTENCY FIX): يربط السطر بحركة التسوية المقابلة.
@@ -231,26 +232,26 @@ END";
         //   يُقيَّم صراحةً بـProduct.CostPrice احتياطًا موثقًا.
         // ─────────────────────────────────────────────────
         /// <summary>صنف الدفعة للاستهلاك FEFO: كميتها الحالية وتكلفتها.</summary>
-        private sealed record FefoBatch(int Quantity, decimal? UnitCost);
+        private sealed record FefoBatch(decimal Quantity, decimal? UnitCost);
 
         /// <summary>قيمة الفرق (سالب = عجز / موجب = فائض / صفر) بتكاليف الدفعات الفعلية.
         /// fefoBatches = دفعات المنتج بكمية > 0 بترتيب FEFO نفسه الذي يستهلكه
         /// AdjustStockAsync (نقصان بلا رقم دفعة). productCost = Product.CostPrice
         /// الاحتياطي الموثق للدفعات بلا تكلفة وللفائض.</summary>
-        private static decimal ComputeVarianceValue(int diff, decimal productCost, IReadOnlyList<FefoBatch> fefoBatches)
+        private static decimal ComputeVarianceValue(decimal diff, decimal productCost, IReadOnlyList<FefoBatch> fefoBatches)
         {
-            if (diff == 0)
+            if (diff == 0m)
                 return 0m;
 
             if (diff > 0)
                 return diff * productCost; // الفائض: دفعة تلقائية بلا تكلفة → احتياط Product.CostPrice
 
             decimal value = 0m;
-            int remaining = -diff; // حجم العجز
+            decimal remaining = -diff; // حجم العجز
             foreach (var b in fefoBatches)
             {
                 if (remaining <= 0) break;
-                int take = Math.Min(remaining, b.Quantity); // استهلاك جزئي ممكن — نفس منطق الترحيل
+                decimal take = Math.Min(remaining, b.Quantity); // استهلاك جزئي ممكن — نفس منطق الترحيل
                 value -= take * (b.UnitCost ?? productCost);
                 remaining -= take;
             }
@@ -312,7 +313,7 @@ END";
                     // uncounted line: live book (snapshot + movements since session start)
                     PostCountMovements = _dbContext.StockMovements
                         .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
-                        .Sum(m => (int?)m.Quantity) ?? 0
+                        .Sum(m => (decimal?)m.Quantity) ?? 0
                 })
                 .ToListAsync();
 
@@ -322,8 +323,8 @@ END";
             foreach (var sc in rows)
             {
                 // uncounted line: الكتيب الحي؛ counted line: الكتيب لحظة العد الفعلي
-                int book = sc.CountedAt.HasValue
-                    ? sc.BookQuantityAtCount ?? 0
+                decimal book = sc.CountedAt.HasValue
+                    ? sc.BookQuantityAtCount ?? 0m
                     : sc.BookQuantity + sc.PostCountMovements;
 
                 var vms = new StockCountVM
@@ -385,7 +386,7 @@ END";
         /// صلاحية: يتطلب actorUserId صاحب صلاحية شاشة المخزون (بوابة في الخدمة —
         /// غياب الهوية أو معرف 0 يُرفض، ولا يُعدَّل السطر أبدًا بلا تصريح).
         /// </summary>
-        public async Task<Result> SetCountedAsync(int countId, int? counted, int actorUserId)
+        public async Task<Result> SetCountedAsync(int countId, decimal? counted, int actorUserId)
         {
             // بوابة الصلاحية قبل أي قراءة/قفل/كتابة
             var permissionCheck = await CheckInventoryPermissionAsync(actorUserId);
@@ -410,13 +411,16 @@ END";
 
                 if (counted.HasValue)
                 {
+                    // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+                    counted = Math.Round(counted.Value, 3, MidpointRounding.AwayFromZero);
+
                     // snapshot الكمية الدفترية لحظة العد — يُقرأ من القاعدة مباشرة
                     // (AsNoTracking: تجنب كيان متتبعًا قديمًا من نفس السياق)،
                     // ويحفظ أي حركات لاحقة للعد في الرصيد النهائي
                     var inventory = await _dbContext.Inventories
                         .AsNoTracking()
                         .FirstOrDefaultAsync(i => i.ProductId == line.ProductId);
-                    line.BookQuantityAtCount = inventory?.QuantityAvailable ?? 0;
+                    line.BookQuantityAtCount = inventory?.QuantityAvailable ?? 0m;
                     // لقطة وقت العد من ساعة SQL الموثقة لا ساعة الجهاز (Task 5)
                     line.CountedAt = await _storeClock.GetUtcNowAsync(_dbContext);
                     line.CountedQuantity = counted;
@@ -459,7 +463,7 @@ END";
                     ProductCost = sc.Product.CostPrice,
                     Movements = _dbContext.StockMovements
                         .Where(m => m.ProductId == sc.ProductId && m.CreatedAt >= sc.CreatedAt)
-                        .Sum(m => (int?)m.Quantity) ?? 0
+                        .Sum(m => (decimal?)m.Quantity) ?? 0
                 })
                 .ToListAsync();
 
@@ -475,8 +479,8 @@ END";
             foreach (var l in lines)
             {
                 // BookQuantityAtCount = snapshot لحظة العد; null = توافق خلفي (live book)
-                int effectiveBook = l.BookQuantityAtCount ?? (l.BookQuantity + l.Movements);
-                int diff = l.CountedQuantity!.Value - effectiveBook;
+                decimal effectiveBook = l.BookQuantityAtCount ?? (l.BookQuantity + l.Movements);
+                decimal diff = l.CountedQuantity!.Value - effectiveBook;
                 summary.AbsolutDiff += Math.Abs(diff);
                 summary.NetDiff += diff;
                 // تقييم بتكاليف الدفعات (FEFO للعجز / احتياط Product.CostPrice للفائض)
@@ -580,11 +584,11 @@ END";
                     // والتتبع فقط)؛ ضمان عدم التكرار يأتي من التحقق من مجموعة الحركات
                     // كاملةً بمفتاح SourceId = CountId — لا من العمود المفرد.
                     // عند التعارض: لا إعادة تطبيق ولا وسم «مرحّل» — فشل واضح يطلب تحقيقًا يدويًا.
-                    int thisLineAggregate = existing.Sum(m => m.Quantity);
+                    decimal thisLineAggregate = existing.Sum(m => m.Quantity);
 
                     // BookQuantityAtCount = snapshot لحظة العد الفعلي — الدفتري الصحيح للمقارنة
                     // null = توافق خلفي: استخدم الكتيب الحي عند بدء الجلسة
-                    int effectiveBook;
+                    decimal effectiveBook;
                     if (line.BookQuantityAtCount.HasValue)
                     {
                         effectiveBook = line.BookQuantityAtCount.Value;
@@ -597,10 +601,10 @@ END";
                         // كي يبقى الفرق = فرق العد الأصلي ويقابله مجموع حركات السطر الملتزمة.
                         // (SourceId لكل سطر على حدة — حركات سطور أخرى لا تمس هذا السطر.)
                         effectiveBook = line.BookQuantity
-                            + ((movementNet.TryGetValue(line.ProductId, out int net) ? net : 0) - thisLineAggregate);
+                            + ((movementNet.TryGetValue(line.ProductId, out decimal net) ? net : 0m) - thisLineAggregate);
                     }
 
-                    int diff = line.CountedQuantity!.Value - effectiveBook;
+                    decimal diff = line.CountedQuantity!.Value - effectiveBook;
 
                     if (existing.Count > 0)
                     {

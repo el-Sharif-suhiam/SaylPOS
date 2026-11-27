@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -20,7 +20,7 @@ namespace Common.DTOs
 
         public decimal CostPrice { get; set; }
 
-        public int? ReorderLevel { get; set; }
+        public decimal? ReorderLevel { get; set; }
 
         public bool IsActive { get; set; }
 

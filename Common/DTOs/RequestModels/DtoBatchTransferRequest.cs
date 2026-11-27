@@ -8,7 +8,7 @@ namespace Common.DTOs.RequestModels
     {
         public int SourceBatchId { get; set; }
         public string TargetBatchNumber { get; set; } = null!;
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public DateOnly? TargetExpiryDate { get; set; }
         public int UserId { get; set; }
     }

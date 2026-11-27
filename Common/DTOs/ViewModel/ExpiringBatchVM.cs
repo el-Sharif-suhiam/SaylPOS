@@ -12,7 +12,7 @@ namespace Common.DTOs.ViewModel
         public string ProductName { get; set; } = null!;
         public string BatchNumber { get; set; } = null!;
         public DateOnly ExpiryDate { get; set; }
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public int DaysUntilExpiry { get; set; }
         public bool IsExpired { get; set; }
     }

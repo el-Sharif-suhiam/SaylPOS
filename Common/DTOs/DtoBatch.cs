@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -14,7 +14,7 @@ namespace Common.DTOs
 
         public DateOnly? ExpiryDate { get; set; }
 
-        public int BatchQuantity { get; set; }
+        public decimal BatchQuantity { get; set; }
 
         public bool IsQuarantined { get; set; }
 

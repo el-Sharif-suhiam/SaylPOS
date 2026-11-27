@@ -73,20 +73,20 @@ public class AdjustStockMovementTests
     }
 
     /// <summary>حركات التسوية (ManualAdjustment) للمنتج مرتبة زمنيًا مع رقم دفعتها.</summary>
-    private static async Task<List<(int BatchId, int Quantity)>> MovementsAsync(DatabaseFixture fx, int productId)
+    private static async Task<List<(int BatchId, decimal Quantity)>> MovementsAsync(DatabaseFixture fx, int productId)
     {
         await using var db = fx.CreateContext();
         return await db.StockMovements.AsNoTracking()
             .Where(m => m.ProductId == productId && m.SourceType == "ManualAdjustment")
             .OrderBy(m => m.MovementId)
-            .Select(m => new ValueTuple<int, int>(m.BatchId ?? 0, m.Quantity))
+            .Select(m => new ValueTuple<int, decimal>(m.BatchId ?? 0, m.Quantity))
             .ToListAsync();
     }
 
-    private static async Task<int> AvailableAsync(DatabaseFixture fx, int productId)
+    private static async Task<decimal> AvailableAsync(DatabaseFixture fx, int productId)
     {
         await using var db = fx.CreateContext();
-        return (await db.Inventories.AsNoTracking().SingleAsync(i => i.ProductId == productId)).QuantityAvailable ?? 0;
+        return (await db.Inventories.AsNoTracking().SingleAsync(i => i.ProductId == productId)).QuantityAvailable ?? 0m;
     }
 
     // ══ 1) نقصان من دفعة واحدة — حركة واحدة بالكمية الصحيحة ══
@@ -276,7 +276,7 @@ public class AdjustStockMovementTests
 
         // مجموع الدفعات = المتاح (الثابت المحفوظ في كل منطق التسوية)
         await using var db = _fx.CreateContext();
-        int batchSum = await db.Batches.Where(b => b.ProductId == seed.ProductId).SumAsync(b => b.BatchQuantity);
+        decimal batchSum = await db.Batches.Where(b => b.ProductId == seed.ProductId).SumAsync(b => b.BatchQuantity);
         Assert.Equal(10, batchSum);
     }
 

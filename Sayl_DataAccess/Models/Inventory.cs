@@ -7,9 +7,9 @@ public partial class Inventory
 {
     public int ProductId { get; set; }
 
-    public int? QuantityAvailable { get; set; }
+    public decimal? QuantityAvailable { get; set; }
 
-    public int? QuantityReserved { get; set; }
+    public decimal? QuantityReserved { get; set; }
 
     public DateTime? UpdatedAt { get; set; }
 

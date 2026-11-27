@@ -7,7 +7,7 @@ namespace Common.DTOs.RequestModels
     public class DtoStockAdjustmentRequest
     {
         public int ProductId { get; set; }
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public bool IsIncrease { get; set; }
         public string Reason { get; set; } = null!;
         public string? BatchNumber { get; set; }

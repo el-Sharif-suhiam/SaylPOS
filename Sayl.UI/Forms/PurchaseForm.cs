@@ -223,12 +223,15 @@ namespace Sayl.UI.Forms
 
             // NumericUpDown بدل TextBox للكمية: أسهم + حد أدنى/أقصى مدمج —
             // Minimum=1 يمنع الصفر والسالب بلا تحقق يدوي.
+            // كميات عشرية: 3 منازل عشرية (كغم/لتر) — Phase 4
             _nudQty = new NumericUpDown
             {
                 Minimum = 1,
                 Maximum = 10000,
                 Value = 1,
-                Width = 60,
+                DecimalPlaces = 3,
+                Increment = 1m,
+                Width = 76,
                 Height = 30,
                 Font = AppTheme.FontBody,
                 Margin = new Padding(2, 2, 4, 0)
@@ -578,7 +581,7 @@ namespace Sayl.UI.Forms
 
             var p = _products[_lstProducts.SelectedIndex];
             int productId = p.ProductId;
-            int requestedQty = (int)_nudQty.Value;   // الكمية المطلوبة
+            decimal requestedQty = Math.Round(_nudQty.Value, 3, MidpointRounding.AwayFromZero);   // الكمية المطلوبة
 
             // 1) ابحث إذا كان المنتج موجودًا مسبقًا
             foreach (DataGridViewRow row in _grid.Rows)
@@ -586,8 +589,8 @@ namespace Sayl.UI.Forms
                 if (row.IsNewRow) continue;
                 if (row.Tag is int id && id == productId)
                 {
-                    int currentQty = (int)ParseDecimal(row.Cells["colQty"].Value);
-                    row.Cells["colQty"].Value = (currentQty + requestedQty).ToString();
+                    decimal currentQty = ParseDecimal(row.Cells["colQty"].Value);
+                    row.Cells["colQty"].Value = (currentQty + requestedQty).ToString("0.###");
                     _grid.CurrentCell = row.Cells["colQty"];
                     RecalcTotals();
                     return;
@@ -598,7 +601,7 @@ namespace Sayl.UI.Forms
             int rowIndex = _grid.Rows.Add(
                 p.Name,
                 string.Empty,
-                requestedQty.ToString(),
+                requestedQty.ToString("0.###"),
                 p.CostPrice.ToString("0.##"),
                 string.Empty,
                 string.Empty,
@@ -707,8 +710,9 @@ namespace Sayl.UI.Forms
                 }
 
                 decimal qtyRaw = ParseDecimal(row.Cells["colQty"].Value);
-                int qty = (int)qtyRaw;
-                if (qtyRaw <= 0 || qtyRaw != qty)
+                // كميات عشرية: تقريب إلى 3 منازل (AwayFromZero) — يُرفض الصفر والسالب فقط
+                decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
+                if (qty <= 0)
                 {
                     UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.QtyInvalidFor", productName));
                     _grid.CurrentCell = row.Cells["colQty"];

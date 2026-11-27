@@ -109,9 +109,9 @@ namespace Sayl.Core.Services
                             ProductId = p.ProductId,
                             ProductName = p.Name,
                             Unit = p.Unit,
-                            QuantityAvailable = inv.QuantityAvailable ?? 0,
-                            QuantityReserved = inv.QuantityReserved ?? 0,
-                            ReorderLevel = p.ReorderLevel ?? 0,
+                            QuantityAvailable = inv.QuantityAvailable ?? 0m,
+                            QuantityReserved = inv.QuantityReserved ?? 0m,
+                            ReorderLevel = p.ReorderLevel ?? 0m,
                             LastCountedAt = inv.LastCountedAt
                         };
 
@@ -154,9 +154,9 @@ namespace Sayl.Core.Services
                                   ProductId = p.ProductId,
                                   ProductName = p.Name,
                                   Unit = p.Unit,
-                                  QuantityAvailable = inv.QuantityAvailable ?? 0,
-                                  QuantityReserved = inv.QuantityReserved ?? 0,
-                                  ReorderLevel = p.ReorderLevel ?? 0,
+                                  QuantityAvailable = inv.QuantityAvailable ?? 0m,
+                                  QuantityReserved = inv.QuantityReserved ?? 0m,
+                                  ReorderLevel = p.ReorderLevel ?? 0m,
                                   LastCountedAt = inv.LastCountedAt
                               })
                              .ToListAsync();
@@ -799,9 +799,9 @@ namespace Sayl.Core.Services
                                        ProductId = p.ProductId,
                                        ProductName = p.Name,
                                        Unit = p.Unit,
-                                       QuantityAvailable = inv.QuantityAvailable ?? 0,
-                                       QuantityReserved = inv.QuantityReserved ?? 0,
-                                       ReorderLevel = p.ReorderLevel ?? 0,
+                                       QuantityAvailable = inv.QuantityAvailable ?? 0m,
+                                       QuantityReserved = inv.QuantityReserved ?? 0m,
+                                       ReorderLevel = p.ReorderLevel ?? 0m,
                                        LastCountedAt = inv.LastCountedAt
                                    })
                                   .ToListAsync();
@@ -1017,12 +1017,12 @@ namespace Sayl.Core.Services
             static decimal NetRatio(decimal total, decimal net)
                 => total != 0 ? net / total : 0m;
 
-            var agg = new Dictionary<int, (string Name, int Qty, decimal Revenue, decimal Cost)>();
-            void Accumulate(int productId, string name, int qty, decimal revenue, decimal cost, int sign)
+            var agg = new Dictionary<int, (string Name, decimal Qty, decimal Revenue, decimal Cost)>();
+            void Accumulate(int productId, string name, decimal qty, decimal revenue, decimal cost, int sign)
             {
                 var cur = agg.TryGetValue(productId, out var v)
                     ? v
-                    : (Name: name, Qty: 0, Revenue: 0m, Cost: 0m);
+                    : (Name: name, Qty: 0m, Revenue: 0m, Cost: 0m);
                 agg[productId] = (cur.Name, cur.Qty + sign * qty, cur.Revenue + sign * revenue, cur.Cost + sign * cost);
             }
 
@@ -1039,7 +1039,7 @@ namespace Sayl.Core.Services
             var list = new List<ProductProfitVM>();
             foreach (var (productId, row) in agg)
             {
-                if (row.Qty <= 0) continue; // صافي الصفر لا يفيد التحليل
+                if (row.Qty <= 0m) continue; // صافي الصفر لا يفيد التحليل (مقارنة عشرية تامة الدقة)
 
                 decimal revenue = row.Revenue;
                 decimal cost = row.Cost;

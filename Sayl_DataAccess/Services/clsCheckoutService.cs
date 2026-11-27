@@ -38,7 +38,7 @@ BEGIN
             CONSTRAINT PK_StockReservations PRIMARY KEY,
         InvoiceId INT NOT NULL,
         ProductId INT NOT NULL,
-        Quantity INT NOT NULL CONSTRAINT DF_StockReservations_Quantity DEFAULT (1),
+        Quantity DECIMAL(10,3) NOT NULL CONSTRAINT DF_StockReservations_Quantity DEFAULT (1), /* Upgrade_22: كميات كسرية */
         /* Upgrade_15: افتراضية UTC لا GETDATE — منطقة زمنية واحدة مع الكُتّاب (DateTime.UtcNow / GETUTCDATE) */
         CreatedAt DATETIME2 NULL CONSTRAINT DF_StockReservations_CreatedAt DEFAULT (SYSUTCDATETIME()),
 
@@ -93,6 +93,9 @@ END";
             {
                 if (item.Quantity <= 0)
                     return Result<int>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+                item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
             }
 
             // صلاحية الخصم: خصم أكبر من حد الكاشير يتطلب شاشة فواتير البيع (بت 16)
@@ -665,7 +668,7 @@ END";
         {
             foreach (var group in items.GroupBy(i => i.ProductId))
             {
-                int quantity = group.Sum(i => i.Quantity);
+                decimal quantity = group.Sum(i => i.Quantity);
                 var product = await _dbContext.Products.FindAsync(group.Key);
                 if (product == null || product.Type != "stock") continue;
 
@@ -680,7 +683,7 @@ END";
                 if (inv == null)
                     throw new InvalidOperationException($"لا يوجد مخزون للمنتج {group.First().ProductName}");
 
-                int available = (inv.QuantityAvailable ?? 0 ) - (inv.QuantityReserved ?? 0);
+                decimal available = (inv.QuantityAvailable ?? 0m) - (inv.QuantityReserved ?? 0m);
                 if (available < quantity)
                     throw new InvalidOperationException($"المخزون المتاح غير كافٍ للمنتج {product.Name}");
 
@@ -720,16 +723,25 @@ END";
         /// <summary>VULN-20: طرح المحجوز مع حماية عدم السالب القائمة + تشخيص عند
         /// الانحراف الفعلي فقط (قبل الطرح &lt; المطلق) — لا سجل عند الطرح السليم.
         /// التدقيق عبر LogRejectedAsync (اتصال مستقل، أفضل جهد): التباعد حالة بيانات
-        /// قائمة قبل المعاملة، فالسجل ينجو من تراجعها ولا يكسر مسار التحرير أبدًا.</summary>
-        private async Task ClampReservedWithDiagnosticAsync(Inventory inv, int released, int productId, int invoiceId)
+        /// قائمة قبل المعاملة، فالسجل ينجو من تراجعها ولا يكسر مسار التحرير أبدًا.
+        /// الكميات العشرية: بقايا أقل من 0.0005 (ضجيج تقريب دون مقياس 3 منازل)
+        /// تُقصَّص إلى صفر بصمت؛ انحراف أكبر يُسجَّل تشخيصيًا كما كان.</summary>
+        private async Task ClampReservedWithDiagnosticAsync(Inventory inv, decimal released, int productId, int invoiceId)
         {
-            int before = inv.QuantityReserved ?? 0;
-            int after = before - released;
+            decimal before = inv.QuantityReserved ?? 0m;
+            decimal after = before - released;
             if (after < 0)
             {
+                if (Math.Abs(after) < 0.0005m)
+                {
+                    // بقايا تقريب دون مقياس 3 منازل — قصّص صامتًا إلى صفر (لا انحراف حقيقي)
+                    inv.QuantityReserved = 0m;
+                    return;
+                }
+
                 await clsAudit.LogRejectedAsync(_dbContext, null, "ReservationUnderflow",
                     $"تحت الطرح في المخزون المحجوز: المنتج #{productId} — الفاتورة #{invoiceId} — قبل الطرح {before} — الكمية المطلق تحريرها {released} — قُصَّص إلى 0 (انحراف حجز/مخزون يحتاج تدقيقًا يدويًا).");
-                inv.QuantityReserved = 0;
+                inv.QuantityReserved = 0m;
             }
             else
             {
@@ -760,14 +772,14 @@ END";
                     throw new InvalidOperationException($"لا يوجد مخزون للمنتج {item.ProductName}");
 
                 ownReservations.TryGetValue(item.ProductId, out var ownRow);
-                int ownRemaining = releaseReservation ? ownRow?.Quantity ?? 0 : 0;
+                decimal ownRemaining = releaseReservation ? ownRow?.Quantity ?? 0m : 0m;
 
                 // B1: التوفر يُحسب من الحجز المتبقي فعلاً فقط — وحين تكمل الفاتورة
                 // نفسها يُستثنى حجزها الذاتي من المحجوز لأنه يُستهلك بهذه العملية.
                 // VULN-10: صف Inventory بـ NULL كان يتخطى فحص التوفر كليًا (is not null)
                 // فباعة بلا حاجز بينما تبقى قيمة NULL تنجرف. الآن: NULL يعامل كصفر —
                 // البيع يرفض برسالة واضحة، والقيمة الفاسدة تظهر بدل أن تختبئ.
-                int availableNow = (inv.QuantityAvailable ?? 0) - ((inv.QuantityReserved ?? 0) - ownRemaining);
+                decimal availableNow = (inv.QuantityAvailable ?? 0m) - ((inv.QuantityReserved ?? 0m) - ownRemaining);
                 if (availableNow < item.Quantity)
                     throw new InvalidOperationException($"المخزون غير كافٍ للمنتج {product.Name}");
 
@@ -790,12 +802,12 @@ END";
                         .ThenBy(b => b.CreatedAt)
                         .ToListAsync();
 
-                    int remaining = item.Quantity;
-                    var allocations = new List<(Batch Batch, int Take)>();
+                    decimal remaining = item.Quantity;
+                    var allocations = new List<(Batch Batch, decimal Take)>();
                     foreach (var batch in batches)
                     {
                         if (remaining <= 0) break;
-                        int take = Math.Min(remaining, batch.BatchQuantity);
+                        decimal take = Math.Min(remaining, batch.BatchQuantity);
                         batch.BatchQuantity -= take;
                         remaining -= take;
 
@@ -858,9 +870,9 @@ END";
                 {
                     // يُحرَّر من حجز هذه الفاتورة الذاتي فقط — عبر صف StockReservations
                     // الخاص بها (ownRow ينقص عبر بنود نفس المنتج سطرًا سطرًا)
-                    int ownRelease = Math.Min(item.Quantity, ownRow.Quantity);
+                    decimal ownRelease = Math.Min(item.Quantity, ownRow.Quantity);
                     ownRow.Quantity -= ownRelease;
-                    if (ownRow.Quantity <= 0)
+                    if (ownRow.Quantity <= 0m)
                         _dbContext.StockReservations.Remove(ownRow);
 
                     // VULN-20: نفس التشخيص — موقع القصّص الثاني (مسار الإكمال)

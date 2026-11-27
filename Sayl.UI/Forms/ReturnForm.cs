@@ -27,7 +27,7 @@ namespace Sayl.UI.Forms
         // المتبقي للإرجاع لكل منتج (المباع − المرتجع سابقًا) — يُحسب عند التحميل
         // من بيانات الخدمة نفسها التي يحرس بها المرتجع. عرض وتنبيه فقط:
         // الفيصل النهائي يبقى حارس clsReturnService داخل المعاملة.
-        private Dictionary<int, int> _remainingByProduct = new();
+        private Dictionary<int, decimal> _remainingByProduct = new();
 
         /// <summary>VULN-05: جلسة الدرج النشطة — نقد الاسترداد يُنسب لها في تقرير Z
         /// (لا لجلسة الفاتورة الأصلية المتجمدة). يمرَّر من PosForm عند الفتح.</summary>
@@ -310,7 +310,7 @@ namespace Sayl.UI.Forms
 
                 // المرتجع سابقًا لكل منتج — من الخدمة نفسها التي يحرس بها المرتجع،
                 // ليبدو «المتبقي للإرجاع» مطابقًا لما سيقبله الحارس فعلًا.
-                Dictionary<int, int> previouslyReturned;
+                Dictionary<int, decimal> previouslyReturned;
                 using (var returnScope = Program.Services.CreateScope())
                 {
                     var returnService = returnScope.ServiceProvider.GetRequiredService<clsReturnService>();
@@ -328,9 +328,9 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in _items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity,
-                        previouslyReturned.GetValueOrDefault(item.ProductId),
-                        _remainingByProduct.GetValueOrDefault(item.ProductId),
+                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"),
+                        previouslyReturned.GetValueOrDefault(item.ProductId).ToString("0.###"),
+                        _remainingByProduct.GetValueOrDefault(item.ProductId).ToString("0.###"),
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
 
                 _lblInfo.Text = AppLang.T("Return.Info.Loaded", result.Data.InvoiceNumber,
@@ -371,12 +371,14 @@ namespace Sayl.UI.Forms
 
             // الإدخال يُجمَّع لكل منتج أولاً (قد يتكرر المنتج على سطور متعددة لدفاعاته)
             // ثم يُفحص ضد المتبقي للإرجاع — نفس حارس الخدمة بالضبط (عرض هنا، فيصل هناك).
-            var enteredByProduct = new Dictionary<int, int>();
+            var enteredByProduct = new Dictionary<int, decimal>();
 
             for (int i = 0; i < _grid.Rows.Count && i < _items.Count; i++)
             {
-                if (!int.TryParse(_grid.Rows[i].Cells["colReturnQty"].Value?.ToString(), out int qty) || qty <= 0)
+                // كميات عشرية: تقريب إلى 3 منازل (AwayFromZero) — بلا اقتطاع صحيح
+                if (!decimal.TryParse(_grid.Rows[i].Cells["colReturnQty"].Value?.ToString(), out decimal qtyRaw) || qtyRaw <= 0)
                     continue;
+                decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
                 var item = _items[i];
                 enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + qty;
@@ -386,7 +388,7 @@ namespace Sayl.UI.Forms
 
             foreach (var entered in enteredByProduct)
             {
-                int remaining = _remainingByProduct.GetValueOrDefault(entered.Key);
+                decimal remaining = _remainingByProduct.GetValueOrDefault(entered.Key);
                 if (entered.Value > remaining)
                 {
                     string productName = _items.First(i => i.ProductId == entered.Key).ProductName;

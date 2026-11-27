@@ -279,23 +279,23 @@ END";
         /// الصلاحية وغير محجوب (حجر)، فلا يعرض الكاشير مخزونًا لا يمكن بيعه.
         /// المحجوز للمعلّقات يخصم من السقف، وغير سالب دائمًا.
         /// المنتج غير المخزّن = غير محدود (بلا دفعات ولا مخزون = 0).</summary>
-        public async Task<int> GetNetAvailableQuantityAsync(int productId)
+        public async Task<decimal> GetNetAvailableQuantityAsync(int productId)
         {
             // اليوم بمعنى المتجر من ساعة SQL (Task 2) — FEFO والصلاحية بمعنى المحل
             DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext);
 
-            int reserved = await _dbContext.Inventories
+            decimal reserved = await _dbContext.Inventories
                 .Where(i => i.ProductId == productId)
-                .Select(i => (int?)(i.QuantityReserved ?? 0))
+                .Select(i => (decimal?)(i.QuantityReserved ?? 0))
                 .FirstOrDefaultAsync() ?? 0;
 
-            int sellable = await _dbContext.Batches
+            decimal sellable = await _dbContext.Batches
                 .Where(b => b.ProductId == productId && b.BatchQuantity > 0
                          && !b.IsQuarantined
                          && (b.ExpiryDate == null || b.ExpiryDate >= today))
-                .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+                .SumAsync(b => (decimal?)b.BatchQuantity) ?? 0;
 
-            return Math.Max(0, sellable - reserved);
+            return Math.Max(0m, sellable - reserved);
         }
 
         /// <summary>المتاح الفعلي للبيع لعدة منتجات دفعة واحدة — نفس قواعد
@@ -304,7 +304,7 @@ END";
         /// محجوب (حجر). موجّه للتقارير الجماعية (لوحة التحكم/حالة المخزون)
         /// حتى لا تُعاد كتابة القاعدة بمعادلة منفصلة في خدمة التقارير —
         /// استعلامان اثنان مهما كان عدد المنتجات (لا استعلام لكل منتج).</summary>
-        public async Task<Dictionary<int, int>> GetNetAvailableQuantitiesAsync(IEnumerable<int>? productIds = null)
+        public async Task<Dictionary<int, decimal>> GetNetAvailableQuantitiesAsync(IEnumerable<int>? productIds = null)
         {
             // اليوم بمعنى المتجر من ساعة SQL (Task 2) — FEFO والصلاحية بمعنى المحل
             DateOnly today = await _storeClock.GetStoreTodayAsync(_dbContext);
@@ -318,12 +318,12 @@ END";
             {
                 int[] ids = productIds.Distinct().ToArray();
                 if (ids.Length == 0)
-                    return new Dictionary<int, int>();
+                    return new Dictionary<int, decimal>();
                 sellableQuery = sellableQuery.Where(b => ids.Contains(b.ProductId));
             }
 
             // مجموع الدفعات الصالحة لكل منتج
-            Dictionary<int, int> sellableByProduct = await sellableQuery
+            Dictionary<int, decimal> sellableByProduct = await sellableQuery
                 .GroupBy(b => b.ProductId)
                 .Select(g => new { ProductId = g.Key, Qty = g.Sum(b => b.BatchQuantity) })
                 .ToDictionaryAsync(x => x.ProductId, x => x.Qty);
@@ -336,16 +336,16 @@ END";
                 reservedQuery = reservedQuery.Where(i => ids.Contains(i.ProductId));
             }
 
-            Dictionary<int, int> reservedByProduct = await reservedQuery
+            Dictionary<int, decimal> reservedByProduct = await reservedQuery
                 .ToDictionaryAsync(x => x.ProductId, x => x.Reserved);
 
             // المتاح الصافي = غير سالب دائمًا (نفس معادلة النسخة الأحادية)
-            var result = new Dictionary<int, int>();
+            var result = new Dictionary<int, decimal>();
             foreach (int productId in sellableByProduct.Keys.Union(reservedByProduct.Keys))
             {
-                sellableByProduct.TryGetValue(productId, out int sellable);
-                reservedByProduct.TryGetValue(productId, out int reserved);
-                result[productId] = Math.Max(0, sellable - reserved);
+                sellableByProduct.TryGetValue(productId, out decimal sellable);
+                reservedByProduct.TryGetValue(productId, out decimal reserved);
+                result[productId] = Math.Max(0m, sellable - reserved);
             }
             return result;
         }
@@ -551,14 +551,14 @@ END";
 
             // الكميات المحجوزة (فسخ فاتورة معلقة): تمنع التعطيل
             var inventory = await _dbContext.Inventories.FindAsync(productId);
-            if (inventory != null && (inventory.QuantityReserved ?? 0) > 0)
+            if (inventory != null && (inventory.QuantityReserved ?? 0m) > 0m)
                 return Result.Fail("لا يمكن تعطيل المنتج لوجود كميات محجوزة.");
 
             // المنتجات المخزنية: المخزون الفعلي (دفعات) يجب أن يكون صفرًا —
             // التعطيل يخفي المنتج من منتقيات الفواتير فيصعب تحرير المخزون يدويًا.
             if (product.Type == "stock")
             {
-                if (inventory != null && (inventory.QuantityAvailable ?? 0) > 0)
+                if (inventory != null && (inventory.QuantityAvailable ?? 0m) > 0m)
                     return Result.Fail($"لا يمكن تعطيل المنتج — عليه مخزون متاح ({inventory.QuantityAvailable} وحدة). أفرغ المخزون أولًا.");
 
                 bool hasBatchStock = await _dbContext.Batches.AnyAsync(b => b.ProductId == productId && b.BatchQuantity > 0);

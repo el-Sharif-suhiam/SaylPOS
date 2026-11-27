@@ -255,11 +255,11 @@ namespace Sayl.UI.UserControls
                 if (s.TopProducts.Count == 0)
                     _lstTopProducts.Items.Add(AppLang.T("Dashboard.Msg.NoSales"));
                 foreach (var p in s.TopProducts)
-                    _lstTopProducts.Items.Add(AppLang.T("Dashboard.TopProduct.Line", p.ProductName, p.TotalQuantitySold, UiHelpers.Money(p.TotalRevenue)));
+                    _lstTopProducts.Items.Add(AppLang.T("Dashboard.TopProduct.Line", p.ProductName, p.TotalQuantitySold.ToString("0.###"), UiHelpers.Money(p.TotalRevenue)));
 
                 _gridLowStock.Rows.Clear();
                 foreach (var item in s.LowStockItems)
-                    _gridLowStock.Rows.Add(item.ProductName, item.QuantityAvailable, item.NetAvailable, item.ReorderLevel);
+                    _gridLowStock.Rows.Add(item.ProductName, item.QuantityAvailable.ToString("0.###"), item.NetAvailable.ToString("0.###"), item.ReorderLevel.ToString("0.###"));
 
                 _lblLowStockHeader.Text = s.LowStockCount > 0
                     ? AppLang.T("Dashboard.LowStock.Count", s.LowStockCount)

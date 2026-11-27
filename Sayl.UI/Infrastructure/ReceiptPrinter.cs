@@ -147,7 +147,7 @@ namespace Sayl.UI.Infrastructure
                 foreach (var item in invoice.Items)
                 {
                     Line(item.ProductName);
-                    Line(AppLang.T("Receipt.Line.Item", item.Quantity, item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
+                    Line(AppLang.T("Receipt.Line.Item", item.Quantity.ToString("0.###"), item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
                 }
 
                 Divider();

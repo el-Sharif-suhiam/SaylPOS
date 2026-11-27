@@ -151,7 +151,7 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in inv.Items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity, UiHelpers.Money(item.ItemPrice),
+                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"), UiHelpers.Money(item.ItemPrice),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
 
                 _btnPrint.Enabled = true;

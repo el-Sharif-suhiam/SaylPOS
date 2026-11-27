@@ -50,6 +50,9 @@ namespace Sayl.Core.Services
 
                 if (string.IsNullOrWhiteSpace(item.BatchNumber))
                     return Result<int>.Fail("رقم الدفعة مطلوب لكل بند.");
+
+                // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+                item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
             }
 
             bool supplierExists = await _dbContext.Suppliers.AnyAsync(s => s.PartyId == request.SupplierId);
@@ -179,7 +182,8 @@ namespace Sayl.Core.Services
                                     $"لا يمكن دمج الكمية: رقم الدفعة '{item.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{(batch.ExpiryDate.HasValue ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd") : "(بدون)")}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {item.ExpiryDate.Value:yyyy-MM-dd}). استخدم رقم دفعة جديدًا.");
                             batch.BatchQuantity += item.Quantity;
                             // دفعة أنشأها طلب متوازٍ: وسّط بالوزن إن كان لها تكلفة مختلفة
-                            batch.UnitCost = batch.UnitCost is null || batch.BatchQuantity <= item.Quantity
+                            // (مقارنة الفراغ بتسامح 0.0005 — بقايا أقل من مقياس 3 منازل تُعد دفعة فارغة)
+                            batch.UnitCost = batch.UnitCost is null || batch.BatchQuantity < item.Quantity + 0.0005m
                                 ? unitEffectiveCost
                                 : Math.Round((batch.UnitCost.Value * (batch.BatchQuantity - item.Quantity)
                                               + unitEffectiveCost * item.Quantity) / batch.BatchQuantity, 2, MidpointRounding.AwayFromZero);
@@ -195,8 +199,9 @@ namespace Sayl.Core.Services
                                 $"لا يمكن دمج الكمية: رقم الدفعة '{item.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{(batch.ExpiryDate.HasValue ? batch.ExpiryDate.Value.ToString("yyyy-MM-dd") : "(بدون)")}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {item.ExpiryDate.Value:yyyy-MM-dd}). استخدم رقم دفعة جديدًا.");
 
                         // زيادة ذرية على مستوى القاعدة — لا يمكن أن تضيع مع فاتورة شراء متوازية
+                        // (SqlQty: باراميتر الكمية بمقياس (10,3) — الافتراضي (18,2) يقرّب 1.235 إلى 1.24)
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {item.Quantity} WHERE BatchId = {batch.BatchId}");
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", item.Quantity)} WHERE BatchId = {batch.BatchId}");
 
                         // دمج في دفعة قائمة: تكلفة الدفعة تتوسط بالوزن (الكمية القديمة بتكلفتها
                         // التاريخية + الكمية الجديدة بتكلفتها الفعلية) — الإجمالي يظل مطابقًا
@@ -205,8 +210,8 @@ namespace Sayl.Core.Services
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
 UPDATE Batches
 SET UnitCost = CASE
-                   WHEN UnitCost IS NULL OR BatchQuantity <= {item.Quantity} THEN {unitEffectiveCost}
-                   ELSE ROUND((UnitCost * (BatchQuantity - {item.Quantity}) + {unitEffectiveCost} * {item.Quantity}) / BatchQuantity, 2)
+                   WHEN UnitCost IS NULL OR BatchQuantity < {SqlQty.Param("@q1", item.Quantity)} + 0.0005 THEN {unitEffectiveCost}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {SqlQty.Param("@q2", item.Quantity)}) + {unitEffectiveCost} * {SqlQty.Param("@q3", item.Quantity)}) / BatchQuantity, 2)
                END
 WHERE BatchId = {batch.BatchId}");
                     }
@@ -245,7 +250,7 @@ WHERE BatchId = {batch.BatchId}");
                     // UpdatedAt من لقطة SQL للعملية (Task 2): نفس لحظة الفاتورة
                     // وبنودها — مصدر واحد SYSUTCDATETIME لا تعبير ساعة مستقل لكل صف
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {item.Quantity}, UpdatedAt = {nowUtc} WHERE ProductId = {item.ProductId}");
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {SqlQty.Param("@qty", item.Quantity)}, UpdatedAt = {nowUtc} WHERE ProductId = {item.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {

@@ -34,7 +34,7 @@ namespace Common.DTOs.ViewModel
         public int InvoiceItemId { get; set; }
         public int ProductId { get; set; }
         public string ProductName { get; set; } = null!;
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public string? BatchNumber { get; set; }
         public decimal ItemPrice { get; set; }
         public decimal? ItemCost { get; set; }

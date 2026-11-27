@@ -413,7 +413,7 @@ namespace Sayl.UI.Infrastructure
                                     no.ToString(),
                                     item.ProductName,
                                     item.BatchNumber ?? "-",
-                                    item.Quantity.ToString(),
+                                    item.Quantity.ToString("0.###"),
                                     Money(item.ItemPrice),
                                     Money(item.ItemPrice * item.Quantity));
                                 stripe = !stripe;
@@ -421,7 +421,7 @@ namespace Sayl.UI.Infrastructure
 
                             // سطر الإجمالي — كحلي بارز
                             table.Cell().ColumnSpan(5).Element(TotalCell).AlignRight()
-                                .Text(AppLang.T("Pdf.ItemsCount", inv.Items.Count, inv.Items.Sum(i => i.Quantity)));
+                                .Text(AppLang.T("Pdf.ItemsCount", inv.Items.Count, inv.Items.Sum(i => i.Quantity).ToString("0.###")));
                             table.Cell().Element(TotalCell).AlignLeft()
                                 .Text(Money(inv.TotalAmount)).FontColor(Sky);
                         });
@@ -644,15 +644,15 @@ namespace Sayl.UI.Infrastructure
                             foreach (var item in inv.Items)
                             {
                                 table.Cell().Text(item.ProductName).FontSize(8);
-                                table.Cell().AlignCenter().Text(item.Quantity.ToString()).FontSize(8);
+                                table.Cell().AlignCenter().Text(item.Quantity.ToString("0.###")).FontSize(8);
                                 table.Cell().AlignLeft().Text(Money(item.ItemPrice)).FontSize(8);
                                 table.Cell().AlignLeft().Text(Money(item.ItemPrice * item.Quantity)).FontSize(8);
                             }
                         });
 
                         // 5) عدّاد الأسطر/الوحدات
-                        int units = inv.Items.Sum(i => i.Quantity);
-                        col.Item().Text(AppLang.T("Pdf.Thermal.ItemsCount", inv.Items.Count, units)).FontSize(7.5f);
+                        decimal units = inv.Items.Sum(i => i.Quantity);
+                        col.Item().Text(AppLang.T("Pdf.Thermal.ItemsCount", inv.Items.Count, units.ToString("0.###"))).FontSize(7.5f);
 
                         Separator();
 

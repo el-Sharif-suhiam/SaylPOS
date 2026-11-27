@@ -32,7 +32,7 @@ namespace Sayl.UI.Forms
         // Remaining returnable per product (purchased - previously returned),
         // computed at load time from the same service data the service guard uses.
         // Display/hint only: the final gate remains the clsReturnService guard.
-        private Dictionary<int, int> _remainingByProduct = new();
+        private Dictionary<int, decimal> _remainingByProduct = new();
 
         // VULN-05: active drawer session - refund cash is attributed to it in the
         // Z report (not to the frozen original purchase session). Passed by caller.
@@ -372,7 +372,7 @@ namespace Sayl.UI.Forms
                 // Previously returned per product - from the same service the
                 // return guard uses, so "remaining returnable" matches what the
                 // guard will actually accept.
-                Dictionary<int, int> previouslyReturned;
+                Dictionary<int, decimal> previouslyReturned;
                 using (var returnScope = Program.Services.CreateScope())
                 {
                     var returnService = returnScope.ServiceProvider.GetRequiredService<clsReturnService>();
@@ -391,9 +391,9 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in _items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity,
-                        previouslyReturned.GetValueOrDefault(item.ProductId),
-                        _remainingByProduct.GetValueOrDefault(item.ProductId),
+                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"),
+                        previouslyReturned.GetValueOrDefault(item.ProductId).ToString("0.###"),
+                        _remainingByProduct.GetValueOrDefault(item.ProductId).ToString("0.###"),
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
 
                 // The box shows the loaded invoice's commercial number (never
@@ -423,12 +423,14 @@ namespace Sayl.UI.Forms
             // Input is aggregated per product first (the product may repeat across
             // lines for its batches) then checked against remaining returnable -
             // same guard as the service (display here, final decision there).
-            var enteredByProduct = new Dictionary<int, int>();
+            var enteredByProduct = new Dictionary<int, decimal>();
 
             for (int i = 0; i < _grid.Rows.Count && i < _items.Count; i++)
             {
-                if (!int.TryParse(_grid.Rows[i].Cells["colReturnQty"].Value?.ToString(), out int qty) || qty <= 0)
+                // Decimal quantities: round to 3 dp (AwayFromZero) - no integer truncation
+                if (!decimal.TryParse(_grid.Rows[i].Cells["colReturnQty"].Value?.ToString(), out decimal qtyRaw) || qtyRaw <= 0)
                     continue;
+                decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
                 var item = _items[i];
                 enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + qty;
@@ -438,7 +440,7 @@ namespace Sayl.UI.Forms
 
             foreach (var entered in enteredByProduct)
             {
-                int remaining = _remainingByProduct.GetValueOrDefault(entered.Key);
+                decimal remaining = _remainingByProduct.GetValueOrDefault(entered.Key);
                 if (entered.Value > remaining)
                 {
                     string productName = _items.First(i => i.ProductId == entered.Key).ProductName;

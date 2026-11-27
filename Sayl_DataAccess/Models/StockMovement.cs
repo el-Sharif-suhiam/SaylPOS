@@ -12,7 +12,7 @@ public partial class StockMovement
 
     public enStockMovementType MovementType { get; set; }
 
-    public int Quantity { get; set; }
+    public decimal Quantity { get; set; }
 
     public string SourceType { get; set; } = null!;
 

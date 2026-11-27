@@ -248,7 +248,7 @@ namespace Sayl.UI.UserControls
                         _currentTitle = AppLang.T("Reports.Type.TopProducts");
                         AddColumns((AppLang.T("Common.Label.Product"), 50), (AppLang.T("Reports.Top.SoldQty"), 25), (AppLang.T("Reports.Top.Revenue"), 25));
                         foreach (var p in r.Data)
-                            AddRow(p.ProductName, p.TotalQuantitySold.ToString(), UiHelpers.Money(p.TotalRevenue));
+                            AddRow(p.ProductName, p.TotalQuantitySold.ToString("0.###"), UiHelpers.Money(p.TotalRevenue));
                         break;
                     }
                     case ReportInventory:
@@ -258,9 +258,9 @@ namespace Sayl.UI.UserControls
                         _currentTitle = AppLang.T("Reports.Type.Inventory");
                         AddColumns((AppLang.T("Common.Label.Product"), 30), (AppLang.T("Inventory.Label.OnHand"), 13), (AppLang.T("Inventory.Label.AvailableForSale"), 14), (AppLang.T("Inventory.Label.Reserved"), 13), (AppLang.T("Common.Label.Reorder"), 15), (AppLang.T("Common.Label.Status"), 15));
                         foreach (var i in r.Data)
-                            AddRow(i.ProductName, i.QuantityAvailable.ToString(), i.NetAvailable.ToString(),
-                                i.QuantityReserved.ToString(),
-                                i.ReorderLevel.ToString(),
+                            AddRow(i.ProductName, i.QuantityAvailable.ToString("0.###"), i.NetAvailable.ToString("0.###"),
+                                i.QuantityReserved.ToString("0.###"),
+                                i.ReorderLevel.ToString("0.###"),
                                 i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"));
                         break;
                     }
@@ -288,7 +288,7 @@ namespace Sayl.UI.UserControls
                         AddColumns((AppLang.T("Common.Label.Product"), 30), (AppLang.T("Reports.Expiry.Batch"), 18), (AppLang.T("Reports.Expiry.ExpiryDate"), 18), (AppLang.T("Common.Label.Qty"), 12), (AppLang.T("Reports.Expiry.DaysLeft"), 12), (AppLang.T("Common.Label.Status"), 10));
                         foreach (var b in r.Data)
                             AddRow(b.ProductName, b.BatchNumber, b.ExpiryDate.ToString("yyyy-MM-dd"),
-                                b.Quantity.ToString(), b.DaysUntilExpiry.ToString(),
+                                b.Quantity.ToString("0.###"), b.DaysUntilExpiry.ToString(),
                                 b.IsExpired ? AppLang.T("Reports.Expiry.Expired")
                                     : b.DaysUntilExpiry <= 30 ? AppLang.T("Reports.Expiry.VeryClose") : AppLang.T("Reports.Expiry.Close"));
                         break;
@@ -300,7 +300,7 @@ namespace Sayl.UI.UserControls
                         _currentTitle = AppLang.T("Reports.Type.ProductProfit");
                         AddColumns((AppLang.T("Common.Label.Product"), 28), (AppLang.T("Reports.ProductProfit.Qty"), 10), (AppLang.T("Reports.Top.Revenue"), 14), (AppLang.T("Common.Label.Cost"), 14), (AppLang.T("Reports.ProductProfit.Profit"), 14), (AppLang.T("Reports.ProductProfit.Margin"), 10), (AppLang.T("Reports.ProductProfit.Share"), 10));
                         foreach (var p in r.Data)
-                            AddRow(p.ProductName, p.Quantity.ToString(), UiHelpers.Money(p.Revenue),
+                            AddRow(p.ProductName, p.Quantity.ToString("0.###"), UiHelpers.Money(p.Revenue),
                                 UiHelpers.Money(p.Cost), UiHelpers.Money(p.Profit),
                                 p.MarginPercent.ToString("0.#"), p.ProfitSharePercent.ToString("0.#"));
                         break;
@@ -375,8 +375,8 @@ namespace Sayl.UI.UserControls
                         else
                         {
                             foreach (var l in lines)
-                                AddRow(l.ProductName, l.BookQuantity.ToString(), l.CountedQuantity?.ToString() ?? "-",
-                                    l.Difference > 0 ? "+" + l.Difference : l.Difference?.ToString() ?? "-",
+                                AddRow(l.ProductName, l.BookQuantity.ToString("0.###"), l.CountedQuantity?.ToString("0.###") ?? "-",
+                                    l.Difference > 0 ? "+" + l.Difference!.Value.ToString("0.###") : l.Difference?.ToString("0.###") ?? "-",
                                     l.DifferenceCost.ToString("N2"),
                                     l.Difference is > 0 ? AppLang.T("Reports.Count.Surplus")
                                         : l.Difference is < 0 ? AppLang.T("Reports.Count.Shortage")

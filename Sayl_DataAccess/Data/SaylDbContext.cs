@@ -127,6 +127,8 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.IsQuarantined).HasDefaultValue(false);
             entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
+            // Upgrade_22: كميات كسرية
+            entity.Property(e => e.BatchQuantity).HasColumnType("decimal(10, 3)");
 
             entity.HasOne(d => d.Product).WithMany(p => p.Batches)
                 .HasForeignKey(d => d.ProductId)
@@ -303,6 +305,10 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.ProductName).HasMaxLength(100);
             entity.Property(e => e.UnitCost).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
+            // Upgrade_22: كميات كسرية — الكتاب NOT NULL والمعدود/اللقطتان NULL بالدلالة القائمة
+            entity.Property(e => e.BookQuantity).HasColumnType("decimal(10, 3)");
+            entity.Property(e => e.CountedQuantity).HasColumnType("decimal(10, 3)");
+            entity.Property(e => e.BookQuantityAtCount).HasColumnType("decimal(10, 3)");
             // CountedAt, BookQuantityAtCount, PostedMovementId are nullable with no default — conventions handle
 
             entity.HasOne(d => d.Product).WithMany()
@@ -339,8 +345,9 @@ public partial class SaylDbContext : DbContext
             entity.HasIndex(e => e.QuantityAvailable, "IX_Inventory_QuantityAvailable");
 
             entity.Property(e => e.ProductId).ValueGeneratedNever();
-            entity.Property(e => e.QuantityAvailable).HasDefaultValue(0);
-            entity.Property(e => e.QuantityReserved).HasDefaultValue(0);
+            // Upgrade_22: كميات كسرية — decimal(10,3) على مستوى القاعدة (لا float أبدًا)
+            entity.Property(e => e.QuantityAvailable).HasColumnType("decimal(10, 3)").HasDefaultValue(0m);
+            entity.Property(e => e.QuantityReserved).HasColumnType("decimal(10, 3)").HasDefaultValue(0m);
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Product).WithOne(p => p.Inventory)
@@ -438,7 +445,7 @@ public partial class SaylDbContext : DbContext
 
             entity.Property(e => e.ItemPrice).HasColumnType("decimal(10, 2)");
             entity.Property(e => e.ItemCost).HasColumnType("decimal(10, 2)");
-            entity.Property(e => e.Quantity).HasDefaultValue(1);
+            entity.Property(e => e.Quantity).HasColumnType("decimal(10, 3)").HasDefaultValue(1m);
 
             // لقطات وحدة الإدخال (Upgrade_21) — NULL = صف إرثي، لا افتراضيات ولا تحويل
             entity.Property(e => e.UnitName).HasMaxLength(20);
@@ -577,7 +584,7 @@ public partial class SaylDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.Name).HasMaxLength(100);
-            entity.Property(e => e.ReorderLevel).HasDefaultValue(0);
+            entity.Property(e => e.ReorderLevel).HasColumnType("decimal(10, 3)").HasDefaultValue(0m);
             entity.Property(e => e.Type).HasMaxLength(20);
             entity.Property(e => e.Unit).HasMaxLength(20);
         });
@@ -635,6 +642,8 @@ public partial class SaylDbContext : DbContext
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.MovementType).HasMaxLength(30).HasConversion<string>();
+            // Upgrade_22: كميات كسرية
+            entity.Property(e => e.Quantity).HasColumnType("decimal(10, 3)");
             entity.Property(e => e.SourceType)
                 .HasMaxLength(50)
                 .IsUnicode(false);
@@ -659,7 +668,7 @@ public partial class SaylDbContext : DbContext
 
             entity.HasIndex(e => new { e.InvoiceId, e.ProductId }, "UQ_StockReservations_Invoice_Product").IsUnique();
 
-            entity.Property(e => e.Quantity).HasDefaultValue(1);
+            entity.Property(e => e.Quantity).HasColumnType("decimal(10, 3)").HasDefaultValue(1m);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Invoice).WithMany()

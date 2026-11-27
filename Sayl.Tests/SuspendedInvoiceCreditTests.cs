@@ -143,9 +143,9 @@ public class SuspendedInvoiceCreditTests
         await using var db = _fx.CreateContext();
         await SetLimitAsync(db, seed.CustomerId, 30m);
 
-        int reservedBefore = await db.StockReservations
+        decimal reservedBefore = await db.StockReservations
             .Where(r => r.InvoiceId == suspendedId).SumAsync(r => r.Quantity);
-        int invReservedBefore = await db.Inventories.AsNoTracking()
+        decimal invReservedBefore = await db.Inventories.AsNoTracking()
             .Where(v => v.ProductId == seed.ProductId).Select(v => v.QuantityReserved ?? 0).SingleAsync();
         int paymentsBefore = await db.Payments.CountAsync(p => p.InvoiceId == suspendedId);
         int movementsBefore = await db.StockMovements.CountAsync(m => m.SourceId == suspendedId && m.SourceType == "Invoice");

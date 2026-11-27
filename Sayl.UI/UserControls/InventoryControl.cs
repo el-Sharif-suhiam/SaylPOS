@@ -38,8 +38,8 @@ internal class InventoryControl : SectionListControl
                 _shown = result.Data.Items;
                 Grid.Rows.Clear();
                 foreach (var i in _shown)
-                    Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable, i.NetAvailable, i.QuantityReserved,
-                        i.ReorderLevel, i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"),
+                    Grid.Rows.Add(i.ProductName, i.Unit ?? "-", i.QuantityAvailable.ToString("0.###"), i.NetAvailable.ToString("0.###"), i.QuantityReserved.ToString("0.###"),
+                        i.ReorderLevel.ToString("0.###"), i.IsLowStock ? AppLang.T("Common.Status.Low") : AppLang.T("Common.Status.Good"),
                         i.LastCountedAt?.ToString("yyyy-MM-dd") ?? "-");
             }
             catch

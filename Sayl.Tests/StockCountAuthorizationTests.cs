@@ -101,12 +101,12 @@ public class StockCountAuthorizationTests
     }
 
     /// <summary>عدّ كل سطور الجلسة المفتوحة (بقيمة معينة أو بالكتيب — فرق صفر).</summary>
-    private static async Task CountAllLinesAsync(SaylDbContext db, int userId, Dictionary<int, int>? countedByProduct = null)
+    private static async Task CountAllLinesAsync(SaylDbContext db, int userId, Dictionary<int, decimal>? countedByProduct = null)
     {
         var svc = new clsStockCountService(db);
         foreach (var line in await svc.GetOpenSessionAsync())
         {
-            int counted = countedByProduct != null && countedByProduct.TryGetValue(line.ProductId, out int v)
+            decimal counted = countedByProduct != null && countedByProduct.TryGetValue(line.ProductId, out decimal v)
                 ? v : line.BookQuantity;
             var r = await svc.SetCountedAsync(line.CountId, counted, userId);
             Assert.True(r.IsSuccess, r.Message);

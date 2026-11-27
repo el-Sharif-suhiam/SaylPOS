@@ -204,7 +204,9 @@ namespace Sayl.UI.Forms
             }
 
             decimal.TryParse(_txtCostPrice.Text?.Trim(), out decimal costPrice);
-            int.TryParse(_txtReorder.Text?.Trim(), out int reorder);
+            // حد الطلب كميات عشرية: تحليل عشري + تقريب إلى 3 منازل (AwayFromZero)
+            decimal.TryParse(_txtReorder.Text?.Trim(), out decimal reorderRaw);
+            decimal reorder = Math.Round(reorderRaw, 3, MidpointRounding.AwayFromZero);
 
             var dto = new DtoProduct
             {
@@ -215,7 +217,7 @@ namespace Sayl.UI.Forms
                 Type = _cmbType.SelectedItem?.ToString() ?? "stock",
                 BasePrice = basePrice,
                 CostPrice = costPrice,
-                ReorderLevel = reorder > 0 ? reorder : null,
+                ReorderLevel = reorder > 0m ? reorder : null,
                 IsActive = _existing?.IsActive ?? true
             };
 

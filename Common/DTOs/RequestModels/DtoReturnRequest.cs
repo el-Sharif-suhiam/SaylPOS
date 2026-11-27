@@ -20,7 +20,7 @@ namespace Common.DTOs.RequestModels
     public class DtoReturnItem
     {
         public int ProductId { get; set; }
-        public int Quantity { get; set; }
+        public decimal Quantity { get; set; }
         public int? BatchId { get; set; }
     }
 }

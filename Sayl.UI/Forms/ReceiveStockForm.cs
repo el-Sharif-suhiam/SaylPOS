@@ -212,12 +212,14 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            if (!int.TryParse(_txtQty.Text?.Trim(), out int qty) || qty <= 0)
+            // كميات عشرية: تحليل عشري + تقريب إلى 3 منازل (AwayFromZero)
+            if (!decimal.TryParse(_txtQty.Text?.Trim(), out decimal qtyRaw) || qtyRaw <= 0)
             {
                 UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.InvalidQty"));
                 _txtQty.Focus();
                 return;
             }
+            decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
             var request = new DtoStockReceiveRequest
             {

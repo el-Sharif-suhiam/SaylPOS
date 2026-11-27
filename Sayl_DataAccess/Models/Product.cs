@@ -19,7 +19,7 @@ public partial class Product
 
     public decimal CostPrice { get; set; }
 
-    public int? ReorderLevel { get; set; }
+    public decimal? ReorderLevel { get; set; }
 
     public bool IsActive { get; set; }
 

@@ -48,6 +48,9 @@ namespace Sayl.Core.Services
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
 
+            // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+            request.Quantity = Math.Round(request.Quantity, 3, MidpointRounding.AwayFromZero);
+
             if (request.UnitCost is < 0)
                 return Result.Fail("سعر التكلفة يجب أن يكون صفرا أو أكثر.");
 
@@ -105,8 +108,9 @@ namespace Sayl.Core.Services
                                 $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
                         }
                         // زيادة ذرية — محصّنة من استلام متوازٍ
+                        // (SqlQty: باراميتر الكمية بمقياس (10,3) — الافتراضي (18,2) يقرّب 1.235 إلى 1.24)
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {batch.BatchId}");
                         // دفعة أنشأها طلب متوازٍ: نفس قاعدة الدمج — متوسط مرجح بالوزن
                         // إن كان لها تكلفة مختلفة، لا تطميس ولا تكلفة مُخترعة
                         if (request.UnitCost.HasValue)
@@ -129,8 +133,9 @@ namespace Sayl.Core.Services
                             $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
                     }
                     // زيادة ذرية — محصّنة من استلام متوازٍ
+                    // (SqlQty: باراميتر الكمية بمقياس (10,3) — الافتراضي (18,2) يقرّب 1.235 إلى 1.24)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {batch.BatchId}");
                     // دمج في دفعة قائمة: التكلفة تتوسط بالوزن بالكمية (نفس معادلة
                     // دمج الشراء ودمج النقل — COSTING.md) فيظل إجمالي تكلفة الدفعة
                     // مطابقًا لما اقتُني فعليًا عبر عمر الدفعة. الاستلام اليدوي بلا
@@ -157,7 +162,7 @@ namespace Sayl.Core.Services
                 // زيادة ذرية للمخزون — محصّنة من فاتورة شراء/استلام متوازٍ
                 // UpdatedAt من لقطة SQL للعملية (Task 2): مصدر واحد لا تعبير ساعة مستقل
                 await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = {nowUtc} WHERE ProductId = {request.ProductId}");
+                    $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {SqlQty.Param("@qty", request.Quantity)}, UpdatedAt = {nowUtc} WHERE ProductId = {request.ProductId}");
 
                 _dbContext.StockMovements.Add(new StockMovement
                 {
@@ -205,10 +210,13 @@ namespace Sayl.Core.Services
         /// لا تستدعِها من كود إنتاجي جديد — وأي بوابة هنا تكسر اختبارات الجودة القائمة
         /// دون حماية إضافية (الخروج الحقيقي مقيّد سلفًا في clsCheckoutService).
         /// </summary>
-        public async Task<Result> SellStockAsync(int productId, int quantity, int? invoiceId = null)
+        public async Task<Result> SellStockAsync(int productId, decimal quantity, int? invoiceId = null)
         {
             if (quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+            // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+            quantity = Math.Round(quantity, 3, MidpointRounding.AwayFromZero);
 
             var product = await _dbContext.Products.FindAsync(productId);
             if (product == null)
@@ -229,7 +237,7 @@ namespace Sayl.Core.Services
                     return Result.Fail("لا يوجد سجل مخزون لهذا المنتج.");
 
                 // إعادة-فحص داخل المعاملة بعد قفل النطاق — يمنع بيعين متوازيين يتجاوزان المتاح
-                int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
+                decimal available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                 if (available < quantity)
                     return Result.Fail($"المخزون المتاح غير كافٍ للمنتج {product.Name}.");
 
@@ -245,12 +253,12 @@ namespace Sayl.Core.Services
                     .ThenBy(b => b.CreatedAt)
                     .ToListAsync();
 
-                int remaining = quantity;
+                decimal remaining = quantity;
                 foreach (var batch in batches)
                 {
                     if (remaining <= 0) break;
 
-                    int take = Math.Min(remaining, batch.BatchQuantity);
+                    decimal take = Math.Min(remaining, batch.BatchQuantity);
                     batch.BatchQuantity -= take;
                     remaining -= take;
 
@@ -290,6 +298,9 @@ namespace Sayl.Core.Services
         {
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+            // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+            request.Quantity = Math.Round(request.Quantity, 3, MidpointRounding.AwayFromZero);
 
             if (string.IsNullOrWhiteSpace(request.Reason))
                 return Result.Fail("سبب التسوية مطلوب.");
@@ -382,7 +393,7 @@ namespace Sayl.Core.Services
                                         $"لا يمكن دمج الكمية: رقم الدفعة '{request.BatchNumber.Trim()}' موجود بتاريخ صلاحية '{existingStr}' — لا يمكن دمج كميات بتواريخ صلاحية مختلفة (الجديد: {newStr}). استخدم رقم دفعة جديدًا.");
                                 }
                                 await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                                    $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                                    $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {batch.BatchId}");
                             }
                         }
                         else
@@ -401,7 +412,7 @@ namespace Sayl.Core.Services
                             }
                             // زيادة ذرية — محصّنة من تسوية/استلام متوازٍ
                             await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                                $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {batch.BatchId}");
+                                $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {batch.BatchId}");
                         }
 
                         batchId = batch.BatchId;
@@ -433,7 +444,7 @@ namespace Sayl.Core.Services
                     // UpdatedAt/LastCountedAt من لقطة SQL للعملية (Task 2): لقطة واحدة
                     // لحقلي السطر نفسه ومصدر واحد SYSUTCDATETIME لا تعبير ساعة مستقل
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {request.Quantity}, UpdatedAt = {nowUtc}, LastCountedAt = {nowUtc} WHERE ProductId = {request.ProductId}");
+                        $"UPDATE Inventory SET QuantityAvailable = QuantityAvailable + {SqlQty.Param("@qty", request.Quantity)}, UpdatedAt = {nowUtc}, LastCountedAt = {nowUtc} WHERE ProductId = {request.ProductId}");
 
                     _dbContext.StockMovements.Add(new StockMovement
                     {
@@ -449,10 +460,10 @@ namespace Sayl.Core.Services
                 else
                 {
                     // (BatchId, Quantity) لكل دفعة خُصمت فعلًا — حركة لكل منها أدناه
-                    var deductions = new List<(int? BatchId, int Quantity)>();
+                    var deductions = new List<(int? BatchId, decimal Quantity)>();
 
                     // إعادة-فحص داخل المعاملة بعد قفل النطاق
-                    int available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
+                    decimal available = (inventory.QuantityAvailable ?? 0) - (inventory.QuantityReserved ?? 0);
                     if (available < request.Quantity)
                     {
                         // تدقيق الرفض — كتابة مستقلة تنجو من تراجع المعاملة
@@ -491,11 +502,11 @@ namespace Sayl.Core.Services
                             .ThenBy(b => b.CreatedAt)
                             .ToListAsync();
 
-                        int remaining = request.Quantity;
+                        decimal remaining = request.Quantity;
                         foreach (var b in batches)
                         {
                             if (remaining <= 0) break;
-                            int take = Math.Min(remaining, b.BatchQuantity);
+                            decimal take = Math.Min(remaining, b.BatchQuantity);
                             b.BatchQuantity -= take;
                             remaining -= take;
                             deductions.Add((b.BatchId, take));
@@ -578,6 +589,9 @@ namespace Sayl.Core.Services
             if (request.Quantity <= 0)
                 return Result.Fail("الكمية يجب أن تكون أكبر من صفر.");
 
+            // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
+            request.Quantity = Math.Round(request.Quantity, 3, MidpointRounding.AwayFromZero);
+
             if (string.IsNullOrWhiteSpace(request.TargetBatchNumber))
                 return Result.Fail("رقم الدفعة الهدف مطلوب.");
 
@@ -630,7 +644,7 @@ namespace Sayl.Core.Services
                         targetBatch = await _dbContext.Batches
                             .FirstAsync(b => b.ProductId == sourceBatch.ProductId && b.BatchNumber == request.TargetBatchNumber.Trim());
                         await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
+                            $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {targetBatch.BatchId}");
                         // دفعة أنشأها طلب متوازٍ قد تحمل تكلفة خاصة بها — الدمج
                         // يتوسط بالوزن (نفس معادلة دمج الشراء) لا يطمسها
                         await MergeTransferCostAsync(targetBatch.BatchId, sourceBatch.UnitCost, request.Quantity);
@@ -659,7 +673,7 @@ namespace Sayl.Core.Services
                     // زيادة ذرية للدفعة الهدف — محصّنة من استلام/نقل متوازٍ
                     // (صلاحية الدفعة القائمة لا تُمس أبدًا)
                     await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {request.Quantity} WHERE BatchId = {targetBatch.BatchId}");
+                        $"UPDATE Batches SET BatchQuantity = BatchQuantity + {SqlQty.Param("@qty", request.Quantity)} WHERE BatchId = {targetBatch.BatchId}");
 
                     // دمج في دفعة قائمة: التكلفة تتوسط بالوزن بالكمية (نفس معادلة
                     // دمج الشراء — COSTING.md) فيظل إجمالي تكلفة الدفعة مطابقًا
@@ -669,7 +683,7 @@ namespace Sayl.Core.Services
 
                 // خصم ذري من المصدر بشرط الكمية — لا يمكن أن يتجاوز المتاح حتى مع تزامن كامل
                 int deducted = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE Batches SET BatchQuantity = BatchQuantity - {request.Quantity} WHERE BatchId = {sourceBatch.BatchId} AND BatchQuantity >= {request.Quantity}");
+                    $"UPDATE Batches SET BatchQuantity = BatchQuantity - {SqlQty.Param("@q1", request.Quantity)} WHERE BatchId = {sourceBatch.BatchId} AND BatchQuantity >= {SqlQty.Param("@q2", request.Quantity)}");
                 if (deducted == 0)
                 {
                     await transaction.RollbackAsync();
@@ -726,14 +740,16 @@ namespace Sayl.Core.Services
         /// قواعد null (لا تُخترع تكلفة بديل ولا Product.CostPrice):
         /// - تكلفة الاستلام null: لا يُستدعى أصلًا — تكلفة الدفعة القائمة تبقى كما هي.
         /// - تكلفة الدفعة null: تُملأ بتكلفة الاستلام — أول تكلفة صريحة تملؤها.
-        /// - دفعة قائمة فارغة (كمية 0 قبل الزيادة): كل وحداتها من الاستلام → تكلفة الاستلام.</summary>
-        private async Task MergeReceiveCostAsync(int batchId, decimal incomingUnitCost, int incomingQuantity)
+        /// - دفعة قائمة فارغة (كمية 0 قبل الزيادة): كل وحداتها من الاستلام → تكلفة الاستلام.
+        /// (مقارنة الفراغ بتسامح 0.0005 — بقايا أقل من مقياس 3 منازل تُعد دفعة فارغة).</summary>
+        private async Task MergeReceiveCostAsync(int batchId, decimal incomingUnitCost, decimal incomingQuantity)
         {
+            // (SqlQty: باراميترات الكمية بمقياس (10,3) — الافتراضي (18,2) يقرّب 1.235 إلى 1.24)
             await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
 UPDATE Batches
 SET UnitCost = CASE
-                   WHEN UnitCost IS NULL OR BatchQuantity <= {incomingQuantity} THEN {incomingUnitCost}
-                   ELSE ROUND((UnitCost * (BatchQuantity - {incomingQuantity}) + {incomingUnitCost} * {incomingQuantity}) / BatchQuantity, 2)
+                   WHEN UnitCost IS NULL OR BatchQuantity < {SqlQty.Param("@q1", incomingQuantity)} + 0.0005 THEN {incomingUnitCost}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {SqlQty.Param("@q2", incomingQuantity)}) + {incomingUnitCost} * {SqlQty.Param("@q3", incomingQuantity)}) / BatchQuantity, 2)
                END
 WHERE BatchId = {batchId}");
         }
@@ -749,17 +765,19 @@ WHERE BatchId = {batchId}");
         ///   (والهدف القديم بلا تكلفة يظل بلا تكلفة).
         /// - تكلفة الهدف null: تُملأ بتكلفة المصدر — أول تكلفة صريحة تملؤها
         ///   (نفس قاعدة ReceiveStockAsync)، والكمية المنقولة تحملها فعلًا.
-        /// - دفعة هدف فارغة (كمية 0): كل وحداتها منقولة من المصدر → تكلفة المصدر.</summary>
-        private async Task MergeTransferCostAsync(int targetBatchId, decimal? sourceUnitCost, int transferredQuantity)
+        /// - دفعة هدف فارغة (كمية 0): كل وحداتها منقولة من المصدر → تكلفة المصدر.
+        /// (مقارنة الفراغ بتسامح 0.0005 — بقايا أقل من مقياس 3 منازل تُعد دفعة فارغة).</summary>
+        private async Task MergeTransferCostAsync(int targetBatchId, decimal? sourceUnitCost, decimal transferredQuantity)
         {
             if (sourceUnitCost is null)
                 return;
 
+            // (SqlQty: باراميترات الكمية بمقياس (10,3) — الافتراضي (18,2) يقرّب 1.235 إلى 1.24)
             await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
 UPDATE Batches
 SET UnitCost = CASE
-                   WHEN UnitCost IS NULL OR BatchQuantity <= {transferredQuantity} THEN {sourceUnitCost.Value}
-                   ELSE ROUND((UnitCost * (BatchQuantity - {transferredQuantity}) + {sourceUnitCost.Value} * {transferredQuantity}) / BatchQuantity, 2)
+                   WHEN UnitCost IS NULL OR BatchQuantity < {SqlQty.Param("@q1", transferredQuantity)} + 0.0005 THEN {sourceUnitCost.Value}
+                   ELSE ROUND((UnitCost * (BatchQuantity - {SqlQty.Param("@q2", transferredQuantity)}) + {sourceUnitCost.Value} * {SqlQty.Param("@q3", transferredQuantity)}) / BatchQuantity, 2)
                END
 WHERE BatchId = {targetBatchId}");
         }

@@ -197,7 +197,7 @@ CREATE TABLE Products
     Type NVARCHAR(20) NOT NULL,
     BasePrice DECIMAL(10,2) NOT NULL DEFAULT (0),
     CostPrice DECIMAL(10,2) NOT NULL DEFAULT (0),
-    ReorderLevel INT DEFAULT (0),
+    ReorderLevel DECIMAL(10,3) NULL DEFAULT (0), -- Upgrade_22: كميات كسرية (3 منازل — وزن/حجم)
     IsActive BIT NOT NULL DEFAULT (1),
     CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     
@@ -218,7 +218,7 @@ CREATE TABLE Batches
     ProductId INT NOT NULL,
     BatchNumber NVARCHAR(100) NOT NULL,
     ExpiryDate DATE NULL,
-    BatchQuantity INT NOT NULL,
+    BatchQuantity DECIMAL(10,3) NOT NULL, -- Upgrade_22: كميات كسرية
     UnitCost DECIMAL(10,2) NULL, -- تكلفة الاقتناء التاريخية للوحدة (بعد خصم الشراء) — مصدر COGS
     CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
@@ -235,8 +235,8 @@ GO
 CREATE TABLE Inventory
 (
     ProductId INT NOT NULL PRIMARY KEY,
-    QuantityAvailable INT DEFAULT (0),
-    QuantityReserved INT DEFAULT (0),
+    QuantityAvailable DECIMAL(10,3) NULL DEFAULT (0), -- Upgrade_22: كميات كسرية
+    QuantityReserved DECIMAL(10,3) NULL DEFAULT (0), -- Upgrade_22: كميات كسرية
     UpdatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     LastCountedAt DATETIME2 NULL,
     CONSTRAINT FK_Inventory_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)
@@ -321,7 +321,7 @@ CREATE TABLE InvoiceItems
     InvoiceItemId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     InvoiceId INT NOT NULL,
     ProductId INT NOT NULL,
-    Quantity INT NOT NULL DEFAULT (1),
+    Quantity DECIMAL(10,3) NOT NULL DEFAULT (1), -- Upgrade_22: كميات كسرية (بوحدة الأساس)
     BatchId INT NULL,
     ItemPrice DECIMAL(10,2) NOT NULL,
     ItemCost DECIMAL(10,2) NULL,
@@ -349,7 +349,7 @@ CREATE TABLE StockReservations
     ReservationId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     InvoiceId INT NOT NULL,
     ProductId INT NOT NULL,
-    Quantity INT NOT NULL DEFAULT (1),
+    Quantity DECIMAL(10,3) NOT NULL DEFAULT (1), -- Upgrade_22: كميات كسرية
     CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
 
     CONSTRAINT FK_StockReservations_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES Invoices(InvoiceId),
@@ -493,7 +493,7 @@ CREATE TABLE StockMovements
     MovementId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     ProductId INT NOT NULL,
     MovementType NVARCHAR(30) NOT NULL,
-    Quantity INT NOT NULL,                   -- positive in, negative out
+    Quantity DECIMAL(10,3) NOT NULL,         -- positive in, negative out (Upgrade_22: كسرية)
     SourceType VARCHAR(50) NOT NULL,         -- 'Invoice', 'ManualAdjustment', etc.
     SourceId INT NULL,
     BatchId INT NULL,
@@ -702,14 +702,14 @@ CREATE TABLE StockCounts
     CountSessionId INT NOT NULL,              -- one physical count session (same value for all lines)
     ProductId INT NOT NULL,
     ProductName NVARCHAR(100) NOT NULL,      -- snapshot of product name at count time
-    BookQuantity INT NOT NULL,               -- system quantity snapshot at session start
-    CountedQuantity INT NULL,                -- actual counted (null = not counted yet)
+    BookQuantity DECIMAL(10,3) NOT NULL,     -- system quantity snapshot at session start (Upgrade_22: كسرية)
+    CountedQuantity DECIMAL(10,3) NULL,      -- actual counted (null = not counted yet)
     UnitCost DECIMAL(10,2) NOT NULL DEFAULT (0),
     IsPosted BIT NOT NULL DEFAULT (0),       -- difference applied to inventory?
     CountedBy INT NOT NULL,
     CreatedAt DATETIME2 DEFAULT (SYSUTCDATETIME()),
     CountedAt DATETIME2 NULL,                -- moment this specific line was physically counted
-    BookQuantityAtCount INT NULL,            -- system quantity at the moment of counting (snapshot)
+    BookQuantityAtCount DECIMAL(10,3) NULL,  -- system quantity at the moment of counting (snapshot)
     PostedMovementId INT NULL,               -- idempotency: StockMovement created by posting this line
 
     CONSTRAINT FK_StockCounts_ProductId FOREIGN KEY (ProductId) REFERENCES Products(ProductId)

@@ -865,7 +865,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             // snapshot BEFORE (isolated context — no shared tracking)
             int prodId = byBarcode.Data!.ProductId;
             decimal invBeforeVal;
-            List<(int BatchId, int Qty)> batchesBefore;
+            List<(int BatchId, decimal Qty)> batchesBefore;
             using (var vs = Scope())
             {
                 var vdb = Svc<Sayl.Core.Data.SaylDbContext>(vs);
@@ -873,7 +873,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 batchesBefore = await vdb.Batches.AsNoTracking()
                     .Where(b => b.ProductId == prodId && b.BatchQuantity > 0)
                     .OrderBy(b => b.ExpiryDate ?? DateOnly.MaxValue).ThenBy(b => b.CreatedAt)
-                    .Select(b => new ValueTuple<int, int>(b.BatchId, b.BatchQuantity))
+                    .Select(b => new ValueTuple<int, decimal>(b.BatchId, b.BatchQuantity))
                     .ToListAsync();
             }
 
@@ -1066,7 +1066,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 prodId = prod.ProductId;
             }
 
-            async Task<(int avail, int reserved, int rowCount, int rowsSum)> Snap()
+            async Task<(decimal avail, decimal reserved, int rowCount, decimal rowsSum)> Snap()
                 => await VerifyAsync(async db =>
                 {
                     var inv = await db.Inventories.AsNoTracking().Where(i => i.ProductId == prodId)
@@ -1222,12 +1222,12 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 db.InvoiceItems.AsNoTracking().Where(i => i.InvoiceId == _saleInvoiceId)
                     .Select(i => new { i.ProductId, i.BatchId }).FirstAsync());
 
-            int availBefore = await VerifyAsync(db =>
+            decimal availBefore = await VerifyAsync(db =>
                 db.Inventories.AsNoTracking().Where(i => i.ProductId == item.ProductId)
                     .Select(i => i.QuantityAvailable ?? 0).FirstAsync());
-            int? batchBefore = item.BatchId.HasValue
+            decimal? batchBefore = item.BatchId.HasValue
                 ? await VerifyAsync(db => db.Batches.AsNoTracking()
-                    .Where(b => b.BatchId == item.BatchId).Select(b => (int?)b.BatchQuantity).FirstAsync())
+                    .Where(b => b.BatchId == item.BatchId).Select(b => (decimal?)b.BatchQuantity).FirstAsync())
                 : null;
 
             var ret = await returns.CreateCustomerReturnAsync(new DtoReturnRequest
@@ -1238,14 +1238,14 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             });
             Check("customer return executed", ret.IsSuccess, ret.Message);
 
-            int availAfter = await VerifyAsync(db =>
+            decimal availAfter = await VerifyAsync(db =>
                 db.Inventories.AsNoTracking().Where(i => i.ProductId == item.ProductId)
                     .Select(i => i.QuantityAvailable ?? 0).FirstAsync());
             Check("stock restored", availAfter == availBefore + 1, $"{availBefore}->{availAfter}");
 
             if (item.BatchId.HasValue && batchBefore.HasValue)
             {
-                int batchAfter = await VerifyAsync(db => db.Batches.AsNoTracking()
+                decimal batchAfter = await VerifyAsync(db => db.Batches.AsNoTracking()
                     .Where(b => b.BatchId == item.BatchId).Select(b => b.BatchQuantity).FirstAsync());
                 Check("batch quantity restored", batchAfter == batchBefore + 1);
             }
@@ -1969,8 +1969,8 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             });
             Check("adjust +5 without batch number succeeds", adj.IsSuccess, adj.Message);
 
-            int batchQty = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
-            Check("auto batch created with quantity", batchQty == 5, $"batchSum={batchQty}");
+            decimal batchQty = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (decimal?)b.BatchQuantity) ?? 0m;
+            Check("auto batch created with quantity", batchQty == 5m, $"batchSum={batchQty}");
 
             // كان يفشل قبل الإصلاح: الدفعة الوحيدة تجميعية تلقائية.
             // نطاق منفصل — قارئ خصم البيع الحقيقي لا يحمل كاش الكيانات من التسوية
@@ -1981,8 +1981,8 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 Check("sale-deduct 2 from auto batch succeeds", deduct.IsSuccess, deduct.Message);
             }
 
-            int after = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (int?)b.BatchQuantity) ?? 0;
-            Check("batches track inventory after deduct", after == 3, $"batchSum={after}");
+            decimal after = await db.Batches.Where(b => b.ProductId == pid).SumAsync(b => (decimal?)b.BatchQuantity) ?? 0m;
+            Check("batches track inventory after deduct", after == 3m, $"batchSum={after}");
         }
 
         // ───────────────── 19. Stock count: stale snapshot + concurrency ─────────────────
@@ -2015,7 +2015,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 }
             }
 
-            int invOf(int pid) => VerifyAsync(async db =>
+            decimal invOf(int pid) => VerifyAsync(async db =>
                 await db.Inventories.AsNoTracking().Where(i => i.ProductId == pid)
                     .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync()).GetAwaiter().GetResult();
 
@@ -2055,7 +2055,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 var lines = await cnt.GetOpenSessionAsync();
                 foreach (var l in lines)
                 {
-                    int counted = l.ProductId == pidA ? 11 : l.ProductId == pidB ? 6 : l.ProductId == pidC ? 12
+                    decimal counted = l.ProductId == pidA ? 11m : l.ProductId == pidB ? 6m : l.ProductId == pidC ? 12m
                         : await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
@@ -2115,7 +2115,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 var lines = await cnt.GetOpenSessionAsync();
                 foreach (var l in lines)
                 {
-                    int counted = l.ProductId == pidD ? 8
+                    decimal counted = l.ProductId == pidD ? 8m
                         : await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
@@ -2176,7 +2176,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     var lines = await cnt.GetOpenSessionAsync();
                     foreach (var l in lines)
                     {
-                        int counted = await VerifyAsync(async db =>
+                        decimal counted = await VerifyAsync(async db =>
                             await db.Inventories.AsNoTracking().Where(i => i.ProductId == l.ProductId)
                                 .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync());
                         await cnt.SetCountedAsync(l.CountId, counted, adminId);
@@ -2208,18 +2208,18 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 adminId = await pdb.Users.Where(u => u.Username == "admin").Select(u => u.UserId).FirstAsync();
             }
 
-            async Task<(int inv, int batchSum, int quarantined)> Snap(int productId)
+            async Task<(decimal inv, decimal batchSum, decimal quarantined)> Snap(int productId)
                 => await VerifyAsync(async db =>
                 {
-                    int inv = await db.Inventories.AsNoTracking()
+                    decimal inv = await db.Inventories.AsNoTracking()
                         .Where(i => i.ProductId == productId)
                         .Select(i => i.QuantityAvailable ?? 0).FirstOrDefaultAsync();
-                    int batchSum = await db.Batches.AsNoTracking()
+                    decimal batchSum = await db.Batches.AsNoTracking()
                         .Where(b => b.ProductId == productId)
-                        .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
-                    int quarantined = await db.Batches.AsNoTracking()
+                        .SumAsync(b => (decimal?)b.BatchQuantity) ?? 0m;
+                    decimal quarantined = await db.Batches.AsNoTracking()
                         .Where(b => b.ProductId == productId && b.IsQuarantined)
-                        .SumAsync(b => (int?)b.BatchQuantity) ?? 0;
+                        .SumAsync(b => (decimal?)b.BatchQuantity) ?? 0m;
                     return (inv, batchSum, quarantined);
                 });
 
@@ -2368,22 +2368,22 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 }
 
                 var (p1Qty, p1Exp) = await VerifyAsync(async db => (
-                    await db.Batches.AsNoTracking().Where(b => b.BatchId == srcId).Select(b => (int?)b.BatchQuantity).SingleAsync(),
+                    await db.Batches.AsNoTracking().Where(b => b.BatchId == srcId).Select(b => (decimal?)b.BatchQuantity).SingleAsync(),
                     await db.Batches.AsNoTracking().Where(b => b.BatchId == srcId).Select(b => (DateOnly?)b.ExpiryDate).SingleAsync()));
-                Check("expired return went back to its expired batch (7)", p1Qty == 7 && p1Exp < today, $"qty={p1Qty} exp={p1Exp}");
+                Check("expired return went back to its expired batch (7)", p1Qty == 7m && p1Exp < today, $"qty={p1Qty} exp={p1Exp}");
 
                 int fabricatedSellable = await VerifyAsync(db => db.Batches.AsNoTracking()
                     .CountAsync(b => b.ProductId == pid && b.BatchNumber.StartsWith("RET-") && !b.IsQuarantined));
                 Check("no new sellable batch was fabricated for the expired return", fabricatedSellable == 0, $"count={fabricatedSellable}");
 
                 var snap6 = await Snap(pid);
-                Check("expired return kept batches = inventory", snap6.inv == 12 && snap6.batchSum == 12, $"inv={snap6.inv} batches={snap6.batchSum}");
+                Check("expired return kept batches = inventory", snap6.inv == 12m && snap6.batchSum == 12m, $"inv={snap6.inv} batches={snap6.batchSum}");
             }
 
             // ══ 6) المتاح الصافي يستثني المنتهي والمحجوب ويراعي الحجز ══
             // صالح للبيع: P2=3 (بلا صلاحية) فقط — P1 منتهي (7) وP3 منتهي؟ لا: P3=e2 (+60 يوم)
             // صالح: P2=3 + P3=2 = 5، محجوز 0
-            int netBefore = 0;
+            decimal netBefore = 0;
             using (var ps = Scope())
             {
                 netBefore = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
@@ -2405,7 +2405,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                 suspendedInvoice = susp.IsSuccess ? susp.Data : 0;
             }
 
-            int netReserved = 0;
+            decimal netReserved = 0;
             using (var ps = Scope())
             {
                 netReserved = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
@@ -2419,7 +2419,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
                     var cancel = await Svc<clsCheckoutService>(ps).CancelSuspendedInvoiceAsync(suspendedInvoice, cashierId);
                     Check("cancel suspended releases reservation", cancel.IsSuccess, cancel.Message);
                 }
-                int netAfter = 0;
+                decimal netAfter = 0;
                 using (var ps = Scope())
                 {
                     netAfter = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);
@@ -2467,7 +2467,7 @@ IF NOT EXISTS (SELECT 1 FROM Suppliers WHERE PartyId = 13)
             Check("no-batch return quarantined (1) not sellable", snap7.quarantined == 1 && snap7.inv == 13 && snap7.batchSum == 13,
                 $"inv={snap7.inv} batches={snap7.batchSum} quarantined={snap7.quarantined}");
 
-            int netFinal = 0;
+            decimal netFinal = 0;
             using (var ps = Scope())
             {
                 netFinal = await Svc<clsProductService>(ps).GetNetAvailableQuantityAsync(pid);

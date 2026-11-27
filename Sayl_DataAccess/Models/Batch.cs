@@ -13,7 +13,7 @@ public partial class Batch
 
     public DateOnly? ExpiryDate { get; set; }
 
-    public int BatchQuantity { get; set; }
+    public decimal BatchQuantity { get; set; }
 
     /// <summary>حجب/حجر: مخزون وُجد فعليًا لكنه غير صالح للبيع (مرتجع منتهي الصلاحية،
     /// مرتجع بلا دفعة مصدر…) — يبقى محسوبًا في المخزون الكلي ومستثنى من البيع
