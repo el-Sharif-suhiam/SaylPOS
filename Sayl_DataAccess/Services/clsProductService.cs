@@ -369,12 +369,15 @@ END";
                 .ToListAsync();
         }
 
-        /// <summary>المرحلة 5: وحدات المنتج النشطة للاختيار في الواجهات —
+        /// <summary>المرحلة 5: وحدات المنتج للاختيار في الواجهات —
         /// الوحدة الأساس أولًا (IsBase = 1) ثم الباقية بالاسم. PricePerUnit
         /// للعرض فقط (سعر الأساس × المعامل، مقرّب لخانتين) — الحقيقة المخزنة
         /// تبقى سعر الأساس على المنتج. المنتج غير الموجود = قائمة فارغة
-        /// (الواجهة تُسقط عمود الوحدات إلى الأساس).</summary>
-        public async Task<List<DtoProductUnit>> GetProductUnitsAsync(int productId)
+        /// (الواجهة تُسقط عمود الوحدات إلى الأساس).
+        /// المرحلة 6: includeInactive (لتحرير وحدات المنتج) يجلب المعطلة
+        /// أيضًا ويعيد PricePerUnit المخزن كما هو — الواجهة الافتراضية
+        /// (false) تبقى نشطة حصرًا بسعر العرض المشتق كما كانت.</summary>
+        public async Task<List<DtoProductUnit>> GetProductUnitsAsync(int productId, bool includeInactive = false)
         {
             var product = await _dbContext.Products
                 .AsNoTracking()
@@ -385,9 +388,14 @@ END";
             if (product == null)
                 return new List<DtoProductUnit>();
 
-            var units = await _dbContext.ProductUnits
+            var query = _dbContext.ProductUnits
                 .AsNoTracking()
-                .Where(u => u.ProductId == productId && u.IsActive)
+                .Where(u => u.ProductId == productId);
+
+            if (!includeInactive)
+                query = query.Where(u => u.IsActive);
+
+            var units = await query
                 .OrderByDescending(u => u.IsBase)
                 .ThenBy(u => u.Name)
                 .Select(u => new DtoProductUnit
@@ -396,20 +404,251 @@ END";
                     Name = u.Name,
                     FactorToBase = u.FactorToBase,
                     IsBase = u.IsBase,
-                    PricePerUnit = u.PricePerUnit
+                    PricePerUnit = u.PricePerUnit,
+                    IsActive = u.IsActive
                 })
                 .ToListAsync();
 
             // سعر وحدة الإدخال للعرض فقط — يُشتق من سعر الأساس المخزن على
             // المنتج (لا يُعتمد على PricePerUnit المخزن القديم إن اختلفت
-            // لأن الحقيقة المخزنة هي سعر الأساس).
-            foreach (var unit in units)
+            // لأن الحقيقة المخزنة هي سعر الأساس). وضع التحرير (includeInactive)
+            // يعيد القيمة المخزنة كما هي ليحررها المستخدم.
+            if (!includeInactive)
             {
-                if (product.BasePrice > 0m && unit.FactorToBase > 0m)
-                    unit.PricePerUnit = Math.Round(product.BasePrice * unit.FactorToBase, 2, MidpointRounding.AwayFromZero);
+                foreach (var unit in units)
+                {
+                    if (product.BasePrice > 0m && unit.FactorToBase > 0m)
+                        unit.PricePerUnit = Math.Round(product.BasePrice * unit.FactorToBase, 2, MidpointRounding.AwayFromZero);
+                }
             }
 
             return units;
+        }
+
+        // ═══ المرحلة 6: إدارة وحدات المنتج (الأساس + البدائل) من محرر المنتج ═══
+        // سياسة التاريخ (المرحلة 5): كل سطر فاتورة يحمل لقطته النصية
+        // (UnitName/UnitFactorToBase/EnteredQuantity) تُقرأ ولا تُعاد كتابتها
+        // أبدًا — إعادة تسمية وحدة آمنة لأن الصفوف القديمة تُبقي نصها القديم،
+        // أما تغيير المعامل فيُرفض للوحدة المستخدمة لأنه يُغيّر معنى الكميات
+        // المسجلة، والحذف يُرفض ما دامت فواتير تشير للوحدة (التعطيل هو دورة
+        // الحياة الآمنة: ResolveUnitAsync يحجب المعطلة في المعاملات الجديدة).
+
+        /// <summary>تحقق مشترك لحقول وحدة المنتج — يُعيد رسالة الرفض أو null.
+        /// الاسم: غير فارغ بعد القص وبحد 20 حرفًا (عرض العمود NVARCHAR(20)).
+        /// المعامل: أكبر من صفر وبخانات لا تتجاوز 6 (DECIMAL(18,6)) — خانات
+        /// أكثر = دقة مفرطة تُرفض لا تُقرَّب. السعر: صفر أو أكثر أو null.</summary>
+        private static string? ValidateUnitFields(string? name, decimal factorToBase, decimal? pricePerUnit)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "اسم الوحدة مطلوب.";
+
+            if (name.Trim().Length > 20)
+                return "اسم الوحدة يجب ألا يتجاوز 20 حرفًا.";
+
+            if (factorToBase <= 0m)
+                return "معامل التحويل يجب أن يكون أكبر من صفر.";
+
+            // دقة مفرطة: تقريب إلى 6 خانات يُغيّر القيمة ⇒ كان بها أكثر من 6
+            if (Math.Round(factorToBase, 6) != factorToBase)
+                return "معامل التحويل يتجاوز 6 منازل عشرية — دقة مفرطة غير مسموحة.";
+
+            if (pricePerUnit.HasValue && pricePerUnit.Value < 0m)
+                return "سعر الوحدة يجب أن يكون صفراً أو أكثر.";
+
+            return null;
+        }
+
+        /// <summary>هل استُخدمت الوحدة في لقطة فاتورة؟ المرجع بالمفتاح
+        /// (ProductUnitId) إن وُجد أو بمطابقة الاسم الحالي على سطور نفس
+        /// المنتج — مسار المعاملات الحالي (المرحلة 5) يكتب اللقطة النصية
+        /// ويترك المفتاح التيسيري NULL، فالمطابقة النصية هي الحقيقة العاملة.
+        /// ملاحظة التصميم: إعادة التسمية تفصل الصفوف القديمة عن هذا الصف
+        /// بالاسم، لكن معناها يبقى مجمّدًا في نصها القديم (سياسة اللقطة)
+        /// فلا يُفسد التاريخ بذلك الفصل.</summary>
+        private async Task<bool> IsProductUnitUsedAsync(int productUnitId, int productId, string name)
+        {
+            return await _dbContext.InvoiceItems
+                .AsNoTracking()
+                .AnyAsync(ii => ii.ProductUnitId == productUnitId
+                             || (ii.ProductId == productId && ii.UnitName == name));
+        }
+
+        /// <summary>المرحلة 6: إضافة وحدة بديلة لمنتج — نشطة فورًا وغير أساس.
+        /// الاسم فريد لكل منتج بمطابقة قيد الفردية في القاعدة (UQ_ProductUnits_Product_Name
+        /// عبر تساوي EF الذي يُترجم لمقارنة العمود نفسها — يتضمن اسم صف الأساس).</summary>
+        public async Task<Result<int>> AddProductUnitAsync(int productId, string name,
+            decimal factorToBase, decimal? pricePerUnit = null, int actorUserId = 0)
+        {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"إضافة وحدة للمنتج #{productId} مرفوضة: تتطلب صلاحية شاشة المنتجات.");
+                return Result<int>.Fail("إدارة وحدات المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
+
+            if (productId <= 0)
+                return Result<int>.Fail("معرف المنتج غير صالح.");
+
+            bool productExists = await _dbContext.Products.AnyAsync(p => p.ProductId == productId);
+            if (!productExists)
+                return Result<int>.Fail("المنتج غير موجود.");
+
+            string? validationError = ValidateUnitFields(name, factorToBase, pricePerUnit);
+            if (validationError != null)
+                return Result<int>.Fail(validationError);
+
+            string trimmed = name.Trim();
+
+            bool duplicate = await _dbContext.ProductUnits
+                .AnyAsync(u => u.ProductId == productId && u.Name == trimmed);
+            if (duplicate)
+                return Result<int>.Fail($"اسم الوحدة «{trimmed}» مستخدم لهذا المنتج — اختر اسمًا آخر.");
+
+            var unit = new ProductUnit
+            {
+                ProductId = productId,
+                Name = trimmed,
+                FactorToBase = factorToBase,
+                IsBase = false,
+                PricePerUnit = pricePerUnit,
+                IsActive = true,
+                CreatedAt = await _storeClock.GetUtcNowAsync(_dbContext)
+            };
+
+            _dbContext.ProductUnits.Add(unit);
+            await _dbContext.SaveChangesAsync();
+            return Result<int>.Ok(unit.ProductUnitId, "تمت إضافة الوحدة بنجاح.");
+        }
+
+        /// <summary>المرحلة 6: تعديل وحدة بديلة. إعادة التسمية مسموحة دائمًا —
+        /// اللقطات النصية على الفواتير القديمة تُبقي نصها القديم فلا يتغير
+        /// معناها (سياسة اللقطة). تغيير المعامل يُرفض للوحدة المستخدمة في أي
+        /// فاتورة سابقة: الكميات المسجلة حُسبت بالمعامل القديم وتغييره يُعيد
+        /// كتابة معنى التاريخ. السعر قابل للتعديل دائمًا. الوحدة الأساس لا
+        /// تُعدل من هنا (عاملها 1 بقيد CK_ProductUnits_BaseFactor وتُدار من
+        /// حقل وحدة الأساس على المنتج).</summary>
+        public async Task<Result> UpdateProductUnitAsync(int productUnitId, string name,
+            decimal factorToBase, decimal? pricePerUnit = null, int actorUserId = 0)
+        {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"تعديل وحدة منتج #{productUnitId} مرفوض: يتطلب صلاحية شاشة المنتجات.");
+                return Result.Fail("إدارة وحدات المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
+
+            var unit = await _dbContext.ProductUnits
+                .FirstOrDefaultAsync(u => u.ProductUnitId == productUnitId);
+            if (unit == null)
+                return Result.Fail("وحدة المنتج غير موجودة.");
+
+            if (unit.IsBase)
+                return Result.Fail("الوحدة الأساس تُدار من حقل وحدة الأساس في شاشة المنتج.");
+
+            string? validationError = ValidateUnitFields(name, factorToBase, pricePerUnit);
+            if (validationError != null)
+                return Result.Fail(validationError);
+
+            string trimmed = name.Trim();
+
+            bool duplicate = await _dbContext.ProductUnits
+                .AnyAsync(u => u.ProductId == unit.ProductId
+                            && u.ProductUnitId != unit.ProductUnitId
+                            && u.Name == trimmed);
+            if (duplicate)
+                return Result.Fail($"اسم الوحدة «{trimmed}» مستخدم لوحدة أخرى لنفس المنتج.");
+
+            // حماية التاريخ: المعامل ثابت للوحدة المستخدمة — المقارنة دقيقة
+            // (المدخل مُتحقق منه بـ 6 خانات والمخزن DECIMAL(18,6))
+            if (unit.FactorToBase != factorToBase)
+            {
+                bool used = await IsProductUnitUsedAsync(unit.ProductUnitId, unit.ProductId, unit.Name);
+                if (used)
+                {
+                    await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductUnitFactorChangeDenied",
+                        $"تغيير معامل الوحدة '{unit.Name}' (#{unit.ProductUnitId}) مرفوض: استُخدمت في فواتير سابقة.");
+                    return Result.Fail(
+                        $"لا يمكن تغيير معامل الوحدة «{unit.Name}» لأنها استُخدمت في فواتير سابقة — " +
+                        "تغيير المعامل يُغيّر معنى الكميات المسجلة تاريخيًا. يمكنك إعادة تسميتها أو تعطيلها وإنشاء وحدة جديدة بالمعامل الصحيح.");
+                }
+            }
+
+            unit.Name = trimmed;
+            unit.FactorToBase = factorToBase;
+            unit.PricePerUnit = pricePerUnit;
+
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم تحديث الوحدة بنجاح.");
+        }
+
+        /// <summary>المرحلة 6: تعطيل وحدة بديلة — دورة الحياة الآمنة: تعمل للوحدات
+        /// المستخدمة وغير المستخدمة، والفواتير القديمة تُبقي لقطتها النصية،
+        /// وResolveUnitAsync يحجب المعطلة في المعاملات الجديدة. الوحدة الأساس
+        /// لا تُعطَّل (هي المرآة القانونية لـ Product.Unit).</summary>
+        public async Task<Result> DeactivateProductUnitAsync(int productUnitId, int actorUserId)
+        {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"تعطيل وحدة منتج #{productUnitId} مرفوض: يتطلب صلاحية شاشة المنتجات.");
+                return Result.Fail("إدارة وحدات المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
+
+            var unit = await _dbContext.ProductUnits
+                .FirstOrDefaultAsync(u => u.ProductUnitId == productUnitId);
+            if (unit == null)
+                return Result.Fail("وحدة المنتج غير موجودة.");
+
+            if (unit.IsBase)
+                return Result.Fail("لا يمكن تعطيل الوحدة الأساس — هي المرآة القانونية لوحدة المنتج.");
+
+            unit.IsActive = false;
+
+            clsAudit.Log(_dbContext, actorUserId, "DeactivateProductUnit",
+                $"تعطيل وحدة المنتج '{unit.Name}' (#{unit.ProductUnitId}) للمنتج رقم {unit.ProductId}");
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم تعطيل الوحدة بنجاح — لن تُقبل في المعاملات الجديدة، والفواتير القديمة تحفظ لقطتها.");
+        }
+
+        /// <summary>المرحلة 6: حذف صارم لوحدة بديلة لا تشير إليها أي فاتورة
+        /// (بالمفتاح أو بمطابقة الاسم). ما استُخدم في فواتير يُرفض حذفه —
+        /// التعطيل هو المسار الآمن لأنه يُبقي الصف مرجعًا ساكنًا للتاريخ.</summary>
+        public async Task<Result> DeleteProductUnitAsync(int productUnitId, int actorUserId)
+        {
+            int actorRole = await GetUserRoleValueAsync(actorUserId);
+            if (actorRole < 0 || !AppPermissions.Has(actorRole, AppPermissions.Products))
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductOpDenied",
+                    $"حذف وحدة منتج #{productUnitId} مرفوض: يتطلب صلاحية شاشة المنتجات.");
+                return Result.Fail("إدارة وحدات المنتجات تتطلب صلاحية شاشة المنتجات.");
+            }
+
+            var unit = await _dbContext.ProductUnits
+                .FirstOrDefaultAsync(u => u.ProductUnitId == productUnitId);
+            if (unit == null)
+                return Result.Fail("وحدة المنتج غير موجودة.");
+
+            if (unit.IsBase)
+                return Result.Fail("لا يمكن حذف الوحدة الأساس — كل منتج يحتاج وحدة أساس واحدة.");
+
+            bool used = await IsProductUnitUsedAsync(unit.ProductUnitId, unit.ProductId, unit.Name);
+            if (used)
+            {
+                await clsAudit.LogRejectedAsync(_dbContext, actorUserId, "ProductUnitDeleteDenied",
+                    $"حذف الوحدة '{unit.Name}' (#{unit.ProductUnitId}) مرفوض: فواتير سابقة تشير إليها.");
+                return Result.Fail(
+                    $"لا يمكن حذف الوحدة «{unit.Name}» لأن فواتير سابقة تشير إليها — عطّلها بدلًا من الحذف.");
+            }
+
+            _dbContext.ProductUnits.Remove(unit);
+
+            clsAudit.Log(_dbContext, actorUserId, "DeleteProductUnit",
+                $"حذف وحدة المنتج '{unit.Name}' (#{unit.ProductUnitId}) من المنتج رقم {unit.ProductId}");
+            await _dbContext.SaveChangesAsync();
+            return Result.Ok("تم حذف الوحدة بنجاح.");
         }
 
         public async Task<Result<int>> AddNewProductAsync(DtoProduct dtoProduct, int actorUserId = 0)
@@ -433,6 +672,13 @@ END";
 
             if (dtoProduct.CostPrice < 0)
                 return Result<int>.Fail("سعر التكلفة يجب أن يكون صفراً أو أكثر.");
+
+            // المرحلة 6: منع تكوين وحدة أساس فارغ للمنتجات المخزنية — صف الأساس
+            // (ProductUnits) يحمل اسمًا NOT NULL وكل حساب المخزون يُشتق منه؛
+            // منتج مخزني بلا وحدة = تكوين غير صالح يُرفض عند الحد. الأنواع
+            // الأخرى (service/manufactured) تبقى حرة النص كما كانت.
+            if (dtoProduct.Type.ToLower() == "stock" && string.IsNullOrWhiteSpace(dtoProduct.Unit))
+                return Result<int>.Fail("وحدة الأساس مطلوبة للمنتجات المخزنية.");
 
             if (!string.IsNullOrWhiteSpace(dtoProduct.Barcode))
             {
@@ -514,6 +760,16 @@ END";
             var product = await _dbContext.Products.FindAsync(dtoProduct.ProductId);
             if (product == null)
                 return Result.Fail("المنتج غير موجود.");
+
+            // المرحلة 6: منع تكوين وحدة أساس فارغ للمنتجات المخزنية عند التعديل —
+            // إرسال وحدة فارغة لمنتج مخزني بلا وحدة أصلًا يُرفض. منتج له وحدة
+            // يُبقي وحدته عند إرسال نص فارغ (السلوك القائم: الوحدة لا تُمسح).
+            string effectiveType = !string.IsNullOrWhiteSpace(dtoProduct.Type)
+                ? dtoProduct.Type.ToLower() : product.Type;
+            if (effectiveType == "stock"
+                && string.IsNullOrWhiteSpace(dtoProduct.Unit)
+                && string.IsNullOrWhiteSpace(product.Unit))
+                return Result.Fail("وحدة الأساس مطلوبة للمنتجات المخزنية.");
 
             if (!string.IsNullOrWhiteSpace(dtoProduct.Name))
                 product.Name = clsValidation.ValidateString(dtoProduct.Name, "Name", 100);

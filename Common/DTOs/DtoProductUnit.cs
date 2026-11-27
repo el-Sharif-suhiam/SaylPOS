@@ -23,5 +23,9 @@ namespace Common.DTOs
         /// <summary>سعر وحدة الإدخال للعرض فقط (سعر الأساس × المعامل، مقرّب
         /// لخانتين). null إذا لم يتوفر سعر أساس.</summary>
         public decimal? PricePerUnit { get; set; }
+
+        /// <summary>المرحلة 6: حالة الوحدة — محرر المنتج يعرض المعطلة أيضًا
+        /// (includeInactive: true) بينما منتقيات المعاملات تطلب النشطة حصرًا.</summary>
+        public bool IsActive { get; set; }
     }
 }
