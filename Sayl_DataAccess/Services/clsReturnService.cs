@@ -120,6 +120,19 @@ namespace Sayl.Core.Services
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
 
+            // ══ المرحلة 5: وحدة الإرجاع = لقطة السطر الأصلي — لا قراءة من
+            // ProductUnits الحالية أبدًا. التحويل مرة واحدة لكل سطر هنا ثم
+            // الكل بعد ذلك بالوحدة الأساس (الحدود، التوزيع، الاسترداد).
+            foreach (var item in request.Items)
+            {
+                var unitCheck = ValidateReturnUnitAgainstOriginal(
+                    item, originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList());
+                if (!unitCheck.IsSuccess)
+                    return Result<int>.Fail(unitCheck.Message);
+
+                item.Quantity = unitCheck.Data;
+            }
+
             // ══ VULN-01: حارس الازدواج داخل الطلب الواحد ══
             // نفس المنتخ مرتين في الطلب (مثال هجومي: {X:5},{X:5} على فاتورة بِيعت 8)
             // كان يجتاز الفحص الفردي (5≤8 و5≤8) فيُرتجَع 10 ويُخزَّن 10 — سرقة نقد
@@ -254,7 +267,13 @@ namespace Sayl.Core.Services
                             Quantity = a.Quantity,
                             BatchId = a.BatchId,
                             ItemPrice = a.ItemPrice,
-                            ItemCost = a.ItemCost
+                            ItemCost = a.ItemCost,
+                            // المرحلة 5: لقطة وحدة الإرجاع منسوخة من السطر الأصلي
+                            // (اسم + معامل) — الكمية المُدخلة للمرتجع الكلي لقته
+                            // الأصلية والجزئي قسمة على المعامل. لا تُشتق من التكوين.
+                            UnitName = a.UnitName,
+                            UnitFactorToBase = a.UnitFactorToBase,
+                            EnteredQuantity = a.EnteredQuantity
                         });
 
                         await RestockProductAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice, nowUtc);
@@ -318,6 +337,18 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("فاتورة الشراء الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+
+            // ══ المرحلة 5: وحدة الإرجاع = لقطة السطر الأصلي — نفس قاعدة
+            // مرتجع العميل أعلاه. التحويل مرة واحدة لكل سطر ثم الكل بالأساس.
+            foreach (var item in request.Items)
+            {
+                var unitCheck = ValidateReturnUnitAgainstOriginal(
+                    item, originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList());
+                if (!unitCheck.IsSuccess)
+                    return Result<int>.Fail(unitCheck.Message);
+
+                item.Quantity = unitCheck.Data;
+            }
 
             // VULN-01: حارس الازدواج داخل الطلب — التجميع قبل الفحص (نفس مرتجع العميل)
             foreach (var g in GroupRequestItems(request.Items))
@@ -433,7 +464,12 @@ namespace Sayl.Core.Services
                             Quantity = a.Quantity,
                             BatchId = a.BatchId,
                             ItemPrice = a.ItemPrice,
-                            ItemCost = a.ItemCost
+                            ItemCost = a.ItemCost,
+                            // المرحلة 5: لقطة وحدة الإرجاع منسوخة من سطر الشراء
+                            // الأصلي (نفس قاعدة مرتجع العميل أعلاه).
+                            UnitName = a.UnitName,
+                            UnitFactorToBase = a.UnitFactorToBase,
+                            EnteredQuantity = a.EnteredQuantity
                         });
 
                         await DeductProductStockAsync(g.ProductId, a.Quantity, a.BatchId, returnInvoice, nowUtc);
@@ -489,6 +525,63 @@ namespace Sayl.Core.Services
                 .Select(g => (g.Key, g.Sum(i => i.Quantity)));
 
         /// <summary>
+        /// المرحلة 5: وحدة الإرجاع تُتحقق مقابل اللقطة المخزنة على سطر الفاتورة
+        /// الأصلي — لا قراءة من ProductUnits الحالية أبدًا (تعديل/تعطيل الوحدة
+        /// بعد البيع لا يغيّر ما يُرتجع). السطور الإرثية (بلا لقطة) تُرتجع
+        /// بوحدة الأساس فقط؛ والمنتج المباع بلقطة يجب أن يُرتجع بوحدتها نفسها
+        /// (اسم مطابق + معامل مطابق ضمن التسامح). تُعيد الكمية بالوحدة الأساس
+        /// (التحويل مرة واحدة لكل سطر عند حد الخدمة).
+        /// </summary>
+        private static Result<decimal> ValidateReturnUnitAgainstOriginal(
+            DtoReturnItem item, List<InvoiceItem> originalLines)
+        {
+            bool hasSnapshotLines = originalLines.Any(l => !string.IsNullOrWhiteSpace(l.UnitName));
+
+            // ── إرجاع بوحدة الأساس: مسموح فقط لفواتير بلا لقطات (إرثية/أساس) ──
+            if (string.IsNullOrWhiteSpace(item.UnitName))
+            {
+                if (hasSnapshotLines)
+                    return Result<decimal>.Fail("هذا المنتج بِيع بوحدة إدخال محددة — يجب الإرجاع بنفس وحدة الفاتورة الأصلية.");
+
+                if (item.EnteredQuantity.HasValue && item.EnteredQuantity.Value <= 0)
+                    return Result<decimal>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                decimal legacyBaseQty = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
+                if (legacyBaseQty <= 0)
+                    return Result<decimal>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                return Result<decimal>.Ok(legacyBaseQty);
+            }
+
+            // ── إرجاع بوحدة إدخال: يجب أن تطابق لقطة سطر أصلي ──
+            if (!hasSnapshotLines)
+                return Result<decimal>.Fail($"الفاتورة الأصلية لهذا المنتج بوحدة الأساس — لا يمكن الإرجاع بوحدة «{item.UnitName}».");
+
+            var matchingLines = originalLines
+                .Where(l => string.Equals(l.UnitName?.Trim(), item.UnitName.Trim(), StringComparison.Ordinal))
+                .ToList();
+            if (matchingLines.Count == 0)
+                return Result<decimal>.Fail($"وحدة الإرجاع «{item.UnitName}» لا تطابق وحدة الفاتورة الأصلية لهذا المنتج.");
+
+            if (!item.EnteredQuantity.HasValue || item.EnteredQuantity.Value <= 0)
+                return Result<decimal>.Fail($"الكمية المُدخلة بوحدة «{item.UnitName}» يجب أن تكون أكبر من صفر.");
+
+            decimal storedFactor = matchingLines.First().UnitFactorToBase ?? 1m;
+            if (!item.UnitFactorToBase.HasValue
+                || Math.Abs(item.UnitFactorToBase.Value - storedFactor) >= UnitConversion.QuantityTolerance)
+                return Result<decimal>.Fail($"معامل تحويل الوحدة «{item.UnitName}» لا يطابق لقطة الفاتورة الأصلية ({storedFactor:0.######}).");
+
+            decimal recomputedBase = Math.Round(
+                item.EnteredQuantity.Value * storedFactor, 3, MidpointRounding.AwayFromZero);
+            if (Math.Abs(item.Quantity - recomputedBase) >= UnitConversion.QuantityTolerance)
+                return Result<decimal>.Fail(
+                    $"الكمية بالوحدة الأساس ({item.Quantity:0.###}) لا تطابق الكمية المُدخلة " +
+                    $"({item.EnteredQuantity.Value:0.###} × {storedFactor:0.######} = {recomputedBase:0.###}) لوحدة «{item.UnitName}».");
+
+            return Result<decimal>.Ok(recomputedBase);
+        }
+
+        /// <summary>
         /// توزيع الكميات المطلوبة على سطور الفاتورة الأصلية بنفس الترتيب القائم
         /// (FEFO: الأقرب انتهاءً ثم الأقدم ثم الأرخص ثم ترتيب السطر).
         ///
@@ -501,7 +594,7 @@ namespace Sayl.Core.Services
         /// السطر صفًا لكل دفعة، فقد تكرر الدفعة نفسها على أكثر من سطر).
         /// الحارس الإجمالي لكل منتج يبقى مسؤول الرفض النهائي خارج هذه الدالة.
         /// </summary>
-        private static List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)> AllocateAcrossOriginalLines(
+        private static List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId, string? UnitName, decimal? UnitFactorToBase, decimal? EnteredQuantity)> AllocateAcrossOriginalLines(
             IEnumerable<InvoiceItem> originalItems,
             IEnumerable<(int ProductId, decimal Quantity)> groupedRequest,
             IReadOnlyDictionary<(int ProductId, int? BatchId), decimal> returnedByBatch)
@@ -525,7 +618,7 @@ namespace Sayl.Core.Services
                          - returnedByBatch.GetValueOrDefault(g.Key));
 
             var request = groupedRequest.ToDictionary(g => g.ProductId, g => g.Quantity);
-            var result = new List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId)>();
+            var result = new List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId, string? UnitName, decimal? UnitFactorToBase, decimal? EnteredQuantity)>();
 
             foreach (var x in ordered)
             {
@@ -540,7 +633,18 @@ namespace Sayl.Core.Services
                 if (take <= 0)
                     continue;
 
-                result.Add((x.Index, x.Item.ProductId, take, x.Item.ItemPrice, x.Item.ItemCost, x.Item.BatchId));
+                // المرحلة 5: لقطة وحدة الإرجاع من السطر الأصلي (لا من التكوين
+                // الحالي). الإرجاع الكلي للسطر يحمل الكمية المُدخلة الأصلية كما
+                // هي؛ الجزئي يُشتق قسمةً على معامل اللقطة (5 كجم = 1 كيس).
+                string? takeUnitName = x.Item.UnitName;
+                decimal? takeUnitFactor = takeUnitName == null ? null : x.Item.UnitFactorToBase ?? 1m;
+                decimal? takeEntered = takeUnitName == null
+                    ? null
+                    : (take >= x.Item.Quantity - 0.0005m && x.Item.EnteredQuantity.HasValue
+                        ? x.Item.EnteredQuantity
+                        : Math.Round(take / takeUnitFactor!.Value, 3, MidpointRounding.AwayFromZero));
+
+                result.Add((x.Index, x.Item.ProductId, take, x.Item.ItemPrice, x.Item.ItemCost, x.Item.BatchId, takeUnitName, takeUnitFactor, takeEntered));
                 request[x.Item.ProductId] = remaining - take;
                 batchRemaining[key] = lineCapacity - take;
             }

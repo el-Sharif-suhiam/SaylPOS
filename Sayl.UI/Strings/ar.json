@@ -17,6 +17,7 @@
   "Common.Label.InvoiceNo": "فاتورة رقم {0}",
   "Common.Label.Product": "المنتج",
   "Common.Label.Qty": "الكمية",
+  "Common.Label.Unit": "الوحدة",
   "Common.Label.Price": "السعر",
   "Common.Label.Total": "الإجمالي",
   "Common.Label.Net": "الصافي",

@@ -38,5 +38,18 @@ namespace Common.DTOs.ViewModel
         public string? BatchNumber { get; set; }
         public decimal ItemPrice { get; set; }
         public decimal? ItemCost { get; set; }
+
+        /// <summary>المرحلة 5: لقطة وحدة الإدخال وقت إنشاء الفاتورة (اسم نصي
+        /// مخزن على السطر). null = سطر قديم أو وحدة أساس — الواجهة تعرض
+        /// حينها الوحدة الحالية للمنتج (Product.Unit) كخيار ارتجاعي.</summary>
+        public string? UnitName { get; set; }
+
+        /// <summary>المرحلة 5: معامل التحويل المخزّن على السطر (لقطة — لا يُقرأ
+        /// من ProductUnits الحالية). null = وحدة أساس.</summary>
+        public decimal? UnitFactorToBase { get; set; }
+
+        /// <summary>المرحلة 5: الكمية المُدخلة بلقطة الوحدة (مثال: 2 كرتون).
+        /// null = سطر قديم/وحدة أساس — تعرض Quantity كما هي.</summary>
+        public decimal? EnteredQuantity { get; set; }
     }
 }

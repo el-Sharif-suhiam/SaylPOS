@@ -96,6 +96,20 @@ END";
 
                 // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
                 item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
+
+                // المرحلة 5: التحويل مرة واحدة لكل سطر عند حد الخدمة — إعادة
+                // حساب الكمية الأساس من وحدة الإدخال (EnteredQuantity ×
+                // UnitFactorToBase) والتحقق من التطابق ضمن التسامح. الواجهة
+                // ليست حد الثقة: وحدة غير معروفة/غير نشطة أو انحراف كمية أو
+                // معامل = رفض. الوحدة الأساس (UnitName فارغ) تتجاوز بلا لقطة.
+                var conversion = await UnitConversion.ValidateAndConvertAsync(
+                    _dbContext, item.ProductId,
+                    item.EnteredQuantity, item.UnitName, item.UnitFactorToBase,
+                    item.Quantity);
+                if (!conversion.IsSuccess)
+                    return Result<int>.Fail(conversion.Message);
+
+                item.Quantity = conversion.Data!.BaseQuantity;
             }
 
             // صلاحية الخصم: خصم أكبر من حد الكاشير يتطلب شاشة فواتير البيع (بت 16)
@@ -427,11 +441,18 @@ END";
                 // الصفوف محاذاة مع البنود (بُنيت من نفس القائمة) ليُكتب كل صف
                 // تكلفته من الدفعات التي يستهلكها فعليًا
                 var invoiceItemRows = invoice.InvoiceItems.ToList();
+                // المرحلة 5: الإكمال يعيد بناء بنود الخصم من الصفوف المخزنة —
+                // اللقطة النصية تُرحَّل كما هي (لا إعادة اشتقاق من التكوين
+                // الحالي): الكمية بالأساس + وحدة الإدخال المخزّنة تظلان
+                // الحقيقة عند الخصم والحركات.
                 var items = invoice.InvoiceItems.Select(i => new DtoCheckoutItem
                 {
                     ProductId = i.ProductId,
                     Quantity = i.Quantity,
-                    BatchId = i.BatchId
+                    BatchId = i.BatchId,
+                    UnitName = i.UnitName,
+                    UnitFactorToBase = i.UnitFactorToBase,
+                    EnteredQuantity = i.EnteredQuantity
                 }).ToList();
 
                 await DeductStockAndCreateMovementsAsync(items, invoice.InvoiceId, releaseReservation: true, invoiceItemRows, nowUtc);
@@ -655,6 +676,18 @@ END";
                  };
 
             _dbContext.InvoiceItems.Add(invoiceItem);
+                // المرحلة 5: لقطة وحدة الإدخال — تُلتقط مرة واحدة عند إنشاء
+                // السطر (تحققت وحُوِّلت الكمية في ProcessCheckoutAsync) ولا
+                // تُعاد كتابتها أبدًا. الوحدة الأساس (UnitName فارغ) تبقى
+                // بلا لقطة — تطابق الصفوف الإرثية والأساسية دائمًا.
+                if (!string.IsNullOrWhiteSpace(item.UnitName))
+                {
+                    invoiceItem.UnitName = item.UnitName.Trim();
+                    invoiceItem.UnitFactorToBase = item.UnitFactorToBase ?? 1m;
+                    invoiceItem.EnteredQuantity = Math.Round(
+                        item.EnteredQuantity ?? item.Quantity, 3, MidpointRounding.AwayFromZero);
+                }
+
             rows.Add(invoiceItem);
              }
 
@@ -836,6 +869,15 @@ END";
                     // البيع على كل صف — التكلفة وحدها تتبع الدفعة.
                     InvoiceItem? row = itemRows != null && itemIndex < itemRows.Count ? itemRows[itemIndex] : null;
                     decimal rowPrice = row?.ItemPrice ?? 0m;
+                    // المرحلة 5: لقطة وحدة الإدخال تُكرَّر على كل صف مُقسَّم —
+                    // الكمية الأساس تنقسم على الدفعات، واللقطة النصية/المعامل/
+                    // الكمية المُدخلة تظل مرجع العرض الموحّد لسطر السلة (الصف
+                    // الأول يحمل لقته الأصلية من AddInvoiceItemsAsync).
+                    string? rowUnitName = item.UnitName;
+                    decimal? rowUnitFactor = rowUnitName == null ? null : item.UnitFactorToBase ?? 1m;
+                    decimal? rowEnteredQty = rowUnitName == null
+                        ? null
+                        : Math.Round(item.EnteredQuantity ?? item.Quantity, 3, MidpointRounding.AwayFromZero);
                     foreach (var (batch, take) in allocations)
                     {
                         decimal unitCost = batch.UnitCost ?? product.CostPrice;
@@ -851,6 +893,12 @@ END";
                                 ItemPrice = rowPrice,
                                 ItemCost = unitCost
                             };
+                            if (rowUnitName != null)
+                            {
+                                row.UnitName = rowUnitName;
+                                row.UnitFactorToBase = rowUnitFactor;
+                                row.EnteredQuantity = rowEnteredQty;
+                            }
                             _dbContext.InvoiceItems.Add(row);
                         }
                         else

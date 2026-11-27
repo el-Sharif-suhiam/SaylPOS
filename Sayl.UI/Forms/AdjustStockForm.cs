@@ -14,12 +14,14 @@ namespace Sayl.UI.Forms
 
         private ComboBox _cmbProduct = null!;
         private TextBox _txtQty = null!;
+        private ComboBox _cmbUnit = null!;
         private RadioButton _rbIncrease = null!;
         private RadioButton _rbDecrease = null!;
         private TextBox _txtReason = null!;
         private TextBox _txtBatch = null!;
 
         private List<Common.DTOs.DtoProduct> _products = new();
+        private List<Common.DTOs.DtoProductUnit> _units = new();
 
         public AdjustStockForm(int? preselectedProductId)
         {
@@ -58,7 +60,11 @@ namespace Sayl.UI.Forms
             _cmbProduct = new ComboBox { Bounds = new Rectangle(30, 84, 400, 40), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
 
             var lblQty = new Label { Text = AppLang.T("Common.Label.Qty") + " *", Bounds = new Rectangle(30, 134, 400, 22), TextAlign = ContentAlignment.MiddleRight, ForeColor = AppTheme.TextMuted };
-            _txtQty = new TextBox { Bounds = new Rectangle(30, 158, 400, 40), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center };
+            _txtQty = new TextBox { Bounds = new Rectangle(30, 158, 190, 40), Font = AppTheme.FontBody, TextAlign = HorizontalAlignment.Center };
+
+            // المرحلة 5: وحدة الإدخال — الجرد/التسوية تُدخل بوحدة الإدخال
+            // والخدمة تحوّل للوحدة الأساس (الجرد والحركات بالأساس دائمًا).
+            _cmbUnit = new ComboBox { Bounds = new Rectangle(240, 158, 190, 40), DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = AppTheme.FontBody };
 
             // زرا الخيار: زيادة يمين (230..430) ونقصان يسار (30..230) —
             // Checked=true على الزيادة = الافتراضي. لا مقبض Click — قراءة لاحقًا.
@@ -82,11 +88,39 @@ namespace Sayl.UI.Forms
 
             Controls.AddRange(new Control[]
             {
-                lblTitle, lblProduct, _cmbProduct, lblQty, _txtQty,
+                lblTitle, lblProduct, _cmbProduct, lblQty, _txtQty, _cmbUnit,
                 _rbIncrease, _rbDecrease, lblBatch, _txtBatch, lblReason, _txtReason,
                 btnSave, btnCancel
             });
             CancelButton = btnCancel;
+            _cmbProduct.SelectedIndexChanged += async (_, _) => await LoadUnitsForSelectedAsync();
+        }
+
+        /// <summary>المرحلة 5: وحدات المنتج المختار (الأساس أولًا) — فشل التحميل
+        /// لا يوقف التسوية: القائمة تبقى فارغة والتسوية بوحدة الأساس.</summary>
+        private async Task LoadUnitsForSelectedAsync()
+        {
+            _cmbUnit.Items.Clear();
+            _units = new List<Common.DTOs.DtoProductUnit>();
+            if (_cmbProduct.SelectedIndex < 0 || _cmbProduct.SelectedIndex >= _products.Count)
+                return;
+
+            var product = _products[_cmbProduct.SelectedIndex];
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
+                _units = await productService.GetProductUnitsAsync(product.ProductId);
+            }
+            catch
+            {
+                _units = new List<Common.DTOs.DtoProductUnit>();
+            }
+
+            foreach (var unit in _units)
+                _cmbUnit.Items.Add(unit.Name);
+            if (_units.Count > 0)
+                _cmbUnit.SelectedIndex = 0; // الأساس أولًا
         }
 
         private async Task LoadProductsAsync()
@@ -161,22 +195,39 @@ namespace Sayl.UI.Forms
                 return;
             }
 
+            // المرحلة 5: الكمية تُكتب بوحدة الإدخال المختار — الطلب يرسل
+            // الكمية بالوحدة الأساس (الحد الخدمي يعيد الحساب والتحقق) مع
+            // لقطة الوحدة. وحدة غير مختارة/غير معروفة = وحدة الأساس.
+            string? unitName = _cmbUnit.SelectedItem?.ToString();
+            var selectedUnit = _units.FirstOrDefault(u => u.Name == unitName && u.FactorToBase > 0);
+            decimal unitFactor = selectedUnit?.FactorToBase ?? 1m;
+            bool hasUnit = selectedUnit != null && !selectedUnit.IsBase;
+            decimal baseQty = Math.Round(qty * unitFactor, 3, MidpointRounding.AwayFromZero);
+            if (baseQty <= 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.InvalidQty"));
+                return;
+            }
+
             var request = new DtoStockAdjustmentRequest
             {
                 ProductId = _products[_cmbProduct.SelectedIndex].ProductId,
-                Quantity = qty,
+                Quantity = baseQty,
                 IsIncrease = _rbIncrease.Checked,
                 Reason = _txtReason.Text.Trim(),
                 BatchNumber = _rbIncrease.Checked && !string.IsNullOrWhiteSpace(_txtBatch.Text)
                     ? _txtBatch.Text.Trim()
                     : null,
-                UserId = SessionState.CurrentUser?.UserId ?? 0
+                UserId = SessionState.CurrentUser?.UserId ?? 0,
+                EnteredQuantity = hasUnit ? qty : null,
+                UnitName = hasUnit ? selectedUnit!.Name : null,
+                UnitFactorToBase = hasUnit ? unitFactor : null
             };
 
             bool confirmed = ConfirmationDialog.Show(this, AppLang.T("AdjustStock.Confirm.Title"),
                 AppLang.T("AdjustStock.Confirm.Body",
                     request.IsIncrease ? AppLang.T("AdjustStock.IncreaseWord") : AppLang.T("AdjustStock.DecreaseWord"),
-                    qty));
+                    baseQty));
             if (!confirmed)
                 return;
 

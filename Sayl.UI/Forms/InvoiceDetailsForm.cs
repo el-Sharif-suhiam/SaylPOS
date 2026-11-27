@@ -199,9 +199,16 @@ namespace Sayl.UI.Forms
 
                 _gridItems.Rows.Clear();
                 foreach (var item in inv.Items)
+                {
+                    // المرحلة 5: «الكمية الوحدة» من اللقطة المخزنة (2 كيس) —
+                    // السطر الإرثي (بلا لقطة) يعرض كما كان. الإجمالي من الأساس.
+                    string qtyText = string.IsNullOrWhiteSpace(item.UnitName)
+                        ? item.Quantity.ToString("0.###")
+                        : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
                     _gridItems.Rows.Add(item.ProductName, item.BatchNumber ?? "-",
-                        item.Quantity.ToString("0.###"), UiHelpers.Money(item.ItemPrice),
+                        qtyText, UiHelpers.Money(item.ItemPrice),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
+                }
 
                 _gridPayments.Rows.Clear();
                 foreach (var p in inv.Payments)

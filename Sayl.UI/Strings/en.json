@@ -17,6 +17,7 @@
   "Common.Label.InvoiceNo": "Invoice No. {0}",
   "Common.Label.Product": "Product",
   "Common.Label.Qty": "Qty",
+  "Common.Label.Unit": "Unit",
   "Common.Label.Price": "Price",
   "Common.Label.Total": "Total",
   "Common.Label.Net": "Net",

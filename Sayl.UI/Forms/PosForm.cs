@@ -31,9 +31,34 @@ namespace Sayl.UI.Forms
         {
             public int ProductId { get; init; }
             public string ProductName { get; init; } = "";
+
+            /// <summary>المرحلة 5: سعر الوحدة الأساس (الحقيقة المخزنة VULN-14) —
+            /// سعر وحدة الإدخال للعرض فقط = Math.Round(Price × UnitFactor, 2)،
+            /// والإجماليات دائمًا من رياضيات الأساس (Price × BaseQuantity) —
+            /// لا ضرب/قسمة مرتين. حافة الخانتين الموثقة: كرتون سعره 115
+            /// ومعامله 12 → سعر الأساس 9.58 (العرض) والكرتون يظل 115 إجمالًا.</summary>
             public decimal Price { get; init; }
+
+            /// <summary>المرحلة 5: الكمية المُدخلة بوحدة الإدخال (ما يكتبه
+            /// الكاشير: 2 كرتون). الوحدة الأساس = نفس الكمية القديمة.</summary>
             public decimal Quantity { get; set; }
-            public decimal Total => Price * Quantity;
+
+            /// <summary>المرحلة 5: الوحدة المختارة — IsBase = وحدة الأساس
+            /// (المرآة لـ Product.Unit) وتُرسل للخدمة بلا لقطة (UnitName null).
+            /// Units = وحدات المنتج النشطة (الأساس أولًا) لقائمة العمود.</summary>
+            public bool IsBase { get; set; } = true;
+            public string? UnitName { get; set; }
+            public decimal UnitFactor { get; set; } = 1m;
+            public List<DtoProductUnit> Units { get; init; } = new();
+
+            /// <summary>الكمية بالوحدة الأساس (الحقيقة المخزنة) — نفس معادلة
+            /// الخدمة بالضبط: Math.Round(Entered × Factor, 3, AwayFromZero).</summary>
+            public decimal BaseQuantity => Math.Round(Quantity * UnitFactor, 3, MidpointRounding.AwayFromZero);
+
+            /// <summary>سعر وحدة الإدخال للعرض فقط (سعر الأساس × المعامل).</summary>
+            public decimal DisplayPrice => Math.Round(Price * UnitFactor, 2, MidpointRounding.AwayFromZero);
+
+            public decimal Total => Price * BaseQuantity;
         }
 
         private sealed class SearchItem
@@ -140,7 +165,7 @@ namespace Sayl.UI.Forms
             try
             {
                 _customerDisplay.UpdateCart(
-                    _cart.Select(i => (i.ProductName, i.Quantity, i.Price)).ToList(),
+                    _cart.Select(i => (i.ProductName, i.Quantity, i.UnitName, i.DisplayPrice, i.BaseQuantity, i.Total)).ToList(),
                     DiscountAmountForDisplay,
                     TaxAmountForDisplay,
                     NetTotal,
@@ -855,6 +880,22 @@ namespace Sayl.UI.Forms
             var cPrice = new DataGridViewCellStyle { Format = "N2", Alignment = DataGridViewContentAlignment.MiddleCenter };
             _gridCart.Columns.Add(new DataGridViewTextBoxColumn { Name = "colPrice", HeaderText = AppLang.T("Common.Label.Price"), DefaultCellStyle = cPrice, ReadOnly = true });
 
+            // المرحلة 5: عمود الوحدة — قائمة منسدلة لكل سطر بوحدات المنتج
+            // النشطة (الأساس أولًا) من GetProductUnitsAsync. تغيير الوحدة
+            // يعيد تحميل الكمية المُدخلة (نفس الكمية بالأساس بوحدة جديدة)
+            // ويعيد حساب سعر العرض — الخدمة تتحقق وتحوّل عند الحد.
+            var colUnit = new DataGridViewComboBoxColumn
+            {
+                Name = "colUnit",
+                HeaderText = AppLang.T("Common.Label.Unit"),
+                ReadOnly = false,
+                FlatStyle = FlatStyle.Flat,
+                FillWeight = 12
+            };
+            colUnit.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            colUnit.DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+            colUnit.DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox;
+
             var colMinus = new DataGridViewButtonColumn { Name = "colMinus", HeaderText = " ", Text = "−", UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 6 };
             colMinus.DefaultCellStyle.ForeColor = AppTheme.Primary;
             colMinus.DefaultCellStyle.Font = new Font("Segoe UI", 14F, FontStyle.Bold);
@@ -874,15 +915,16 @@ namespace Sayl.UI.Forms
             var colDelete = new DataGridViewButtonColumn { Name = "colDelete", HeaderText = AppLang.T("Pos.Cart.Delete"), Text = AppLang.T("Pos.Cart.Delete"), UseColumnTextForButtonValue = true, FlatStyle = FlatStyle.Flat, FillWeight = 8 };
             colDelete.DefaultCellStyle.ForeColor = AppTheme.Danger;
 
-            _gridCart.Columns.AddRange(new DataGridViewColumn[] { colMinus, colQty, colPlus, colTotal, colDelete });
+            _gridCart.Columns.AddRange(new DataGridViewColumn[] { colUnit, colMinus, colQty, colPlus, colTotal, colDelete });
 
-            UiHelpers.Column(_gridCart, "colProduct").FillWeight = 39;
-            UiHelpers.Column(_gridCart, "colPrice").FillWeight = 15;
+            UiHelpers.Column(_gridCart, "colProduct").FillWeight = 33;
+            UiHelpers.Column(_gridCart, "colPrice").FillWeight = 14;
             _gridCart.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             _gridCart.CellClick += GridCart_CellClick;
             _gridCart.CellValidating += GridCart_CellValidating;
             _gridCart.CellEndEdit += GridCart_CellEndEdit;
+            _gridCart.DataError += (_, _) => { /* قيمة وحدة خارج قائمة الصف — تجاهل آمن */ };
         }
 
         // 📖 GridCart_CellValidating/CellEndEdit — زوج حراسة الكمية:
@@ -905,9 +947,48 @@ namespace Sayl.UI.Forms
         private void GridCart_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.RowIndex >= _cart.Count) return;
-            if (_gridCart.Columns[e.ColumnIndex].Name != "colQty") return;
 
             var item = _cart[e.RowIndex];
+            string colName = _gridCart.Columns[e.ColumnIndex].Name;
+
+            // المرحلة 5: تغيير الوحدة — نفس الكمية بالأساس تُعاد كتابتها
+            // بوحدة الإدخال الجديدة (10 كجم → 2 كيس)، والسقف يتحول (stock/معامل)
+            // وسعر العرض يُعاد حسابه. الخدمة تتحقق عند الحد.
+            if (colName == "colUnit")
+            {
+                string? selected = _gridCart[e.ColumnIndex, e.RowIndex].Value?.ToString();
+                var unit = item.Units.FirstOrDefault(u => u.Name == selected);
+                if (unit == null || unit.Name == item.UnitName)
+                {
+                    BeginInvoke(new Action(RefreshCart));
+                    return;
+                }
+
+                decimal oldBase = item.BaseQuantity;
+                item.UnitName = unit.IsBase ? null : unit.Name;
+                item.IsBase = unit.IsBase;
+                item.UnitFactor = unit.FactorToBase;
+
+                decimal entered = Math.Round(oldBase / unit.FactorToBase, 3, MidpointRounding.AwayFromZero);
+                if (entered <= 0) entered = 1;
+
+                // سقف المخزون يتحول: stock بالأساس → entered بمعامل الوحدة
+                // (أرضية لثلاثة منازل — لا يتجاوز المخزون بعد الضرب في المعامل)
+                if (_stockByProduct.TryGetValue(item.ProductId, out decimal stock) &&
+                    stock > 0 && entered * unit.FactorToBase > stock)
+                {
+                    entered = Math.Floor(stock / unit.FactorToBase * 1000m) / 1000m;
+                    if (entered <= 0) entered = 1;
+                    ShowStockWarn(AppLang.T("Pos.Warn.QtyCapped", item.ProductName, entered.ToString("0.###")));
+                }
+
+                item.Quantity = entered;
+                BeginInvoke(new Action(RefreshCart));
+                return;
+            }
+
+            if (colName != "colQty") return;
+
             string raw = _gridCart[e.ColumnIndex, e.RowIndex].Value?.ToString() ?? "";
             // كميات عشرية: تقريب إلى 3 منازل (AwayFromZero) — بلا اقتطاع صحيح
             decimal qty = decimal.TryParse(raw.Trim(), out decimal d)
@@ -916,12 +997,14 @@ namespace Sayl.UI.Forms
 
             if (qty <= 0) qty = 1;
 
-            // حد أقصى صلب: لا تجاوز الكمية المتاحة
-            if (_stockByProduct.TryGetValue(item.ProductId, out decimal stock) &&
-                stock > 0 && qty > stock)
+            // حد أقصى صلب: لا تجاوز الكمية المتاحة — بالوحدة الأساس المقابلة
+            // (المخزون بالأساس؛ الكمية المُدخلة × المعامل هي ما يُخصم فعلًا)
+            if (_stockByProduct.TryGetValue(item.ProductId, out decimal stockCap) &&
+                stockCap > 0 && qty * item.UnitFactor > stockCap)
             {
-                qty = stock;
-                ShowStockWarn(AppLang.T("Pos.Warn.QtyCapped", item.ProductName, stock));
+                decimal enteredCap = Math.Floor(stockCap / item.UnitFactor * 1000m) / 1000m;
+                if (enteredCap > 0) qty = enteredCap;
+                ShowStockWarn(AppLang.T("Pos.Warn.QtyCapped", item.ProductName, enteredCap.ToString("0.###")));
             }
 
             item.Quantity = qty;
@@ -954,8 +1037,9 @@ namespace Sayl.UI.Forms
             switch (colName)
             {
                 case "colPlus":
+                    // المرحلة 5: السقف بالوحدة الأساس — الكمية المُدخلة × المعامل
                     if (_stockByProduct.TryGetValue(item.ProductId, out decimal stockPlus) &&
-                        stockPlus > 0 && item.Quantity >= stockPlus)
+                        stockPlus > 0 && item.BaseQuantity + item.UnitFactor > stockPlus)
                     {
                         ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", item.ProductName, stockPlus));
                         return;
@@ -1354,21 +1438,58 @@ namespace Sayl.UI.Forms
                 }
             }
 
+            // المرحلة 5: وحدات المنتج النشطة (الأساس أولًا) لعمود «الوحدة».
+            // فشل التحميل لا يوقف الكاشير: قائمة أساس اصطناعية من بيانات
+            // الصنف (Product.Unit) — البيع بوحدة الأساس متاح دائمًا.
+            List<DtoProductUnit> units;
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var products2 = scope.ServiceProvider.GetRequiredService<clsProductService>();
+                units = await products2.GetProductUnitsAsync(product.ProductId);
+            }
+            catch
+            {
+                units = new List<DtoProductUnit>();
+            }
+            if (units.Count == 0)
+            {
+                units = new List<DtoProductUnit>
+                {
+                    new()
+                    {
+                        ProductUnitId = 0,
+                        Name = string.IsNullOrWhiteSpace(product.Unit) ? AppLang.T("Common.Label.Unit") : product.Unit,
+                        FactorToBase = 1m,
+                        IsBase = true,
+                        PricePerUnit = product.BasePrice
+                    }
+                };
+            }
+
             if (stock == 0m)
             {
                 ShowStockWarn(AppLang.T("Pos.Warn.NoStock", product.Name));
                 return;
             }
 
-            var existing = _cart.FirstOrDefault(i => i.ProductId == product.ProductId);
-            if (existing != null)
+            // المرحلة 5: الدمج بمفتاح (المنتج، الوحدة) — يُسمح بوحدات مختلطة
+            // لنفس المنتج في السلة (1 كرتون + 3 حبات سطران)، والحجوزات تبقى
+            // تجميعات بالوحدة الأساس عند الحد. الإضافة الجديدة دائمًا بوحدة
+            // الأساس؛ التحويل لاحقًا من عمود «الوحدة» ينشئ قيمته الخاصة.
+            var match = _cart.FirstOrDefault(i =>
+                i.ProductId == product.ProductId &&
+                i.IsBase &&
+                i.UnitName == null);
+
+            if (match != null)
             {
-                if (stock > 0 && existing.Quantity >= stock)
+                if (stock > 0 && match.BaseQuantity + match.UnitFactor > stock)
                 {
                     ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stock));
                     return;
                 }
-                existing.Quantity += 1m;
+                match.Quantity += 1m;
             }
             else
                 _cart.Add(new CartItem
@@ -1376,7 +1497,11 @@ namespace Sayl.UI.Forms
                     ProductId = product.ProductId,
                     ProductName = product.Name,
                     Price = product.BasePrice,
-                    Quantity = 1
+                    Quantity = 1,
+                    IsBase = true,
+                    UnitName = null,
+                    UnitFactor = 1m,
+                    Units = units
                 });
 
             RefreshCart();
@@ -1394,9 +1519,26 @@ namespace Sayl.UI.Forms
         {
             _gridCart.Rows.Clear();
             foreach (var item in _cart)
-                _gridCart.Rows.Add(item.ProductName, UiHelpers.Money(item.Price), "−", item.Quantity.ToString("0.###"), "+", UiHelpers.Money(item.Total), AppLang.T("Pos.Cart.Delete"));
+            {
+                // المرحلة 5: السعر المعروض = سعر وحدة الإدخال (سعر الأساس ×
+                // المعامل للعرض فقط)؛ الإجمالي من رياضيات الأساس دائمًا.
+                int rowIndex = _gridCart.Rows.Add(
+                    item.ProductName, UiHelpers.Money(item.DisplayPrice), item.UnitName ?? "", "−",
+                    item.Quantity.ToString("0.###"), "+", UiHelpers.Money(item.Total), AppLang.T("Pos.Cart.Delete"));
 
-            decimal totalUnits = _cart.Sum(i => i.Quantity);
+                // قائمة الوحدات الخاصة بالمنتج على خلية السطر (الأساس أولًا)
+                if (_gridCart.Rows[rowIndex].Cells["colUnit"] is DataGridViewComboBoxCell unitCell)
+                {
+                    unitCell.Items.Clear();
+                    foreach (var unit in item.Units)
+                        unitCell.Items.Add(unit.Name);
+                    unitCell.Value = item.UnitName ?? (item.Units.FirstOrDefault(u => u.IsBase)?.Name ?? "");
+                }
+            }
+
+            // الشارة: القطعات بالوحدة الأساس (N بند • M قطعة) — وحدات مختلطة
+            // في السلة تُجمع بالأساس دائمًا (مجموع الإدخالات المختلطة بلا معنى).
+            decimal totalUnits = _cart.Sum(i => i.BaseQuantity);
             _lblItemsBadge.Text = _cart.Count == 0 ? AppLang.T("Pos.Cart.Empty") : AppLang.T("Pos.Cart.ItemsBadge", _cart.Count, totalUnits.ToString("0.###"));
             _lblNet.BackColor = _cart.Count == 0 ? AppTheme.TextMuted : AppTheme.Accent;
 
@@ -1567,8 +1709,14 @@ namespace Sayl.UI.Forms
                 {
                     ProductId = i.ProductId,
                     ProductName = i.ProductName,
-                    Quantity = i.Quantity,
-                    UnitPrice = i.Price // VULN-14: snapshot سعر السلة — سعر لحظة الإضافة
+                    // المرحلة 5: Quantity = الكمية بالوحدة الأساس (الحقيقة
+                    // المخزنة — نفس معادلة الخدمة)، واللقطة المُدخلة تُرسل
+                    // معها (الوحدة الأساس تُرسل بلا لقطة — السلوك القديم).
+                    Quantity = i.BaseQuantity,
+                    EnteredQuantity = i.IsBase ? null : i.Quantity,
+                    UnitName = i.IsBase ? null : i.UnitName,
+                    UnitFactorToBase = i.IsBase ? null : i.UnitFactor,
+                    UnitPrice = i.Price // VULN-14: snapshot سعر السلة — سعر الأساس لحظة الإضافة (لكل وحدة أساس)
                 }).ToList(),
                 DiscountPercent = DiscountPercent,
                 DiscountAmount = 0,

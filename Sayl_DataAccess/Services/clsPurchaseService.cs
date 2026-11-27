@@ -53,6 +53,27 @@ namespace Sayl.Core.Services
 
                 // تقريب مرة واحدة عند المدخل إلى مقياس 3 منازل عشرية (سياسة الكميات العشرية)
                 item.Quantity = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
+
+                // المرحلة 5: التحويل مرة واحدة لكل سطر عند حد الخدمة — إعادة
+                // حساب الكمية الأساس من وحدة الإدخال والتحقق من التطابق
+                // (الواجهة ليست حد الثقة). وحدة غير معروفة/غير نشطة أو انحراف
+                // كمية/معامل = رفض. الوحدة الأساس تتجاوز بلا لقطة.
+                var conversion = await UnitConversion.ValidateAndConvertAsync(
+                    _dbContext, item.ProductId,
+                    item.EnteredQuantity, item.UnitName, item.UnitFactorToBase,
+                    item.Quantity);
+                if (!conversion.IsSuccess)
+                    return Result<int>.Fail(conversion.Message);
+
+                item.Quantity = conversion.Data!.BaseQuantity;
+
+                // المرحلة 5: تكلفة وحدة الإدخال → تكلفة الوحدة الأساس (الحقيقة
+                // المخزنة على الدفعة/السطر). مثال الحافة: 115 كرتونًا بمعامل
+                // 12 → 9.5833… → 9.58 (خانتان، AwayFromZero). الكل بعد هنا
+                // (الإجماليات، الخصم، الدفعات، الحركات) بالوحدة الأساس.
+                if (conversion.Data!.Snapshot != null)
+                    item.UnitCost = UnitConversion.ConvertCostToBase(
+                        item.UnitCost, conversion.Data!.Snapshot.UnitFactorToBase);
             }
 
             bool supplierExists = await _dbContext.Suppliers.AnyAsync(s => s.PartyId == request.SupplierId);
@@ -218,7 +239,7 @@ WHERE BatchId = {batch.BatchId}");
 
                     await _dbContext.SaveChangesAsync();
 
-                    _dbContext.InvoiceItems.Add(new InvoiceItem
+                    var purchaseRow = new InvoiceItem
                     {
                         InvoiceId = invoice.InvoiceId,
                         ProductId = item.ProductId,
@@ -227,7 +248,19 @@ WHERE BatchId = {batch.BatchId}");
                         // السعر الخام كما جاء في الطلب (التاريخ) — التكلفة صافية بعد الخصم
                         ItemPrice = item.UnitCost,
                         ItemCost = unitEffectiveCost
-                    });
+                    };
+
+                    // المرحلة 5: لقطة وحدة الإدخال على بند الشراء — مُلتقطة في
+                    // التحقق أعلاه ولا تُعاد كتابتها. الوحدة الأساس بلا لقطة.
+                    if (!string.IsNullOrWhiteSpace(item.UnitName))
+                    {
+                        purchaseRow.UnitName = item.UnitName.Trim();
+                        purchaseRow.UnitFactorToBase = item.UnitFactorToBase ?? 1m;
+                        purchaseRow.EnteredQuantity = Math.Round(
+                            item.EnteredQuantity ?? item.Quantity, 3, MidpointRounding.AwayFromZero);
+                    }
+
+                    _dbContext.InvoiceItems.Add(purchaseRow);
 
                     var inventory = await _dbContext.Inventories.FindAsync(item.ProductId);
                     if (inventory == null)

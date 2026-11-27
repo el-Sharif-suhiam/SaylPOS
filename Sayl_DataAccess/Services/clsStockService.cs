@@ -57,6 +57,24 @@ namespace Sayl.Core.Services
             if (string.IsNullOrWhiteSpace(request.BatchNumber))
                 return Result.Fail("رقم الدفعة مطلوب.");
 
+            // المرحلة 5: التحويل مرة واحدة عند حد الخدمة — استلام بوحدة إدخال
+            // (3 كيس = 15 كجم) يعاد حسابه بالوحدة الأساس والتحقق من التطابق
+            // (الواجهة ليست حد الثقة). الدفعة/المخزون/الحركة كلها بالأساس.
+            var receiveConversion = await UnitConversion.ValidateAndConvertAsync(
+                _dbContext, request.ProductId,
+                request.EnteredQuantity, request.UnitName, request.UnitFactorToBase,
+                request.Quantity);
+            if (!receiveConversion.IsSuccess)
+                return Result.Fail(receiveConversion.Message);
+
+            request.Quantity = receiveConversion.Data!.BaseQuantity;
+
+            // المرحلة 5: تكلفة وحدة الإدخال → تكلفة الوحدة الأساس (الحقيقة
+            // المخزنة على الدفعة) — مثال الحافة: 115 بمعامل 12 → 9.58.
+            if (receiveConversion.Data!.Snapshot != null && request.UnitCost.HasValue)
+                request.UnitCost = UnitConversion.ConvertCostToBase(
+                    request.UnitCost.Value, receiveConversion.Data!.Snapshot.UnitFactorToBase);
+
             var product = await _dbContext.Products.FindAsync(request.ProductId);
             if (product == null)
                 return Result.Fail("المنتج غير موجود.");
@@ -304,6 +322,18 @@ namespace Sayl.Core.Services
 
             if (string.IsNullOrWhiteSpace(request.Reason))
                 return Result.Fail("سبب التسوية مطلوب.");
+
+            // المرحلة 5: التحويل مرة واحدة عند حد الخدمة — تسوية بوحدة إدخال
+            // (كيس = 5 كجم) تُعاد حسابها بالوحدة الأساس والتحقق من التطابق
+            // (الواجهة ليست حد الثقة). الجرد والحركات كلها بالوحدة الأساس.
+            var adjustConversion = await UnitConversion.ValidateAndConvertAsync(
+                _dbContext, request.ProductId,
+                request.EnteredQuantity, request.UnitName, request.UnitFactorToBase,
+                request.Quantity);
+            if (!adjustConversion.IsSuccess)
+                return Result.Fail(adjustConversion.Message);
+
+            request.Quantity = adjustConversion.Data!.BaseQuantity;
 
             // التسوية اليدوية للمخزون تتطلب شاشة المخزون (بت 2).
             // فحص صريح للهوية الفاشلة (actorRole < 0) بنفس شكل بوابة ReceiveStockAsync —

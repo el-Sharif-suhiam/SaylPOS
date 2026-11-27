@@ -112,8 +112,13 @@ namespace Sayl.UI.Forms
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
 
             _grid.Columns.Add("colProduct", AppLang.T("StockCount.Col.Product"));
-            UiHelpers.Column(_grid, "colProduct").FillWeight = 34;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
             UiHelpers.Column(_grid, "colProduct").ReadOnly = true;
+            // المرحلة 5: وحدة الجرد = وحدة الأساس دائمًا (لا إدخال بوحدات
+            // الإدخال في الجرد) — العمود عرض فقط ليعرف العادّ ماذا يعدّ.
+            _grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
+            UiHelpers.Column(_grid, "colUnit").FillWeight = 8;
+            UiHelpers.Column(_grid, "colUnit").ReadOnly = true;
             _grid.Columns.Add("colBook", AppLang.T("StockCount.Col.Book"));
             UiHelpers.Column(_grid, "colBook").FillWeight = 13;
             UiHelpers.Column(_grid, "colBook").ReadOnly = true;
@@ -221,7 +226,7 @@ namespace Sayl.UI.Forms
                     status = mark + AppClock.ToLocal(l.CountedAt.Value).ToString("HH:mm");
                 }
 
-                int row = _grid.Rows.Add(l.ProductName, l.BookQuantity.ToString("0.###"),
+                int row = _grid.Rows.Add(l.ProductName, l.UnitName ?? "", l.BookQuantity.ToString("0.###"),
                     l.CountedQuantity?.ToString("0.###") ?? "",
                     l.Difference > 0 ? "+" + l.Difference!.Value.ToString("0.###") : l.Difference?.ToString("0.###") ?? "",
                     l.CountedQuantity.HasValue ? UiHelpers.Money(l.DifferenceCost) : "",

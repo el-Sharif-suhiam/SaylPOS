@@ -194,29 +194,37 @@ namespace Sayl.UI.Forms
             _grid.ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             _grid.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            _grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
             _grid.Columns.Add("colPurchased", AppLang.T("SupplierReturn.Label.Purchased"));
             _grid.Columns.Add("colReturned", AppLang.T("SupplierReturn.Label.Returned"));
             _grid.Columns.Add("colRemaining", AppLang.T("SupplierReturn.Label.Remaining"));
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("SupplierReturn.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
-            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 26;
+            // Phase 5: unit column - the original line's stored snapshot unit is
+            // the ONLY unit the line can be returned in (legacy lines = base).
+            // Display-only: the UI blocks other units, the service guard closes.
+            UiHelpers.Column(_grid, "colUnit").ReadOnly = true;
+            UiHelpers.Column(_grid, "colUnit").FillWeight = 10;
             UiHelpers.Column(_grid, "colPurchased").FillWeight = 12;
             UiHelpers.Column(_grid, "colReturned").FillWeight = 13;
             UiHelpers.Column(_grid, "colRemaining").FillWeight = 13;
-            UiHelpers.Column(_grid, "colPrice").FillWeight = 12;
-            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 20;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 11;
+            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 15;
             // return qty column is the visual edit affordance (same trick
             // as the cashier cart in PosForm.StyleCartGrid / ReturnForm).
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.BackColor = AppTheme.FieldBg;
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             // input guard: any non-numeric text is rejected before reaching data
+            // (decimal quantities - same parse as ExecuteReturnAsync)
             _grid.CellValidating += (_, args) =>
             {
                 if (_grid.Columns[args.ColumnIndex].Name != "colReturnQty")
                     return;
-                if (!int.TryParse(args.FormattedValue?.ToString()?.Trim() ?? "", out int _))
+                if (!decimal.TryParse(args.FormattedValue?.ToString()?.Trim() ?? "",
+                        out decimal _))
                     args.Cancel = true;
             };
 
@@ -391,10 +399,29 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in _items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"),
-                        previouslyReturned.GetValueOrDefault(item.ProductId).ToString("0.###"),
-                        _remainingByProduct.GetValueOrDefault(item.ProductId).ToString("0.###"),
+                {
+                    // Phase 5: the original line's stored snapshot unit - "2 bag"
+                    // displays in bags and the remaining converts to the line's
+                    // unit (10 kg = 2 bag). Legacy lines (no snapshot) stay base.
+                    bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
+                    decimal lineFactor = item.UnitFactorToBase ?? 1m;
+                    decimal productRemainingBase = _remainingByProduct.GetValueOrDefault(item.ProductId);
+                    decimal productReturnedBase = previouslyReturned.GetValueOrDefault(item.ProductId);
+
+                    string soldText = hasSnapshot
+                        ? (item.EnteredQuantity ?? item.Quantity).ToString("0.###")
+                        : item.Quantity.ToString("0.###");
+                    string returnedText = hasSnapshot
+                        ? (Math.Floor(productReturnedBase / lineFactor * 1000m) / 1000m).ToString("0.###")
+                        : productReturnedBase.ToString("0.###");
+                    string remainingText = hasSnapshot
+                        ? (Math.Floor(productRemainingBase / lineFactor * 1000m) / 1000m).ToString("0.###")
+                        : productRemainingBase.ToString("0.###");
+
+                    _grid.Rows.Add(item.ProductName, item.UnitName ?? "", soldText,
+                        returnedText, remainingText,
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
+                }
 
                 // The box shows the loaded invoice's commercial number (never
                 // the internal id) - both for auto-load and manual lookup.
@@ -433,9 +460,26 @@ namespace Sayl.UI.Forms
                 decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
                 var item = _items[i];
-                enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + qty;
-                returnItems.Add(new DtoReturnItem { ProductId = item.ProductId, Quantity = qty });
-                grossTotal += item.ItemPrice * qty;
+                // Phase 5: the return qty is entered in the ORIGINAL line's stored
+                // snapshot unit - the only unit allowed for that line. The service
+                // guard validates against the stored snapshot, never the current
+                // ProductUnits config.
+                bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
+                decimal lineFactor = item.UnitFactorToBase ?? 1m;
+                decimal baseQty = Math.Round(qty * lineFactor, 3, MidpointRounding.AwayFromZero);
+
+                enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + baseQty;
+                returnItems.Add(new DtoReturnItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = baseQty,
+                    EnteredQuantity = qty,
+                    UnitName = hasSnapshot ? item.UnitName : null,
+                    UnitFactorToBase = hasSnapshot ? lineFactor : null
+                });
+                // VULN-03: stored per-base-unit price x base qty - the net ratio
+                // is applied later exactly as the service does.
+                grossTotal += item.ItemPrice * baseQty;
             }
 
             foreach (var entered in enteredByProduct)

@@ -369,6 +369,49 @@ END";
                 .ToListAsync();
         }
 
+        /// <summary>المرحلة 5: وحدات المنتج النشطة للاختيار في الواجهات —
+        /// الوحدة الأساس أولًا (IsBase = 1) ثم الباقية بالاسم. PricePerUnit
+        /// للعرض فقط (سعر الأساس × المعامل، مقرّب لخانتين) — الحقيقة المخزنة
+        /// تبقى سعر الأساس على المنتج. المنتج غير الموجود = قائمة فارغة
+        /// (الواجهة تُسقط عمود الوحدات إلى الأساس).</summary>
+        public async Task<List<DtoProductUnit>> GetProductUnitsAsync(int productId)
+        {
+            var product = await _dbContext.Products
+                .AsNoTracking()
+                .Where(p => p.ProductId == productId)
+                .Select(p => new { p.BasePrice })
+                .FirstOrDefaultAsync();
+
+            if (product == null)
+                return new List<DtoProductUnit>();
+
+            var units = await _dbContext.ProductUnits
+                .AsNoTracking()
+                .Where(u => u.ProductId == productId && u.IsActive)
+                .OrderByDescending(u => u.IsBase)
+                .ThenBy(u => u.Name)
+                .Select(u => new DtoProductUnit
+                {
+                    ProductUnitId = u.ProductUnitId,
+                    Name = u.Name,
+                    FactorToBase = u.FactorToBase,
+                    IsBase = u.IsBase,
+                    PricePerUnit = u.PricePerUnit
+                })
+                .ToListAsync();
+
+            // سعر وحدة الإدخال للعرض فقط — يُشتق من سعر الأساس المخزن على
+            // المنتج (لا يُعتمد على PricePerUnit المخزن القديم إن اختلفت
+            // لأن الحقيقة المخزنة هي سعر الأساس).
+            foreach (var unit in units)
+            {
+                if (product.BasePrice > 0m && unit.FactorToBase > 0m)
+                    unit.PricePerUnit = Math.Round(product.BasePrice * unit.FactorToBase, 2, MidpointRounding.AwayFromZero);
+            }
+
+            return units;
+        }
+
         public async Task<Result<int>> AddNewProductAsync(DtoProduct dtoProduct, int actorUserId = 0)
         {
             int actorRole = await GetUserRoleValueAsync(actorUserId);

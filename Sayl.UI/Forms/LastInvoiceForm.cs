@@ -151,8 +151,14 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in inv.Items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"), UiHelpers.Money(item.ItemPrice),
+                {
+                    // المرحلة 5: «الكمية الوحدة» من اللقطة المخزنة — الإرثي كما كان
+                    string qtyText = string.IsNullOrWhiteSpace(item.UnitName)
+                        ? item.Quantity.ToString("0.###")
+                        : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
+                    _grid.Rows.Add(item.ProductName, qtyText, UiHelpers.Money(item.ItemPrice),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
+                }
 
                 _btnPrint.Enabled = true;
             }

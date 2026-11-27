@@ -20,5 +20,17 @@ namespace Common.DTOs.RequestModels
         /// بالضبط عند الترحيل. اختياري (null للتسوية اليدوية المباشرة).
         /// </summary>
         public int? SourceId { get; set; }
+
+        /// <summary>المرحلة 5: الكمية المُدخلة بوحدة الإدخال — اختياري للتوافق.
+        /// Quantity يبقى دائمًا بالوحدة الأساس (الجرد/الحركة) ويُحسب على
+        /// الخادم من EnteredQuantity × UnitFactorToBase ويُتحقق تطابقه.</summary>
+        public decimal? EnteredQuantity { get; set; }
+
+        /// <summary>المرحلة 5: اسم وحدة الإدخال (للعرض/التحقق فقط — حركة
+        /// المخزون دائمًا بالوحدة الأساس). null/فارغ = أساس.</summary>
+        public string? UnitName { get; set; }
+
+        /// <summary>المرحلة 5: معامل تحويل وحدة الإدخال إلى الأساس. null/1 = أساس.</summary>
+        public decimal? UnitFactorToBase { get; set; }
     }
 }

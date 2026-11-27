@@ -413,7 +413,7 @@ namespace Sayl.UI.Infrastructure
                                     no.ToString(),
                                     item.ProductName,
                                     item.BatchNumber ?? "-",
-                                    item.Quantity.ToString("0.###"),
+                                    ItemQtyText(item),
                                     Money(item.ItemPrice),
                                     Money(item.ItemPrice * item.Quantity));
                                 stripe = !stripe;
@@ -644,7 +644,7 @@ namespace Sayl.UI.Infrastructure
                             foreach (var item in inv.Items)
                             {
                                 table.Cell().Text(item.ProductName).FontSize(8);
-                                table.Cell().AlignCenter().Text(item.Quantity.ToString("0.###")).FontSize(8);
+                                table.Cell().AlignCenter().Text(ItemQtyText(item)).FontSize(8);
                                 table.Cell().AlignLeft().Text(Money(item.ItemPrice)).FontSize(8);
                                 table.Cell().AlignLeft().Text(Money(item.ItemPrice * item.Quantity)).FontSize(8);
                             }
@@ -985,6 +985,16 @@ namespace Sayl.UI.Infrastructure
         };
 
         internal static string Money(decimal value) => value.ToString("N2");
+
+        /// <summary>المرحلة 5: نص الكمية للطباعة — «الكمية المُدخلة الوحدة» من
+        /// اللقطة المخزنة (2 كيس) عند وجودها؛ السطر الإرثي (بلا لقطة) يعرض
+        /// الكمية كما هي. السعر يظل لكل وحدة أساس والإجمالي من رياضيات الأساس
+        //  — حافة الخانتين الموثقة: كرتون سعره 115 ومعامله 12 → سعر الأساس
+        //  9.58 والكرتون يُحسب 114.96 (الأساس هو الحقيقة المخزنة دائمًا).</summary>
+        internal static string ItemQtyText(Common.DTOs.ViewModel.InvoiceItemVM item) =>
+            string.IsNullOrWhiteSpace(item.UnitName)
+                ? item.Quantity.ToString("0.###")
+                : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
 
         // ═════════════════════════════════════════════════
         // مكوّنات الهوية الموحدة — رؤوس أقسام، خلايا جدول، صفوف جاهزة

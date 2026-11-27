@@ -230,7 +230,12 @@ namespace Sayl.Core.Services
                     Quantity = ii.Quantity,
                     BatchNumber = ii.Batch != null ? ii.Batch.BatchNumber : null,
                     ItemPrice = ii.ItemPrice,
-                    ItemCost = ii.ItemCost
+                    ItemCost = ii.ItemCost,
+                    // المرحلة 5: لقطة وحدة الإدخال من السطر المخزن — null = سطر
+                    // إرثي/وحدة أساس (العرض يرجع حينها لوحدة المنتج الحالية).
+                    UnitName = ii.UnitName,
+                    UnitFactorToBase = ii.UnitFactorToBase,
+                    EnteredQuantity = ii.EnteredQuantity
                 }).ToList()
             };
 
@@ -327,7 +332,12 @@ namespace Sayl.Core.Services
                     Quantity = ii.Quantity,
                     BatchNumber = ii.Batch != null ? ii.Batch.BatchNumber : null,
                     ItemPrice = ii.ItemPrice,
-                    ItemCost = ii.ItemCost
+                    ItemCost = ii.ItemCost,
+                    // المرحلة 5: لقطة وحدة الإدخال من السطر المخزن (طباعة/عرض) —
+                    // null = سطر إرثي/وحدة أساس.
+                    UnitName = ii.UnitName,
+                    UnitFactorToBase = ii.UnitFactorToBase,
+                    EnteredQuantity = ii.EnteredQuantity
                 }).ToList(),
                 Payments = invoice.Payments
                     .OrderBy(p => p.PaymentDate)

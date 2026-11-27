@@ -39,8 +39,24 @@ namespace Common.DTOs.RequestModels
         /// <summary>VULN-14: سعر الوحدة وقت إضافة البند للسلة (snapshot) —
         /// اختياري للتوافق؛ إن مُلئ تُبنى الفاتورة عليه لا على سعر المنتج
         /// الحالي (تعديل سعر أثناء بناء سلة كان يفترس الزبون بصمت).
-        /// null = السلوك القديم (اقرأ السعر الحالي من Products).</summary>
+        /// null = السلوك القديم (اقرأ السعر الحالي من Products).
+        /// الدلالة: سعر الوحدة الأساس (PER-BASE-UNIT) — الحقيقة المخزنة؛
+        /// سعر وحدة الإدخال يُشتق للعرض فقط (سعر الأساس × المعامل).</summary>
         public decimal? UnitPrice { get; set; }
+
+        /// <summary>المرحلة 5: الكمية المُدخلة بوحدة الإدخال (مثال: 2 كرتون) —
+        /// اختياري للتوافق. Quantity يبقى دائمًا بالوحدة الأساس (الحقيقة
+        /// المخزنة) ويُحسب على الخادم = Math.Round(EnteredQuantity ×
+        /// UnitFactorToBase, 3, AwayFromZero) ويُتحقق تطابقه هنا.</summary>
+        public decimal? EnteredQuantity { get; set; }
+
+        /// <summary>المرحلة 5: اسم وحدة الإدخال وقت البيع (لقطة نصية تُخزن على
+        /// InvoiceItem). null/فارغ = الوحدة الأساس (سلوك قديم — لا لقطة).</summary>
+        public string? UnitName { get; set; }
+
+        /// <summary>المرحلة 5: معامل تحويل وحدة الإدخال إلى الأساس
+        /// (1 كرتون = 12 حبة أساس → 12). null/1 = وحدة أساس.</summary>
+        public decimal? UnitFactorToBase { get; set; }
     }
 
     public class DtoPaymentInfo

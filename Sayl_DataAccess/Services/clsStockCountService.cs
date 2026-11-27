@@ -304,6 +304,8 @@ END";
                     sc.CountSessionId,
                     sc.ProductId,
                     sc.ProductName,
+                    // المرحلة 5: وحدة الجرد (الأساس) من المنتج الحالي — عرض فقط
+                    UnitName = sc.Product.Unit,
                     sc.BookQuantity,
                     sc.BookQuantityAtCount,
                     sc.CountedQuantity,
@@ -333,6 +335,7 @@ END";
                     CountSessionId = sc.CountSessionId,
                     ProductId = sc.ProductId,
                     ProductName = sc.ProductName,
+                    UnitName = sc.UnitName,
                     BookQuantity = book,
                     CountedQuantity = sc.CountedQuantity,
                     CountedAt = sc.CountedAt,
@@ -722,6 +725,8 @@ END";
                     sc.CountSessionId,
                     sc.ProductId,
                     sc.ProductName,
+                    // المرحلة 5: وحدة الجرد (الأساس) — عرض فقط
+                    UnitName = sc.Product.Unit,
                     sc.BookQuantity,
                     sc.CountedQuantity,
                     sc.CountedAt,
@@ -757,6 +762,7 @@ END";
                     CountSessionId = sc.CountSessionId,
                     ProductId = sc.ProductId,
                     ProductName = sc.ProductName,
+                    UnitName = sc.UnitName,
                     BookQuantity = sc.BookQuantity,
                     CountedQuantity = sc.CountedQuantity,
                     CountedAt = sc.CountedAt,

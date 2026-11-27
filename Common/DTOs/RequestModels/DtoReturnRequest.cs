@@ -22,5 +22,22 @@ namespace Common.DTOs.RequestModels
         public int ProductId { get; set; }
         public decimal Quantity { get; set; }
         public int? BatchId { get; set; }
+
+        /// <summary>المرحلة 5: الكمية المُدخلة بوحدة الإرجاع — يجب أن تكون
+        /// بوحدة الإرجاع الأصلي نفسها (لقطة سطر الفاتورة الأصلي) أو الوحدة
+        /// الأساس للسطور القديمة. اختياري للتوافق؛ Quantity يبقى دائمًا
+        /// بالوحدة الأساس ويُحسب على الخادم من EnteredQuantity ×
+        /// UnitFactorToBase ويُتحقق تطابقه مقابل الحد المتبقي بالأساس.</summary>
+        public decimal? EnteredQuantity { get; set; }
+
+        /// <summary>المرحلة 5: اسم وحدة الإرجاع (يجب أن يطابق لقطة السطر
+        /// الأصلي — لا يُقبل حلّ وحدة جديدة هنا). null/فارغ = أساس
+        /// (سطور الفواتير القديمة أو الإرجاع بوحدة الأساس).</summary>
+        public string? UnitName { get; set; }
+
+        /// <summary>المرحلة 5: معامل تحويل وحدة الإرجاع إلى الأساس — يُتحقق
+        /// مطابقته للقطة المخزنة على السطر الأصلي (مطابقة نصية للوحدة
+        /// ورقمية للمعامل، لا قراءة من ProductUnits الحالية).</summary>
+        public decimal? UnitFactorToBase { get; set; }
     }
 }

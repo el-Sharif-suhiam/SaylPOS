@@ -40,6 +40,10 @@ namespace Sayl.UI.Forms
         private decimal _net;
         private bool _saved;
         private NumericUpDown _nudQty = null!;
+
+        // المرحلة 5: وحدات المنتج النشطة (الأساس أولًا) لكل منتج أُضيف للجدول —
+        // مصدر معامل التحويل عند الحفظ (وحدة غير معروفة/فارغة = الأساس).
+        private readonly Dictionary<int, List<DtoProductUnit>> _unitsByProduct = new();
         public PurchaseForm()
         {
             Text = AppLang.T("Purchase.Title");
@@ -281,14 +285,25 @@ namespace Sayl.UI.Forms
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             _grid.Columns.Add("colProduct", AppLang.T("Purchase.Col.Product"));
             _grid.Columns.Add("colBatch", AppLang.T("Purchase.Col.Batch"));
+            // المرحلة 5: قائمة وحدات الإدخال (تُملأ لكل سطر من وحدات المنتج)
+            _grid.Columns.Add(new DataGridViewComboBoxColumn
+            {
+                Name = "colUnit",
+                HeaderText = AppLang.T("Common.Label.Unit"),
+                FlatStyle = FlatStyle.Flat
+            });
             _grid.Columns.Add("colQty", AppLang.T("Purchase.Col.Qty"));
             _grid.Columns.Add("colCost", AppLang.T("Purchase.Col.Cost"));
             _grid.Columns.Add("colExpiry", AppLang.T("Purchase.Col.Expiry"));
             _grid.Columns.Add("colTotal", AppLang.T("Purchase.Col.Total"));
             _grid.Columns.Add("colDelete", "");
             UiHelpers.Column(_grid, "colProduct").ReadOnly = true;
-            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
-            UiHelpers.Column(_grid, "colBatch").FillWeight = 16;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 26;
+            UiHelpers.Column(_grid, "colBatch").FillWeight = 14;
+            // المرحلة 5: عمود الوحدة — قائمة وحدات المنتج (الأساس أولًا)؛
+            // الكمية والتكلفة تُدخل بوحدة الإدخال والخدمة تحوّل للأساس.
+            UiHelpers.Column(_grid, "colUnit").FillWeight = 10;
+            UiHelpers.Column(_grid, "colUnit").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             UiHelpers.Column(_grid, "colQty").FillWeight = 9;
             UiHelpers.Column(_grid, "colQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             UiHelpers.Column(_grid, "colCost").FillWeight = 11;
@@ -302,6 +317,7 @@ namespace Sayl.UI.Forms
             // CellEndEdit: بعد انتهاء تحرير أي خلية تُعاد الحسابات — إجمالي
             // السطر وكل الملخصات أسفل النافذة يتحدثان فورًا.
             _grid.CellEndEdit += (_, _) => RefreshRowTotals();
+            _grid.DataError += (_, _) => { /* قيمة وحدة خارج قائمة الصف — تجاهل آمن */ };
             // CellClick مع فلترة عمود: نقر «حذف» فقط يحذف السطر —
             // args.ColumnIndex نقارن بفهرس العمود الاسمي لا برقم ثابت.
             _grid.CellClick += (_, args) =>
@@ -583,11 +599,14 @@ namespace Sayl.UI.Forms
             int productId = p.ProductId;
             decimal requestedQty = Math.Round(_nudQty.Value, 3, MidpointRounding.AwayFromZero);   // الكمية المطلوبة
 
-            // 1) ابحث إذا كان المنتج موجودًا مسبقًا
+            // 1) ابحث إذا كان المنتج موجودًا مسبقًا بنفس الوحدة (الأساس = خلية فارغة) —
+            //    وحدات مختلطة لنفس المنتج تبقى سطورًا منفصلة (المرحلة 5).
             foreach (DataGridViewRow row in _grid.Rows)
             {
                 if (row.IsNewRow) continue;
-                if (row.Tag is int id && id == productId)
+                string rowUnit = row.Cells["colUnit"].Value?.ToString() ?? "";
+                bool rowIsBase = string.IsNullOrWhiteSpace(rowUnit);
+                if (row.Tag is int id && id == productId && rowIsBase)
                 {
                     decimal currentQty = ParseDecimal(row.Cells["colQty"].Value);
                     row.Cells["colQty"].Value = (currentQty + requestedQty).ToString("0.###");
@@ -597,9 +616,10 @@ namespace Sayl.UI.Forms
                 }
             }
 
-            // 2) لم يوجد، أضف سطرًا جديدًا بالكمية المطلوبة
+            // 2) لم يوجد، أضف سطرًا جديدًا بالكمية المطلوبة (بوحدة الأساس افتراضيًا)
             int rowIndex = _grid.Rows.Add(
                 p.Name,
+                string.Empty,
                 string.Empty,
                 requestedQty.ToString("0.###"),
                 p.CostPrice.ToString("0.##"),
@@ -610,17 +630,74 @@ namespace Sayl.UI.Forms
             _grid.Rows[rowIndex].Tag = p.ProductId;
             _grid.Rows[rowIndex].Cells["colDelete"].Style.ForeColor = AppTheme.Danger;
             _grid.CurrentCell = _grid.Rows[rowIndex].Cells["colBatch"];
+            LoadUnitsForRowAsync(_grid.Rows[rowIndex], productId);
             RecalcTotals();
+        }
+
+        // المرحلة 5: تعبئة قائمة الوحدات لسطر الشراء (خلفية — فشل التحميل لا
+        // يوقف الشراء: الخلية تبقى فارغة = وحدة الأساس).
+        private async Task LoadUnitsForRowAsync(DataGridViewRow row, int productId)
+        {
+            try
+            {
+                List<DtoProductUnit> units;
+                if (_unitsByProduct.TryGetValue(productId, out var cached))
+                {
+                    units = cached;
+                }
+                else
+                {
+                    using var scope = Program.Services.CreateScope();
+                    var products = scope.ServiceProvider.GetRequiredService<clsProductService>();
+                    units = await products.GetProductUnitsAsync(productId);
+                    if (units.Count > 0)
+                        _unitsByProduct[productId] = units;
+                }
+
+                if (row.DataGridView == null || row.IsNewRow) return;
+                if (row.Cells["colUnit"] is DataGridViewComboBoxCell cell && cell.Items.Count == 0)
+                {
+                    foreach (var u in units)
+                        cell.Items.Add(u.Name);
+                    if (!string.IsNullOrWhiteSpace(cell.Value?.ToString()))
+                        cell.Value = cell.Value; // إبقاء اختيار المستخدم
+                    else
+                        cell.Value = units.FirstOrDefault(u => u.IsBase)?.Name ?? "";
+                    RefreshRowTotals();
+                }
+            }
+            catch
+            {
+                // قائمة فارغة = الأساس — الحد الخدمي يتحقق أصلًا
+            }
+        }
+
+        /// <summary>المرحلة 5: معامل التحويل للسطر — من قائمة الوحدات المحمّلة
+        /// حسب الاسم المختار. اسم فارغ/غير معروف = وحدة الأساس (1).</summary>
+        private decimal RowFactor(DataGridViewRow row)
+        {
+            if (row.Tag is not int productId) return 1m;
+            if (!_unitsByProduct.TryGetValue(productId, out var units)) return 1m;
+            string? name = row.Cells["colUnit"].Value?.ToString();
+            if (string.IsNullOrWhiteSpace(name)) return 1m;
+            var unit = units.FirstOrDefault(u => u.Name == name.Trim());
+            return unit != null && unit.FactorToBase > 0 ? unit.FactorToBase : 1m;
         }
         // ── الحسابات ──
         private void RefreshRowTotals()
         {
             foreach (DataGridViewRow row in _grid.Rows)
             {
-                if (row.IsNewRow) continue;
+                if (row.IsNewRow || row.Tag == null) continue;
+                // المرحلة 5: الإجمالي المعروض من رياضيات الأساس — الكمية
+                // الأساس × تكلفة الأساس (المُدخل بوحدة الإدخال يُحوَّل كما
+                // تفعل الخدمة بالضبط) — لا ضرب/قسمة مرتين.
                 decimal qty = ParseDecimal(row.Cells["colQty"].Value);
                 decimal cost = ParseDecimal(row.Cells["colCost"].Value);
-                row.Cells["colTotal"].Value = UiHelpers.Money(qty * cost);
+                decimal factor = RowFactor(row);
+                decimal baseQty = Math.Round(qty * factor, 3, MidpointRounding.AwayFromZero);
+                decimal baseCost = Math.Round(cost / factor, 2, MidpointRounding.AwayFromZero);
+                row.Cells["colTotal"].Value = UiHelpers.Money(baseQty * baseCost);
             }
             RecalcTotals();
         }
@@ -630,8 +707,12 @@ namespace Sayl.UI.Forms
             decimal total = 0;
             foreach (DataGridViewRow row in _grid.Rows)
             {
-                if (row.IsNewRow) continue;
-                total += ParseDecimal(row.Cells["colQty"].Value) * ParseDecimal(row.Cells["colCost"].Value);
+                if (row.IsNewRow || row.Tag == null) continue;
+                decimal qty = ParseDecimal(row.Cells["colQty"].Value);
+                decimal cost = ParseDecimal(row.Cells["colCost"].Value);
+                decimal factor = RowFactor(row);
+                total += Math.Round(qty * factor, 3, MidpointRounding.AwayFromZero)
+                       * Math.Round(cost / factor, 2, MidpointRounding.AwayFromZero);
             }
 
             decimal discount = Math.Max(0, ParseDecimal(_txtDiscount.Text));
@@ -734,14 +815,34 @@ namespace Sayl.UI.Forms
                     return;
                 }
 
-                subtotal += qty * cost;
+                // المرحلة 5: الكمية والتكلفة تُدخلان بوحدة الإدخال (1 كرتون
+                // @ 120) — الطلب يرسل الكمية بالوحدة الأساس (الحد الخدمي يعيد
+                // الحساب والتحقق) مع لقطة الوحدة، وتكلفة وحدة الإدخال كما
+                // كُتبت (الخدمة تحوّلها للأساس = Round(التكلفة/المعامل, 2)).
+                decimal unitFactor = RowFactor(row);
+                decimal baseQty = Math.Round(qty * unitFactor, 3, MidpointRounding.AwayFromZero);
+                if (baseQty <= 0)
+                {
+                    UiHelpers.ShowError(this, AppLang.T("Purchase.Msg.QtyInvalidFor", productName));
+                    _grid.CurrentCell = row.Cells["colQty"];
+                    return;
+                }
+
+                string? unitName = row.Cells["colUnit"].Value?.ToString()?.Trim();
+                bool hasUnit = !string.IsNullOrWhiteSpace(unitName) && unitFactor != 1m;
+
+                // إجمالي الخصم/الدفع يُقاس على الأساس — نفس رياضيات الخدمة
+                subtotal += baseQty * Math.Round(cost / unitFactor, 2, MidpointRounding.AwayFromZero);
                 items.Add(new DtoPurchaseItem
                 {
                     ProductId = (int)row.Tag,
                     BatchNumber = batch,
-                    Quantity = qty,
+                    Quantity = baseQty,
                     UnitCost = cost,
-                    ExpiryDate = expiry
+                    ExpiryDate = expiry,
+                    EnteredQuantity = hasUnit ? qty : null,
+                    UnitName = hasUnit ? unitName : null,
+                    UnitFactorToBase = hasUnit ? unitFactor : null
                 });
             }
 

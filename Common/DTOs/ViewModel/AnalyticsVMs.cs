@@ -73,6 +73,9 @@ namespace Common.DTOs.ViewModel
         public int CountSessionId { get; set; }
         public int ProductId { get; set; }
         public string ProductName { get; set; } = null!;
+        /// <summary>المرحلة 5: وحدة الجرد (الأساس دائمًا — الجرد لا يدخل بوحدات
+        /// الإدخال) للعرض في عمود الوحدة بجانب الكميات.</summary>
+        public string? UnitName { get; set; }
         public decimal BookQuantity { get; set; }
         /// <summary>null = لم يُعد بعد.</summary>
         public decimal? CountedQuantity { get; set; }

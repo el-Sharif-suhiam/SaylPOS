@@ -13,6 +13,8 @@ namespace Sayl.UI.Forms
         private ListBox _lstProducts = null!;
         private TextBox _txtBatch = null!;
         private TextBox _txtQty = null!;
+        private ComboBox _cmbUnit = null!;
+        private List<Common.DTOs.DtoProductUnit> _units = new();
         private DateTimePicker _dtpExpiry = null!;
         private CheckBox _chkHasExpiry = null!;
 
@@ -38,7 +40,7 @@ namespace Sayl.UI.Forms
         {
             Text = AppLang.T("ReceiveStock.Form.Title");
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(560, 620);
+            ClientSize = new Size(560, 670);
             BackColor = AppTheme.CardBg;
             RightToLeft = RightToLeft.Yes;
             Font = AppTheme.FontBody;
@@ -85,6 +87,7 @@ namespace Sayl.UI.Forms
                 IntegralHeight = false
             };
             _lstProducts.DoubleClick += (_, _) => { if (_lstProducts.SelectedIndex >= 0) _txtQty.Focus(); };
+            _lstProducts.SelectedIndexChanged += async (_, _) => await LoadUnitsForSelectedAsync();
 
             // ── صف مزدوج: الدفعة يمينًا والكمية يسارًا ──
             // نفس أسلوب EmployeeEditForm: تسميتان فوق مربعين في صف واحد —
@@ -119,6 +122,16 @@ namespace Sayl.UI.Forms
                 TextAlign = HorizontalAlignment.Center // الرقم وسط — أسرع قراءة
             };
 
+            // ── المرحلة 5: وحدة الإدخال — أساس أولًا ثم البديلة بالمعامل.
+            // الكمية تُكتب بوحدة الإدخال (3 أكياس) والخدمة تحوّل للأساس (15 كجم).
+            _cmbUnit = new ComboBox
+            {
+                Bounds = new Rectangle(290, 386, 240, 40),
+                Font = AppTheme.FontBody,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            _cmbUnit.SelectedIndexChanged += (_, _) => { };
+
             // ── الانتهاء الشرطي: المفتاح يفعّل منتقي التاريخ ──
             // نمط «إدخال يُفتح بمفتاح»: _dtpExpiry معطّل (Enabled=false)
             // حتى يعلّم المستخدم المفتاح — CheckedChanged يقلب Enabled.
@@ -126,14 +139,14 @@ namespace Sayl.UI.Forms
             _chkHasExpiry = new CheckBox
             {
                 Text = AppLang.T("ReceiveStock.Label.HasExpiry"),
-                Bounds = new Rectangle(290, 388, 240, 26),
+                Bounds = new Rectangle(290, 436, 240, 26),
                 TextAlign = ContentAlignment.MiddleRight,
                 ForeColor = AppTheme.TextMuted
             };
 
             _dtpExpiry = new DateTimePicker
             {
-                Bounds = new Rectangle(30, 386, 240, 40),
+                Bounds = new Rectangle(30, 434, 240, 40),
                 Format = DateTimePickerFormat.Short,
                 Enabled = false
             };
@@ -142,18 +155,18 @@ namespace Sayl.UI.Forms
             // ── صف الأزرار: استلام (يمين) + إغلاق (يسار) ──
             // Height=52: أكبر من حد اللمس 48 — زر العمل الأساسي يبرز.
             var btnReceive = AppTheme.MakeButton(AppLang.T("ReceiveStock.Button.Receive"), AppTheme.Success, hoverColor: Color.FromArgb(21, 128, 61));
-            btnReceive.Bounds = new Rectangle(30, 452, 240, 52);
+            btnReceive.Bounds = new Rectangle(30, 500, 240, 52);
             btnReceive.Click += async (_, _) => await ReceiveAsync();
 
             var btnClose = AppTheme.MakeButton(AppLang.T("Common.Button.Close"), AppTheme.Bg,
                 foreColor: AppTheme.TextPrimary, hoverColor: AppTheme.BorderColor);
-            btnClose.Bounds = new Rectangle(290, 452, 240, 52);
+            btnClose.Bounds = new Rectangle(290, 500, 240, 52);
             btnClose.DialogResult = DialogResult.Cancel; // Esc = إغلاق
 
             Controls.AddRange(new Control[]
             {
                 lblTitle, _txtSearch, btnSearch, lblProducts, _lstProducts,
-                lblBatch, _txtBatch, lblQty, _txtQty, _chkHasExpiry, _dtpExpiry,
+                lblBatch, _txtBatch, lblQty, _txtQty, _cmbUnit, _chkHasExpiry, _dtpExpiry,
                 btnReceive, btnClose
             });
 
@@ -195,6 +208,33 @@ namespace Sayl.UI.Forms
             }
         }
 
+        /// <summary>المرحلة 5: وحدات المنتج المختار (الأساس أولًا) — فشل التحميل
+        /// لا يوقف الاستلام: القائمة تبقى فارغة والاستلام بوحدة الأساس.</summary>
+        private async Task LoadUnitsForSelectedAsync()
+        {
+            _cmbUnit.Items.Clear();
+            _units = new List<Common.DTOs.DtoProductUnit>();
+            if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
+                return;
+
+            var product = _products[_lstProducts.SelectedIndex];
+            try
+            {
+                using var scope = Program.Services.CreateScope();
+                var productService = scope.ServiceProvider.GetRequiredService<clsProductService>();
+                _units = await productService.GetProductUnitsAsync(product.ProductId);
+            }
+            catch
+            {
+                _units = new List<Common.DTOs.DtoProductUnit>();
+            }
+
+            foreach (var unit in _units)
+                _cmbUnit.Items.Add(unit.Name);
+            if (_units.Count > 0)
+                _cmbUnit.SelectedIndex = 0; // الأساس أولًا
+        }
+
         private async Task ReceiveAsync()
         {
             if (_lstProducts.SelectedIndex < 0 || _lstProducts.SelectedIndex >= _products.Count)
@@ -221,14 +261,32 @@ namespace Sayl.UI.Forms
             }
             decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
+            // المرحلة 5: الكمية تُكتب بوحدة الإدخال المختار — الطلب يرسل
+            // الكمية بالوحدة الأساس (الحد الخدمي يعيد الحساب والتحقق) مع
+            // لقطة الوحدة. وحدة غير مختارة/غير معروفة = وحدة الأساس.
+            string? unitName = _cmbUnit.SelectedItem?.ToString();
+            var selectedUnit = _units.FirstOrDefault(u => u.Name == unitName && u.FactorToBase > 0);
+            decimal unitFactor = selectedUnit?.FactorToBase ?? 1m;
+            bool hasUnit = selectedUnit != null && !selectedUnit.IsBase;
+            decimal baseQty = Math.Round(qty * unitFactor, 3, MidpointRounding.AwayFromZero);
+            if (baseQty <= 0)
+            {
+                UiHelpers.ShowError(this, AppLang.T("ReceiveStock.Msg.InvalidQty"));
+                _txtQty.Focus();
+                return;
+            }
+
             var request = new DtoStockReceiveRequest
             {
                 ProductId = product.ProductId,
                 BatchNumber = _txtBatch.Text.Trim(),
-                Quantity = qty,
+                Quantity = baseQty,
                 ExpiryDate = _chkHasExpiry.Checked
                     ? DateOnly.FromDateTime(_dtpExpiry.Value.Date)
-                    : null
+                    : null,
+                EnteredQuantity = hasUnit ? qty : null,
+                UnitName = hasUnit ? selectedUnit!.Name : null,
+                UnitFactorToBase = hasUnit ? unitFactor : null
             };
 
             int actorUserId = SessionState.CurrentUser?.UserId ?? 0;
@@ -239,7 +297,8 @@ namespace Sayl.UI.Forms
             }
 
             Result result = await UiHelpers.UseServiceAsync(s => s.ReceiveStockAsync(request, actorUserId: actorUserId));
-            UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", qty, product.Name));
+            // رسالة النجاح بالوحدة الأساس (الحقيقة المخزنة) — 3 أكياس = 15 كجم
+            UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", baseQty, product.Name));
 
             if (result.IsSuccess)
             {

@@ -175,29 +175,37 @@ namespace Sayl.UI.Forms
             _grid.ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
             _grid.Columns.Add("colProduct", AppLang.T("Common.Label.Product"));
+            _grid.Columns.Add("colUnit", AppLang.T("Common.Label.Unit"));
             _grid.Columns.Add("colSold", AppLang.T("Return.Label.Sold"));
             _grid.Columns.Add("colReturned", AppLang.T("Return.Label.Returned"));
             _grid.Columns.Add("colRemaining", AppLang.T("Return.Label.Remaining"));
             _grid.Columns.Add("colPrice", AppLang.T("Common.Label.Price"));
             var colReturnQty = new DataGridViewTextBoxColumn { Name = "colReturnQty", HeaderText = AppLang.T("Return.Label.ReturnQty"), ReadOnly = false };
             _grid.Columns.Add(colReturnQty);
-            UiHelpers.Column(_grid, "colProduct").FillWeight = 30;
+            UiHelpers.Column(_grid, "colProduct").FillWeight = 26;
+            // المرحلة 5: عمود الوحدة — وحدة السطر الأصلي (اللقطة المخزنة) فقط:
+            // المنتج المباع بـ«2 كيس» يُرتجع بالكيس، والسطور الإرثية بالأساس.
+            // عرض فقط — الواجهة لا تسمح باختيار وحدة أخرى والحرس الخدمي يقفل.
+            UiHelpers.Column(_grid, "colUnit").ReadOnly = true;
+            UiHelpers.Column(_grid, "colUnit").FillWeight = 10;
             UiHelpers.Column(_grid, "colSold").FillWeight = 10;
             UiHelpers.Column(_grid, "colReturned").FillWeight = 13;
             UiHelpers.Column(_grid, "colRemaining").FillWeight = 13;
-            UiHelpers.Column(_grid, "colPrice").FillWeight = 14;
-            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 20;
+            UiHelpers.Column(_grid, "colPrice").FillWeight = 13;
+            UiHelpers.Column(_grid, "colReturnQty").FillWeight = 15;
             // عمود الكمية «دعوة بصرية» للتحرير: خلفية مختلفة عن بقية الجدول
             // (نفس حيلة سلة الكاشير في PosForm.StyleCartGrid).
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.BackColor = AppTheme.FieldBg;
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             UiHelpers.Column(_grid, "colReturnQty").DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             // حارس الإدخال: أي نص غير رقمي يُرفض قبل وصوله للبيانات
+            // (كميات عشرية — نفس تحليل ExecuteReturnAsync بالضبط)
             _grid.CellValidating += (_, args) =>
             {
                 if (_grid.Columns[args.ColumnIndex].Name != "colReturnQty")
                     return;
-                if (!int.TryParse(args.FormattedValue?.ToString()?.Trim() ?? "", out int _))
+                if (!decimal.TryParse(args.FormattedValue?.ToString()?.Trim() ?? "",
+                        out decimal _))
                     args.Cancel = true;
             };
 
@@ -328,10 +336,29 @@ namespace Sayl.UI.Forms
 
                 _grid.Rows.Clear();
                 foreach (var item in _items)
-                    _grid.Rows.Add(item.ProductName, item.Quantity.ToString("0.###"),
-                        previouslyReturned.GetValueOrDefault(item.ProductId).ToString("0.###"),
-                        _remainingByProduct.GetValueOrDefault(item.ProductId).ToString("0.###"),
+                {
+                    // المرحلة 5: وحدة السطر الأصلي من اللقطة المخزنة — «2 كيس»
+                    // يُعرض بالكيس والمتبقي يُحوَّل لوحدة السطر (10 كجم = 2 كيس).
+                    // السطر الإرثي (بلا لقطة) يعرض بوحدة الأساس كما كان.
+                    bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
+                    decimal lineFactor = item.UnitFactorToBase ?? 1m;
+                    decimal productRemainingBase = _remainingByProduct.GetValueOrDefault(item.ProductId);
+                    decimal productReturnedBase = previouslyReturned.GetValueOrDefault(item.ProductId);
+
+                    string soldText = hasSnapshot
+                        ? (item.EnteredQuantity ?? item.Quantity).ToString("0.###")
+                        : item.Quantity.ToString("0.###");
+                    string returnedText = hasSnapshot
+                        ? (Math.Floor(productReturnedBase / lineFactor * 1000m) / 1000m).ToString("0.###")
+                        : productReturnedBase.ToString("0.###");
+                    string remainingText = hasSnapshot
+                        ? (Math.Floor(productRemainingBase / lineFactor * 1000m) / 1000m).ToString("0.###")
+                        : productRemainingBase.ToString("0.###");
+
+                    _grid.Rows.Add(item.ProductName, item.UnitName ?? "", soldText,
+                        returnedText, remainingText,
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
+                }
 
                 _lblInfo.Text = AppLang.T("Return.Info.Loaded", result.Data.InvoiceNumber,
                     result.Data.PartyName ?? AppLang.T("Common.Party.Unknown"));
@@ -381,9 +408,25 @@ namespace Sayl.UI.Forms
                 decimal qty = Math.Round(qtyRaw, 3, MidpointRounding.AwayFromZero);
 
                 var item = _items[i];
-                enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + qty;
-                returnItems.Add(new DtoReturnItem { ProductId = item.ProductId, Quantity = qty });
-                grossTotal += item.ItemPrice * qty;
+                // المرحلة 5: الكمية تُكتب بوحدة السطر الأصلي (اللقطة المخزنة) —
+                // الوحدة الوحيدة المسموحة لهذا السطر. الحرس الخدمي يتحقق من
+                // اللقطة نفسها ولا يقرأ التكوين الحالي أبدًا.
+                bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
+                decimal lineFactor = item.UnitFactorToBase ?? 1m;
+                decimal baseQty = Math.Round(qty * lineFactor, 3, MidpointRounding.AwayFromZero);
+
+                enteredByProduct[item.ProductId] = enteredByProduct.GetValueOrDefault(item.ProductId) + baseQty;
+                returnItems.Add(new DtoReturnItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = baseQty,
+                    EnteredQuantity = qty,
+                    UnitName = hasSnapshot ? item.UnitName : null,
+                    UnitFactorToBase = hasSnapshot ? lineFactor : null
+                });
+                // VULN-03: سعر الأساس (الحقيقة المخزنة) × الكمية الأساس — نسبة
+                // الصافي تُطبق لاحقًا على الخام كما تفعل الخدمة بالضبط.
+                grossTotal += item.ItemPrice * baseQty;
             }
 
             foreach (var entered in enteredByProduct)

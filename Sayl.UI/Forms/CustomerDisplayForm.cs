@@ -39,10 +39,10 @@ namespace Sayl.UI.Forms
 
         // لقطة الفاتورة الحالية (تصل من PosForm)
         private record CartSnapshot(
-            IReadOnlyList<(string Name, decimal Qty, decimal Price)> Items,
+            IReadOnlyList<(string Name, decimal Qty, string? Unit, decimal Price, decimal BaseQty, decimal Total)> Items,
             decimal Discount, decimal Tax, decimal Total, bool CheckoutRequested);
 
-        private CartSnapshot _cart = new(new List<(string, decimal, decimal)>(), 0, 0, 0, false);
+        private CartSnapshot _cart = new(new List<(string, decimal, string?, decimal, decimal, decimal)>(), 0, 0, 0, false);
 
         // ═══════════════════════════════════════════════
         // 📖 الالتقاط التلقائي للشاشة الثانية:
@@ -315,8 +315,11 @@ namespace Sayl.UI.Forms
         // 📖 هذه نقطة الاتصال الوحيدة من شاشة البيع:
         // PosForm ترسل لقطة السلة عند كل تغيير (RefreshCart → OnCartChanged).
         // لا استعلامات قاعدة بيانات هنا — عنصر عرض صرف.
-        /// <summary>تحديث لقطة السلة — أول بند جديد يخفي الترحيب فورًا.</summary>
-        public void UpdateCart(IReadOnlyList<(string Name, decimal Qty, decimal Price)> items,
+        /// <summary>تحديث لقطة السلة — أول بند جديد يخفي الترحيب فورًا.
+        /// المرحلة 5: Qty = الكمية المُدخلة، Unit = وحدة الإدخال (null = أساس)،
+        /// Price = سعر وحدة الإدخال للعرض، BaseQty = الكمية بالأساس (للقطعات)،
+        /// Total = إجمالي السطر من رياضيات الأساس.</summary>
+        public void UpdateCart(IReadOnlyList<(string Name, decimal Qty, string? Unit, decimal Price, decimal BaseQty, decimal Total)> items,
             decimal discount, decimal tax, decimal total, bool checkoutRequested)
         {
             if (InvokeRequired)
@@ -345,7 +348,7 @@ namespace Sayl.UI.Forms
                 return;
             }
 
-            _cart = new CartSnapshot(new List<(string, decimal, decimal)>(), 0, 0, 0, false);
+            _cart = new CartSnapshot(new List<(string, decimal, string?, decimal, decimal, decimal)>(), 0, 0, 0, false);
             RenderCart();
             ShowWelcome();
         }
@@ -355,14 +358,20 @@ namespace Sayl.UI.Forms
         {
             _grid.Rows.Clear();
             foreach (var it in _cart.Items)
-                _grid.Rows.Add(it.Name, it.Qty.ToString("0.###"), it.Price.ToString("N2"),
-                    (it.Price * it.Qty).ToString("N2"));
+            {
+                // المرحلة 5: «الكمية الوحدة» (2 كيس) — بلا وحدة = كما كان
+                string qtyText = string.IsNullOrWhiteSpace(it.Unit)
+                    ? it.Qty.ToString("0.###")
+                    : $"{it.Qty:0.###} {it.Unit}";
+                _grid.Rows.Add(it.Name, qtyText, it.Price.ToString("N2"), it.Total.ToString("N2"));
+            }
 
             // الحقول الصفرية تختبئ (لا «خصم 0.00» — مبدأ الإيصالات نفسه)
             _lblDiscount.Text = _cart.Discount > 0 ? "-" + _cart.Discount.ToString("N2") : "";
             _lblTax.Text = _cart.Tax > 0 ? _cart.Tax.ToString("N2") : "";
             _lblTotal.Text = _cart.Total.ToString("N2");
-            _lblUnits.Text = _cart.Items.Sum(i => i.Qty).ToString("0.###");
+            // القطعات بالوحدة الأساس دائمًا (وحدات مختلطة لا تُجمع بالإدخال)
+            _lblUnits.Text = _cart.Items.Sum(i => i.BaseQty).ToString("0.###");
             _lblPayHint.Text = _cart.CheckoutRequested && _cart.Total > 0
                 ? AppLang.T("Display.PayHint", _cart.Total)
                 : "";
