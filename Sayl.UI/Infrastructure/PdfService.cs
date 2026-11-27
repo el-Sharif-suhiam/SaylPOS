@@ -988,13 +988,15 @@ namespace Sayl.UI.Infrastructure
 
         /// <summary>المرحلة 5: نص الكمية للطباعة — «الكمية المُدخلة الوحدة» من
         /// اللقطة المخزنة (2 كيس) عند وجودها؛ السطر الإرثي (بلا لقطة) يعرض
-        /// الكمية كما هي. السعر يظل لكل وحدة أساس والإجمالي من رياضيات الأساس
+        /// الكمية مع وحدة المنتج الحالية (DisplayUnitName — المرحلة 7) أو
+        /// الكمية وحدها إن كان المنتج بلا وحدة. السعر يظل لكل وحدة أساس
+        /// والإجمالي من رياضيات الأساس
         //  — حافة الخانتين الموثقة: كرتون سعره 115 ومعامله 12 → سعر الأساس
         //  9.58 والكرتون يُحسب 114.96 (الأساس هو الحقيقة المخزنة دائمًا).</summary>
         internal static string ItemQtyText(Common.DTOs.ViewModel.InvoiceItemVM item) =>
-            string.IsNullOrWhiteSpace(item.UnitName)
+            string.IsNullOrWhiteSpace(item.DisplayUnitName ?? item.UnitName)
                 ? item.Quantity.ToString("0.###")
-                : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
+                : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {(item.DisplayUnitName ?? item.UnitName).Trim()}";
 
         // ═════════════════════════════════════════════════
         // مكوّنات الهوية الموحدة — رؤوس أقسام، خلايا جدول، صفوف جاهزة

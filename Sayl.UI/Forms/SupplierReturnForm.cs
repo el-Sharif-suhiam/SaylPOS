@@ -402,7 +402,10 @@ namespace Sayl.UI.Forms
                 {
                     // Phase 5: the original line's stored snapshot unit - "2 bag"
                     // displays in bags and the remaining converts to the line's
-                    // unit (10 kg = 2 bag). Legacy lines (no snapshot) stay base.
+                    // unit (10 kg = 2 bag). Phase 7: the unit COLUMN shows the
+                    // snapshot else the product's current unit (DisplayUnitName)
+                    // - display only; hasSnapshot stays snapshot-driven because
+                    // the service guard rejects units on snapshot-less lines.
                     bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
                     decimal lineFactor = item.UnitFactorToBase ?? 1m;
                     decimal productRemainingBase = _remainingByProduct.GetValueOrDefault(item.ProductId);
@@ -418,7 +421,7 @@ namespace Sayl.UI.Forms
                         ? (Math.Floor(productRemainingBase / lineFactor * 1000m) / 1000m).ToString("0.###")
                         : productRemainingBase.ToString("0.###");
 
-                    _grid.Rows.Add(item.ProductName, item.UnitName ?? "", soldText,
+                    _grid.Rows.Add(item.ProductName, item.DisplayUnitName ?? item.UnitName ?? "", soldText,
                         returnedText, remainingText,
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
                 }
@@ -488,7 +491,7 @@ namespace Sayl.UI.Forms
                 if (entered.Value > remaining)
                 {
                     string productName = _items.First(i => i.ProductId == entered.Key).ProductName;
-                    UiHelpers.ShowError(this, AppLang.T("SupplierReturn.Msg.QtyExceedsRemaining", productName, remaining));
+                    UiHelpers.ShowError(this, AppLang.T("SupplierReturn.Msg.QtyExceedsRemaining", productName, remaining.ToString("0.###")));
                     return;
                 }
             }

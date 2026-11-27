@@ -297,8 +297,9 @@ namespace Sayl.UI.Forms
             }
 
             Result result = await UiHelpers.UseServiceAsync(s => s.ReceiveStockAsync(request, actorUserId: actorUserId));
-            // رسالة النجاح بالوحدة الأساس (الحقيقة المخزنة) — 3 أكياس = 15 كجم
-            UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", baseQty, product.Name));
+            // رسالة النجاح بالوحدة الأساس (الحقيقة المخزنة) — 3 أكياس = 15 كجم.
+            // 0.### حتى لا يظهر «15.000» لأرصدة decimal(10,3)
+            UiHelpers.ShowResult(this, result, AppLang.T("ReceiveStock.Msg.Done", baseQty.ToString("0.###"), product.Name));
 
             if (result.IsSuccess)
             {

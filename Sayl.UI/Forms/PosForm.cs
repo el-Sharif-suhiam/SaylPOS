@@ -165,7 +165,9 @@ namespace Sayl.UI.Forms
             try
             {
                 _customerDisplay.UpdateCart(
-                    _cart.Select(i => (i.ProductName, i.Quantity, i.UnitName, i.DisplayPrice, i.BaseQuantity, i.Total)).ToList(),
+                    _cart.Select(i => (i.ProductName, i.Quantity,
+                            i.UnitName ?? i.Units.FirstOrDefault(u => u.IsBase)?.Name,
+                            i.DisplayPrice, i.BaseQuantity, i.Total)).ToList(),
                     DiscountAmountForDisplay,
                     TaxAmountForDisplay,
                     NetTotal,
@@ -1041,7 +1043,7 @@ namespace Sayl.UI.Forms
                     if (_stockByProduct.TryGetValue(item.ProductId, out decimal stockPlus) &&
                         stockPlus > 0 && item.BaseQuantity + item.UnitFactor > stockPlus)
                     {
-                        ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", item.ProductName, stockPlus));
+                        ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", item.ProductName, stockPlus.ToString("0.###")));
                         return;
                     }
                     item.Quantity += 1m;
@@ -1486,7 +1488,7 @@ namespace Sayl.UI.Forms
             {
                 if (stock > 0 && match.BaseQuantity + match.UnitFactor > stock)
                 {
-                    ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stock));
+                    ShowStockWarn(AppLang.T("Pos.Warn.CannotExceed", product.Name, stock.ToString("0.###")));
                     return;
                 }
                 match.Quantity += 1m;

@@ -147,11 +147,9 @@ namespace Sayl.UI.Infrastructure
                 foreach (var item in invoice.Items)
                 {
                     Line(item.ProductName);
-                    // المرحلة 5: الكمية بلقطة الوحدة «2 كيس» — الإرثي كما كان
-                    string qtyText = string.IsNullOrWhiteSpace(item.UnitName)
-                        ? item.Quantity.ToString("0.###")
-                        : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
-                    Line(AppLang.T("Receipt.Line.Item", qtyText, item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
+                    // المرحلة 5/7: الكمية بلقطة الوحدة «2 كيس» — الإرثي بوحدة
+                    // المنتج الحالية (PdfService.ItemQtyText مصدر الحقيقة الواحد)
+                    Line(AppLang.T("Receipt.Line.Item", PdfService.ItemQtyText(item), item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
                 }
 
                 Divider();

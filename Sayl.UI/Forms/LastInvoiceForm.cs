@@ -152,11 +152,9 @@ namespace Sayl.UI.Forms
                 _grid.Rows.Clear();
                 foreach (var item in inv.Items)
                 {
-                    // المرحلة 5: «الكمية الوحدة» من اللقطة المخزنة — الإرثي كما كان
-                    string qtyText = string.IsNullOrWhiteSpace(item.UnitName)
-                        ? item.Quantity.ToString("0.###")
-                        : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {item.UnitName}";
-                    _grid.Rows.Add(item.ProductName, qtyText, UiHelpers.Money(item.ItemPrice),
+                    // المرحلة 5/7: «الكمية الوحدة» من اللقطة المخزنة — الإرثي
+                    // بوحدة المنتج الحالية (PdfService.ItemQtyText).
+                    _grid.Rows.Add(item.ProductName, PdfService.ItemQtyText(item), UiHelpers.Money(item.ItemPrice),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
                 }
 

@@ -339,7 +339,9 @@ namespace Sayl.UI.Forms
                 {
                     // المرحلة 5: وحدة السطر الأصلي من اللقطة المخزنة — «2 كيس»
                     // يُعرض بالكيس والمتبقي يُحوَّل لوحدة السطر (10 كجم = 2 كيس).
-                    // السطر الإرثي (بلا لقطة) يعرض بوحدة الأساس كما كان.
+                    // المرحلة 7: عمود الوحدة يعرض اللقطة وإلا وحدة المنتج الحالية
+                    // (DisplayUnitName) — عرض فقط؛ hasSnapshot يظل من اللقطة
+                    // الصرفة لأن الحرس الخدمي يرفض وحدةً على سطر بلا لقطة.
                     bool hasSnapshot = !string.IsNullOrWhiteSpace(item.UnitName);
                     decimal lineFactor = item.UnitFactorToBase ?? 1m;
                     decimal productRemainingBase = _remainingByProduct.GetValueOrDefault(item.ProductId);
@@ -355,7 +357,7 @@ namespace Sayl.UI.Forms
                         ? (Math.Floor(productRemainingBase / lineFactor * 1000m) / 1000m).ToString("0.###")
                         : productRemainingBase.ToString("0.###");
 
-                    _grid.Rows.Add(item.ProductName, item.UnitName ?? "", soldText,
+                    _grid.Rows.Add(item.ProductName, item.DisplayUnitName ?? item.UnitName ?? "", soldText,
                         returnedText, remainingText,
                         UiHelpers.Money(item.ItemPrice * _netRatio), 0);
                 }
@@ -435,7 +437,7 @@ namespace Sayl.UI.Forms
                 if (entered.Value > remaining)
                 {
                     string productName = _items.First(i => i.ProductId == entered.Key).ProductName;
-                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.QtyExceedsRemaining", productName, remaining));
+                    UiHelpers.ShowError(this, AppLang.T("Return.Msg.QtyExceedsRemaining", productName, remaining.ToString("0.###")));
                     return;
                 }
             }

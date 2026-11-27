@@ -227,7 +227,7 @@ namespace Sayl.UI.Forms
             bool confirmed = ConfirmationDialog.Show(this, AppLang.T("AdjustStock.Confirm.Title"),
                 AppLang.T("AdjustStock.Confirm.Body",
                     request.IsIncrease ? AppLang.T("AdjustStock.IncreaseWord") : AppLang.T("AdjustStock.DecreaseWord"),
-                    baseQty));
+                    baseQty.ToString("0.###")));
             if (!confirmed)
                 return;
 

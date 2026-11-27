@@ -232,8 +232,12 @@ namespace Sayl.Core.Services
                     ItemPrice = ii.ItemPrice,
                     ItemCost = ii.ItemCost,
                     // المرحلة 5: لقطة وحدة الإدخال من السطر المخزن — null = سطر
-                    // إرثي/وحدة أساس (العرض يرجع حينها لوحدة المنتج الحالية).
+                    // إرثي/وحدة أساس. المرحلة 7: DisplayUnitName للعرض فقط —
+                    // اللقطة أولًا وإلا وحدة المنتج الحالية (لا تُخترع وحدة:
+                    // منتج بلا Unit يظل بلا وحدة معروضة). UnitName يظل اللقطة
+                    // الصرفة — حارس الإرجاع يعتمده كما هو.
                     UnitName = ii.UnitName,
+                    DisplayUnitName = ii.UnitName ?? ii.Product.Unit,
                     UnitFactorToBase = ii.UnitFactorToBase,
                     EnteredQuantity = ii.EnteredQuantity
                 }).ToList()
@@ -334,8 +338,10 @@ namespace Sayl.Core.Services
                     ItemPrice = ii.ItemPrice,
                     ItemCost = ii.ItemCost,
                     // المرحلة 5: لقطة وحدة الإدخال من السطر المخزن (طباعة/عرض) —
-                    // null = سطر إرثي/وحدة أساس.
+                    // null = سطر إرثي/وحدة أساس. المرحلة 7: DisplayUnitName
+                    // للعرض فقط (اللقطة وإلا وحدة المنتج الحالية).
                     UnitName = ii.UnitName,
+                    DisplayUnitName = ii.UnitName ?? ii.Product.Unit,
                     UnitFactorToBase = ii.UnitFactorToBase,
                     EnteredQuantity = ii.EnteredQuantity
                 }).ToList(),

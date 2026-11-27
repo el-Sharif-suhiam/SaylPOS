@@ -55,7 +55,7 @@ namespace Sayl.UI.UserControls
                 foreach (var p in _products)
                     Grid.Rows.Add(p.Name, p.Barcode ?? "-", p.Unit ?? "-", p.Type,
                         UiHelpers.Money(p.BasePrice), UiHelpers.Money(p.CostPrice),
-                        p.ReorderLevel?.ToString() ?? "-",
+                        p.ReorderLevel?.ToString("0.###") ?? "-",
                         p.IsActive ? AppLang.T("Common.Status.Active") : AppLang.T("Common.Status.Inactive"));
             }
             catch

@@ -821,4 +821,119 @@ public class MultiUnitTests
         Assert.Equal(240.00m, UnitConversion.DisplayPricePerUnit(20m, 12m));
         Assert.Equal(100.00m, UnitConversion.DisplayPricePerUnit(20m, 5m));
     }
+
+    // ══ 16) وحدة العرض (المرحلة 7): اللقطة أولًا وإلا وحدة المنتج الحالية —
+    // للعرض فقط، واللقطة الصرفة (UnitName) لا تُمسّ (حارس الإرجاع يعتمدها) ══
+
+    /// <summary>السطر الإرثي (بلا لقطة — بِيع بوحدة الأساس) يعرض وحدة المنتج
+    /// الحالية DisplayUnitName = Product.Unit مع الكمية الأساس، وتبقى اللقطة
+    /// (UnitName/EnteredQuantity) null كما خُزنت — لا وحدات مُختلقة.</summary>
+    [Fact]
+    public async Task InvoicePrintVM_LegacyLine_DisplayUnitFallsBackToLiveProductUnit()
+    {
+        string marker = $"mu16-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "لحم", "كغم");
+        await ReceiveAsync(seed, productId, 20m, $"B-{marker}");
+
+        // بيع بوحدة الأساس — بلا لقطة (نمط السطور الإرثية والبيع بالأساس)
+        int saleId = await SaleAsync(seed, productId, 3m);
+
+        await using var db = _fx.CreateContext();
+        var invoiceService = new clsInvoiceService(db);
+
+        var forPrint = await invoiceService.GetInvoiceForPrintAsync(saleId);
+        Assert.True(forPrint.IsSuccess, forPrint.Message);
+        var printLine = Assert.Single(forPrint.Data!.Items);
+        Assert.Null(printLine.UnitName);                 // اللقطة الصرفة تبقى null
+        Assert.Equal("كغم", printLine.DisplayUnitName);  // العرض: وحدة المنتج الحالية
+        Assert.Null(printLine.EnteredQuantity);
+        Assert.Equal(3m, printLine.Quantity);
+
+        var byId = await invoiceService.GetInvoiceByIdAsync(saleId);
+        Assert.True(byId.IsSuccess, byId.Message);
+        var detailLine = Assert.Single(byId.Data!.Items);
+        Assert.Null(detailLine.UnitName);
+        Assert.Equal("كغم", detailLine.DisplayUnitName);
+
+        // منتج بلا Unit مطلقًا: بلا وحدة معروضة — لا اختراع
+        int noUnitId = await SeedProductWithUnitAsync(seed, "بلاوحدة", unit: null!);
+        await ReceiveAsync(seed, noUnitId, 5m, $"B2-{marker}");
+        int sale2 = await SaleAsync(seed, noUnitId, 1m);
+        var noUnit = await invoiceService.GetInvoiceForPrintAsync(sale2);
+        Assert.True(noUnit.IsSuccess, noUnit.Message);
+        Assert.Null(Assert.Single(noUnit.Data!.Items).DisplayUnitName);
+    }
+
+    /// <summary>سطر بِيع بوحدة إدخال (2 كيس) يُبقي لقطة العرض حتى لو غُيّر
+    /// وسم وحدة الأساس للمنتج لاحقًا — DisplayUnitName = اللقطة أولًا.</summary>
+    [Fact]
+    public async Task InvoicePrintVM_SnapshotLine_DisplayUnitPrefersSnapshotOverRenamedUnit()
+    {
+        string marker = $"mu17-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "سكر", "كغم");
+        // وحدة الإدخال للمنتج الجديد نفسه (لا منتج البذر)
+        await using (var unitDb = _fx.CreateContext())
+        {
+            unitDb.ProductUnits.Add(new ProductUnit
+            {
+                ProductId = productId,
+                Name = "كيس",
+                FactorToBase = 5m,
+                IsBase = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            await unitDb.SaveChangesAsync();
+        }
+        await ReceiveAsync(seed, productId, 30m, $"B-{marker}");
+
+        int saleId = await SaleWithUnitAsync(seed, productId, 2m, "كيس", 5m);
+
+        // تعديل لاحق لوسم وحدة الأساس — لا يمسّ عرض السطر القديم
+        await using (var renameDb = _fx.CreateContext())
+        {
+            await renameDb.Products.Where(p => p.ProductId == productId)
+                .ExecuteUpdateAsync(u => u.SetProperty(p => p.Unit, "غرام"));
+        }
+
+        await using var db = _fx.CreateContext();
+        var forPrint = await new clsInvoiceService(db).GetInvoiceForPrintAsync(saleId);
+        Assert.True(forPrint.IsSuccess, forPrint.Message);
+        var line = Assert.Single(forPrint.Data!.Items);
+        Assert.Equal("كيس", line.UnitName);              // اللقطة المخزنة كما هي
+        Assert.Equal("كيس", line.DisplayUnitName);       // العرض من اللقطة لا الاسم الجديد
+        Assert.Equal(2m, line.EnteredQuantity);
+        Assert.Equal(10m, line.Quantity);
+        Assert.Equal(5m, line.UnitFactorToBase);
+    }
+
+    /// <summary>كمية كسرية تصل تقارير VM عشرية بلا اقتطاع: بيعان 0.5 + 0.25
+    /// كغم = 0.75 في «الأكثر مبيعًا» و«ربحية المنتجات».</summary>
+    [Fact]
+    public async Task ReportVMs_FractionalQuantities_SumAsDecimal()
+    {
+        string marker = $"mu18-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "لحم", "كغم");
+        await ReceiveAsync(seed, productId, 5m, $"B-{marker}");
+
+        await SaleAsync(seed, productId, 0.5m);
+        await SaleAsync(seed, productId, 0.25m);
+
+        DateOnly today = Common.Utils.ProgramClock.Today;
+        await using var db = _fx.CreateContext();
+        var reports = new clsReportService(db);
+
+        var top = await reports.GetTopSellingProductsAsync(today, today, 50);
+        Assert.True(top.IsSuccess, top.Message);
+        var topRow = top.Data!.Single(x => x.ProductId == productId);
+        Assert.Equal(0.75m, topRow.TotalQuantitySold);   // عشري — لا 0 ولا 1
+
+        var profit = await reports.GetProductProfitReportAsync(today, today);
+        Assert.True(profit.IsSuccess, profit.Message);
+        var profitRow = profit.Data!.Single(x => x.ProductId == productId);
+        Assert.Equal(0.75m, profitRow.Quantity);
+    }
 }
