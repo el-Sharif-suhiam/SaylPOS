@@ -41,15 +41,24 @@ SET ANSI_NULLS ON;
 GO
 
 -- ═══ تحويل عمود واحد يحافظًا على Nullability والافتراضي ═══
--- ALTER COLUMN لا يمس الافتراضي القائم (DEFAULT constraint باقٍ)،
--- والفحص بالحرف: يُحول فقط إن كان العمود INT فعلًا.
+-- ALTER COLUMN لا يجري على عمود مرتبط بـ DEFAULT constraint (خطأ
+-- «objects access this column») — فالافتراضي يُسقَط قبل التحويل ويُعاد
+-- **بنفس تعريفه واسمه** بعده. الفحص بالحرف: يُحول فقط إن كان العمود
+-- INT فعلًا (إعادة التشغيل لا تلمس شيئًا أصلًا).
 
 IF OBJECT_ID(N'dbo.Products', N'U') IS NOT NULL
    AND EXISTS (SELECT 1 FROM sys.columns
                WHERE object_id = OBJECT_ID(N'dbo.Products') AND name = N'ReorderLevel'
                  AND system_type_id = TYPE_ID(N'int'))
 BEGIN
+    DECLARE @df sysname, @dfdef nvarchar(max);
+    SELECT @df = dc.name, @dfdef = dc.definition
+    FROM sys.default_constraints dc
+    JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.Products') AND c.name = N'ReorderLevel';
+    IF @df IS NOT NULL EXEC(N'ALTER TABLE dbo.Products DROP CONSTRAINT ' + @df + N';');
     ALTER TABLE dbo.Products ALTER COLUMN ReorderLevel DECIMAL(10,3) NULL;
+    IF @df IS NOT NULL EXEC(N'ALTER TABLE dbo.Products ADD CONSTRAINT ' + @df + N' DEFAULT ' + @dfdef + N' FOR ReorderLevel;');
     PRINT 'Upgrade_22: Products.ReorderLevel -> DECIMAL(10,3) NULL';
 END;
 GO
@@ -66,11 +75,24 @@ GO
 
 IF OBJECT_ID(N'dbo.Inventory', N'U') IS NOT NULL
 BEGIN
+    -- فهرس الكمية المتاحة (SaylDB.sql) يمنع ALTER COLUMN على عموده —
+    -- يُسقَط قبل التحويل ويُعاد بناءه بعده بنفس التعريف
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_Inventory_QuantityAvailable'
+               AND object_id = OBJECT_ID(N'dbo.Inventory'))
+        DROP INDEX IX_Inventory_QuantityAvailable ON dbo.Inventory;
+
     IF EXISTS (SELECT 1 FROM sys.columns
                WHERE object_id = OBJECT_ID(N'dbo.Inventory') AND name = N'QuantityAvailable'
                  AND system_type_id = TYPE_ID(N'int'))
     BEGIN
+        DECLARE @dfqa sysname, @dfqadef nvarchar(max);
+        SELECT @dfqa = dc.name, @dfqadef = dc.definition
+        FROM sys.default_constraints dc
+        JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+        WHERE dc.parent_object_id = OBJECT_ID(N'dbo.Inventory') AND c.name = N'QuantityAvailable';
+        IF @dfqa IS NOT NULL EXEC(N'ALTER TABLE dbo.Inventory DROP CONSTRAINT ' + @dfqa + N';');
         ALTER TABLE dbo.Inventory ALTER COLUMN QuantityAvailable DECIMAL(10,3) NULL;
+        IF @dfqa IS NOT NULL EXEC(N'ALTER TABLE dbo.Inventory ADD CONSTRAINT ' + @dfqa + N' DEFAULT ' + @dfqadef + N' FOR QuantityAvailable;');
         PRINT 'Upgrade_22: Inventory.QuantityAvailable -> DECIMAL(10,3) NULL';
     END;
 
@@ -78,9 +100,21 @@ BEGIN
                WHERE object_id = OBJECT_ID(N'dbo.Inventory') AND name = N'QuantityReserved'
                  AND system_type_id = TYPE_ID(N'int'))
     BEGIN
+        DECLARE @dfqr sysname, @dfqrdef nvarchar(max);
+        SELECT @dfqr = dc.name, @dfqrdef = dc.definition
+        FROM sys.default_constraints dc
+        JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+        WHERE dc.parent_object_id = OBJECT_ID(N'dbo.Inventory') AND c.name = N'QuantityReserved';
+        IF @dfqr IS NOT NULL EXEC(N'ALTER TABLE dbo.Inventory DROP CONSTRAINT ' + @dfqr + N';');
         ALTER TABLE dbo.Inventory ALTER COLUMN QuantityReserved DECIMAL(10,3) NULL;
+        IF @dfqr IS NOT NULL EXEC(N'ALTER TABLE dbo.Inventory ADD CONSTRAINT ' + @dfqr + N' DEFAULT ' + @dfqrdef + N' FOR QuantityReserved;');
         PRINT 'Upgrade_22: Inventory.QuantityReserved -> DECIMAL(10,3) NULL';
     END;
+
+    -- إعادة بناء فهرس الكمية المتاحة على النوع الجديد
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_Inventory_QuantityAvailable'
+                   AND object_id = OBJECT_ID(N'dbo.Inventory'))
+        CREATE INDEX IX_Inventory_QuantityAvailable ON dbo.Inventory(QuantityAvailable);
 END;
 GO
 
@@ -89,7 +123,14 @@ IF OBJECT_ID(N'dbo.InvoiceItems', N'U') IS NOT NULL
                WHERE object_id = OBJECT_ID(N'dbo.InvoiceItems') AND name = N'Quantity'
                  AND system_type_id = TYPE_ID(N'int'))
 BEGIN
+    DECLARE @dfii sysname, @dfiidef nvarchar(max);
+    SELECT @dfii = dc.name, @dfiidef = dc.definition
+    FROM sys.default_constraints dc
+    JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.InvoiceItems') AND c.name = N'Quantity';
+    IF @dfii IS NOT NULL EXEC(N'ALTER TABLE dbo.InvoiceItems DROP CONSTRAINT ' + @dfii + N';');
     ALTER TABLE dbo.InvoiceItems ALTER COLUMN Quantity DECIMAL(10,3) NOT NULL;
+    IF @dfii IS NOT NULL EXEC(N'ALTER TABLE dbo.InvoiceItems ADD CONSTRAINT ' + @dfii + N' DEFAULT ' + @dfiidef + N' FOR Quantity;');
     PRINT 'Upgrade_22: InvoiceItems.Quantity -> DECIMAL(10,3) NOT NULL';
 END;
 GO
@@ -108,7 +149,14 @@ BEGIN
                WHERE object_id = OBJECT_ID(N'dbo.StockReservations') AND name = N'Quantity'
                  AND system_type_id = TYPE_ID(N'int'))
     BEGIN
+        DECLARE @dfsr sysname, @dfsrdef nvarchar(max);
+        SELECT @dfsr = dc.name, @dfsrdef = dc.definition
+        FROM sys.default_constraints dc
+        JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+        WHERE dc.parent_object_id = OBJECT_ID(N'dbo.StockReservations') AND c.name = N'Quantity';
+        IF @dfsr IS NOT NULL EXEC(N'ALTER TABLE dbo.StockReservations DROP CONSTRAINT ' + @dfsr + N';');
         ALTER TABLE dbo.StockReservations ALTER COLUMN Quantity DECIMAL(10,3) NOT NULL;
+        IF @dfsr IS NOT NULL EXEC(N'ALTER TABLE dbo.StockReservations ADD CONSTRAINT ' + @dfsr + N' DEFAULT ' + @dfsrdef + N' FOR Quantity;');
         PRINT 'Upgrade_22: StockReservations.Quantity -> DECIMAL(10,3) NOT NULL';
     END;
 

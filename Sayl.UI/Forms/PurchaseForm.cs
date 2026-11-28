@@ -315,8 +315,10 @@ namespace Sayl.UI.Forms
             UiHelpers.Column(_grid, "colDelete").ReadOnly = true;
             UiHelpers.Column(_grid, "colDelete").FillWeight = 9;
             // CellEndEdit: بعد انتهاء تحرير أي خلية تُعاد الحسابات — إجمالي
-            // السطر وكل الملخصات أسفل النافذة يتحدثان فورًا.
-            _grid.CellEndEdit += (_, _) => RefreshRowTotals();
+            // السطر وكل الملخصات أسفل النافذة يتحدثان فورًا. تغيير الوحدة
+            // يُعيد اشتقاق التكلفة المعروضة (انظر Grid_CellEndEdit).
+            _grid.CellBeginEdit += Grid_CellBeginEdit;
+            _grid.CellEndEdit += Grid_CellEndEdit;
             _grid.DataError += (_, _) => { /* قيمة وحدة خارج قائمة الصف — تجاهل آمن */ };
             // CellClick مع فلترة عمود: نقر «حذف» فقط يحذف السطر —
             // args.ColumnIndex نقارن بفهرس العمود الاسمي لا برقم ثابت.
@@ -684,6 +686,45 @@ namespace Sayl.UI.Forms
             return unit != null && unit.FactorToBase > 0 ? unit.FactorToBase : 1m;
         }
         // ── الحسابات ──
+
+        /// <summary>المرحلة 5: معامل الوحدة قبل بدء تحرير خلية الوحدة —
+        /// يُلتقط في CellBeginEdit (قيمة الخلية لا تزال القديمة) ليعرف
+        /// Grid_CellEndEdit التكلفة المُدخلة بوأي وحدة كُتبت.</summary>
+        private decimal _unitEditOldFactor = 1m;
+
+        private void Grid_CellBeginEdit(object? sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (e.RowIndex < 0 || _grid.Columns[e.ColumnIndex].Name != "colUnit") return;
+            var row = _grid.Rows[e.RowIndex];
+            if (row.IsNewRow || row.Tag == null) return;
+            _unitEditOldFactor = RowFactor(row); // معامل الوحدة قبل التغيير
+        }
+
+        /// <summary>المرحلة 5: تغيير الوحدة في سطر الشراء — نفس دلالة PosForm:
+        /// الكمية المُدخلة تبقى كما كُتبت، وتُشتق التكلفة المعروضة لوحدة
+        /// الإدخال الجديدة من تكلفة الأساس (الحقيقة المخزنة لا تتبدل —
+        /// 120/كرتون → 10/حبة)، والإجمالي يُحسب من جديد بالمعامل الجديد.</summary>
+        private void Grid_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && _grid.Columns[e.ColumnIndex].Name == "colUnit")
+            {
+                var row = _grid.Rows[e.RowIndex];
+                if (!row.IsNewRow && row.Tag != null)
+                {
+                    decimal newFactor = RowFactor(row);
+                    decimal oldCost = ParseDecimal(row.Cells["colCost"].Value);
+                    if (oldCost > 0 && newFactor > 0)
+                    {
+                        // تكلفة الأساس (المُدخل ÷ المعامل القديم) ثم تكلفة الوحدة
+                        // الجديدة = الأساس × المعامل الجديد — خانتان AwayFromZero
+                        decimal baseCost = Math.Round(oldCost / _unitEditOldFactor, 2, MidpointRounding.AwayFromZero);
+                        row.Cells["colCost"].Value = Math.Round(baseCost * newFactor, 2, MidpointRounding.AwayFromZero).ToString("0.##");
+                    }
+                }
+            }
+            RefreshRowTotals();
+        }
+
         private void RefreshRowTotals()
         {
             foreach (DataGridViewRow row in _grid.Rows)

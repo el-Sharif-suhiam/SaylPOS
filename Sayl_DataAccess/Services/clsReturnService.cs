@@ -119,6 +119,11 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("الفاتورة الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
+            // إرجاع الأساس على فاتورة مختلطة الوحدات: سعة الأساس المتبقية تُخصم منها
+            // المرتجعات الأساسية السابقة فقط (سطور المرتجع بلا لقطة) — مرتجعات
+            // اللقطة لا تلمس سعة الأساس (وحدتان منفصلتان على سطور مختلفة)
+            var alreadyReturnedBase = await GetReturnedBaseQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
+            var baseCapacityUsed = new Dictionary<int, decimal>();
 
             // ══ المرحلة 5: وحدة الإرجاع = لقطة السطر الأصلي — لا قراءة من
             // ProductUnits الحالية أبدًا. التحويل مرة واحدة لكل سطر هنا ثم
@@ -126,7 +131,10 @@ namespace Sayl.Core.Services
             foreach (var item in request.Items)
             {
                 var unitCheck = ValidateReturnUnitAgainstOriginal(
-                    item, originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList());
+                    item,
+                    originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList(),
+                    alreadyReturnedBase.GetValueOrDefault(item.ProductId),
+                    baseCapacityUsed);
                 if (!unitCheck.IsSuccess)
                     return Result<int>.Fail(unitCheck.Message);
 
@@ -195,7 +203,7 @@ namespace Sayl.Core.Services
                 decimal netRatio = invTotal > 0 ? invNet / invTotal : 0m;
 
                 var returnedByBatch = await GetReturnedQuantitiesByBatchAsync(originalInvoice.InvoiceId, enInvoicesType.customer_return);
-                var allocations = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items), returnedByBatch);
+                var allocations = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItemsByUnit(request.Items), returnedByBatch);
                 decimal rawRefund = allocations.Sum(a => a.ItemPrice * a.Quantity) * netRatio;
                 // تقريب واحد نهائي — لا تقارب متسلسل يتراكم خطؤه
                 decimal total = Math.Round(rawRefund, 2, MidpointRounding.AwayFromZero);
@@ -337,13 +345,19 @@ namespace Sayl.Core.Services
                 return Result<int>.Fail("فاتورة الشراء الأصلية تعود لسنة مالية مغلقة — لا يمكن إنشاء مرتجع مباشر عليها. سجّل تسوية بالفترة الحالية عبر قيد محاسبي معتمد.");
 
             var alreadyReturned = await GetReturnedQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+            // إرجاع الأساس على فاتورة مختلطة الوحدات — نفس قاعدة مرتجع العميل أعلاه
+            var alreadyReturnedBase = await GetReturnedBaseQuantitiesAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
+            var baseCapacityUsed = new Dictionary<int, decimal>();
 
             // ══ المرحلة 5: وحدة الإرجاع = لقطة السطر الأصلي — نفس قاعدة
             // مرتجع العميل أعلاه. التحويل مرة واحدة لكل سطر ثم الكل بالأساس.
             foreach (var item in request.Items)
             {
                 var unitCheck = ValidateReturnUnitAgainstOriginal(
-                    item, originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList());
+                    item,
+                    originalInvoice.InvoiceItems.Where(ii => ii.ProductId == item.ProductId).ToList(),
+                    alreadyReturnedBase.GetValueOrDefault(item.ProductId),
+                    baseCapacityUsed);
                 if (!unitCheck.IsSuccess)
                     return Result<int>.Fail(unitCheck.Message);
 
@@ -397,7 +411,7 @@ namespace Sayl.Core.Services
                 decimal netRatioSup = invTotalSup > 0 ? invNetSup / invTotalSup : 0m;
 
                 var returnedByBatchSup = await GetReturnedQuantitiesByBatchAsync(originalInvoice.InvoiceId, enInvoicesType.supplier_return);
-                var allocationsSup = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItems(request.Items), returnedByBatchSup);
+                var allocationsSup = AllocateAcrossOriginalLines(originalInvoice.InvoiceItems, GroupRequestItemsByUnit(request.Items), returnedByBatchSup);
                 decimal rawRefundSup = allocationsSup.Sum(a => a.ItemPrice * a.Quantity) * netRatioSup;
                 decimal total = Math.Round(rawRefundSup, 2, MidpointRounding.AwayFromZero);
 
@@ -525,22 +539,46 @@ namespace Sayl.Core.Services
                 .Select(g => (g.Key, g.Sum(i => i.Quantity)));
 
         /// <summary>
+        /// مجموعات الطلب للتوزيع: (المنتج، مفتاح الوحدة) — المفتاح null
+        /// لإرجاع وحدة الأساس واسم الوحدة المُقصّ لإرجاع اللقطة. الفاتورة
+        /// المختلطة (1 كرتون + 3 حبات) تُجمَّع في مجموعتين؛ الأعداد كلها
+        /// بالوحدة الأساس، لكن كل مجموعة تُوزَّع على سطورها المطابقة فقط:
+        /// إرجاع الأساس يُسحب من السطور الإرثية بلا لقطة ويُخزَّن بلا لقطة،
+        /// وإرجاع اللقطة يُسحب من سطور وحدتها — لا يُختم إرجاع الأساس
+        /// بلقطة سطر أخرى ولا العكس.
+        /// </summary>
+        private static IEnumerable<(int ProductId, string? UnitKey, decimal Quantity)> GroupRequestItemsByUnit(
+            List<DtoReturnItem> items) =>
+            items
+                .GroupBy(i => (i.ProductId, UnitKey: string.IsNullOrWhiteSpace(i.UnitName) ? (string?)null : i.UnitName!.Trim()))
+                .Select(g => (g.Key.ProductId, g.Key.UnitKey, g.Sum(i => i.Quantity)));
+
+        /// <summary>
         /// المرحلة 5: وحدة الإرجاع تُتحقق مقابل اللقطة المخزنة على سطر الفاتورة
         /// الأصلي — لا قراءة من ProductUnits الحالية أبدًا (تعديل/تعطيل الوحدة
         /// بعد البيع لا يغيّر ما يُرتجع). السطور الإرثية (بلا لقطة) تُرتجع
         /// بوحدة الأساس فقط؛ والمنتج المباع بلقطة يجب أن يُرتجع بوحدتها نفسها
         /// (اسم مطابق + معامل مطابق ضمن التسامح). تُعيد الكمية بالوحدة الأساس
         /// (التحويل مرة واحدة لكل سطر عند حد الخدمة).
+        ///
+        /// الفاتورة المختلطة (سطور لقطة + سطور إرثية لنفس المنتج — 1 كرتون
+        /// + 3 حبات في سلة واحدة): إرجاع الأساس مسموح لكن مقيّدًا بسعة
+        /// السطور الإرثية وحدها = مجموع كمياتها ناقص المرتجع الأساسي السابق
+        /// (alreadyReturnedBase) ناقص ما طُلب بالأساس سابقًا في الطلب نفسه
+        /// (baseCapacityUsed — تجميع داخل الطلب ضد الازدواج). إرجاع الأساس
+        /// يُخزَّن دائمًا بلا لقطة حتى لو شارك المنتج سطور لقطة.
         /// </summary>
         private static Result<decimal> ValidateReturnUnitAgainstOriginal(
-            DtoReturnItem item, List<InvoiceItem> originalLines)
+            DtoReturnItem item, List<InvoiceItem> originalLines,
+            decimal alreadyReturnedBase, Dictionary<int, decimal> baseCapacityUsed)
         {
             bool hasSnapshotLines = originalLines.Any(l => !string.IsNullOrWhiteSpace(l.UnitName));
+            bool hasLegacyLines = originalLines.Any(l => string.IsNullOrWhiteSpace(l.UnitName));
 
-            // ── إرجاع بوحدة الأساس: مسموح فقط لفواتير بلا لقطات (إرثية/أساس) ──
+            // ── إرجاع بوحدة الأساس: مسموح للفواتير الإرثية وللجزء الإرثي من فاتورة مختلطة ──
             if (string.IsNullOrWhiteSpace(item.UnitName))
             {
-                if (hasSnapshotLines)
+                if (!hasLegacyLines && hasSnapshotLines)
                     return Result<decimal>.Fail("هذا المنتج بِيع بوحدة إدخال محددة — يجب الإرجاع بنفس وحدة الفاتورة الأصلية.");
 
                 if (item.EnteredQuantity.HasValue && item.EnteredQuantity.Value <= 0)
@@ -549,6 +587,22 @@ namespace Sayl.Core.Services
                 decimal legacyBaseQty = Math.Round(item.Quantity, 3, MidpointRounding.AwayFromZero);
                 if (legacyBaseQty <= 0)
                     return Result<decimal>.Fail("الكمية يجب أن تكون أكبر من صفر.");
+
+                // فاتورة مختلطة: سعة الأساس = السطور الإرثية فقط — ناقص المرتجع
+                // الأساسي السابق ناقص المُجمَّع في هذا الطلب. اللقطة سعة منفصلة.
+                if (hasSnapshotLines)
+                {
+                    decimal baseLineSum = originalLines
+                        .Where(l => string.IsNullOrWhiteSpace(l.UnitName))
+                        .Sum(l => l.Quantity);
+                    decimal remainingCapacity = baseLineSum - alreadyReturnedBase
+                        - baseCapacityUsed.GetValueOrDefault(item.ProductId);
+                    if (legacyBaseQty > remainingCapacity + UnitConversion.QuantityTolerance)
+                        return Result<decimal>.Fail(
+                            $"الكمية المتاحة للإرجاع بوحدة الأساس من هذا المنتج هي {Math.Max(remainingCapacity, 0m):0.###} فقط — لا يمكن إرجاع {legacyBaseQty:0.###}.");
+
+                    baseCapacityUsed[item.ProductId] = baseCapacityUsed.GetValueOrDefault(item.ProductId) + legacyBaseQty;
+                }
 
                 return Result<decimal>.Ok(legacyBaseQty);
             }
@@ -596,7 +650,7 @@ namespace Sayl.Core.Services
         /// </summary>
         private static List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId, string? UnitName, decimal? UnitFactorToBase, decimal? EnteredQuantity)> AllocateAcrossOriginalLines(
             IEnumerable<InvoiceItem> originalItems,
-            IEnumerable<(int ProductId, decimal Quantity)> groupedRequest,
+            IEnumerable<(int ProductId, string? UnitKey, decimal Quantity)> groupedRequestByUnit,
             IReadOnlyDictionary<(int ProductId, int? BatchId), decimal> returnedByBatch)
         {
             var ordered = originalItems
@@ -617,12 +671,16 @@ namespace Sayl.Core.Services
                     g => g.Sum(x => x.Item.Quantity)
                          - returnedByBatch.GetValueOrDefault(g.Key));
 
-            var request = groupedRequest.ToDictionary(g => g.ProductId, g => g.Quantity);
+            // الطلب مفهرس بـ(المنتج، مفتاح الوحدة) — كل مجموعة تستهلك سعة سطورها
+            // المطابقة وحدها، بينما سعة الدفعة (batchRemaining) مشتركة بين
+            // المجموعتين لأن كل الكميات بوحدة الأساس على الدفعة نفسها
+            var request = groupedRequestByUnit.ToDictionary(g => (g.ProductId, g.UnitKey), g => g.Quantity);
             var result = new List<(int LineIndex, int ProductId, decimal Quantity, decimal ItemPrice, decimal? ItemCost, int? BatchId, string? UnitName, decimal? UnitFactorToBase, decimal? EnteredQuantity)>();
 
             foreach (var x in ordered)
             {
-                if (!request.TryGetValue(x.Item.ProductId, out decimal remaining) || remaining <= 0)
+                string? lineUnitKey = string.IsNullOrWhiteSpace(x.Item.UnitName) ? null : x.Item.UnitName!.Trim();
+                if (!request.TryGetValue((x.Item.ProductId, lineUnitKey), out decimal remaining) || remaining <= 0)
                     continue;
 
                 var key = (x.Item.ProductId, x.Item.BatchId);
@@ -645,7 +703,7 @@ namespace Sayl.Core.Services
                         : Math.Round(take / takeUnitFactor!.Value, 3, MidpointRounding.AwayFromZero));
 
                 result.Add((x.Index, x.Item.ProductId, take, x.Item.ItemPrice, x.Item.ItemCost, x.Item.BatchId, takeUnitName, takeUnitFactor, takeEntered));
-                request[x.Item.ProductId] = remaining - take;
+                request[(x.Item.ProductId, lineUnitKey)] = remaining - take;
                 batchRemaining[key] = lineCapacity - take;
             }
 
@@ -658,6 +716,27 @@ namespace Sayl.Core.Services
                 .Where(ii => ii.Invoice.OriginalInvoiceId == originalInvoiceId
                           && ii.Invoice.Type == returnType
                           && ii.Invoice.Status == enInvoicesStatus.completed)
+                .GroupBy(ii => ii.ProductId)
+                .Select(g => new { ProductId = g.Key, Quantity = g.Sum(ii => ii.Quantity) })
+                .ToListAsync();
+
+            return returnedItems.ToDictionary(x => x.ProductId, x => x.Quantity);
+        }
+
+        /// <summary>
+        /// الكميات الأساسية المرتجعة سابقًا على الفاتورة الأصلية (سطور المرتجع
+        /// بلا لقطة — إرجاع وحدة الأساس). سعة إرجاع الأساس على الفاتورة
+        /// المختلطة تُخصم منها هذه الكميات وحدها: مرتجعات اللقطة (باسم وحدة)
+        /// تسحب من سعة سطور اللقطة لا من سعة السطور الإرثية.
+        /// </summary>
+        private async Task<Dictionary<int, decimal>> GetReturnedBaseQuantitiesAsync(
+            int originalInvoiceId, enInvoicesType returnType)
+        {
+            var returnedItems = await _dbContext.InvoiceItems
+                .Where(ii => ii.Invoice.OriginalInvoiceId == originalInvoiceId
+                          && ii.Invoice.Type == returnType
+                          && ii.Invoice.Status == enInvoicesStatus.completed
+                          && (ii.UnitName == null || ii.UnitName == ""))
                 .GroupBy(ii => ii.ProductId)
                 .Select(g => new { ProductId = g.Key, Quantity = g.Sum(ii => ii.Quantity) })
                 .ToListAsync();

@@ -149,7 +149,7 @@ namespace Sayl.UI.Infrastructure
                     Line(item.ProductName);
                     // المرحلة 5/7: الكمية بلقطة الوحدة «2 كيس» — الإرثي بوحدة
                     // المنتج الحالية (PdfService.ItemQtyText مصدر الحقيقة الواحد)
-                    Line(AppLang.T("Receipt.Line.Item", PdfService.ItemQtyText(item), item.ItemPrice.ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
+                    Line(AppLang.T("Receipt.Line.Item", PdfService.ItemQtyText(item), PdfService.DisplayPriceFor(item).ToString("N2"), (item.ItemPrice * item.Quantity).ToString("N2")));
                 }
 
                 Divider();

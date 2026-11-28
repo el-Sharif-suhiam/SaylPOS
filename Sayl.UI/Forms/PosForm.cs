@@ -1018,7 +1018,7 @@ namespace Sayl.UI.Forms
         //  • قبل أي شيء: إثبات التحرير المعلق (EndEdit) — الكمية المكتوبة
         //    جزء من العملية، وإلا عمل + على قيمة لم تُعتمد بعد.
         //  • + يفحص سقف المخزون قبل الزيادة (برسالة، لا صمت).
-        //  • − لا ينزل تحت 1 (للحذف زر حذف — خلط العمليتين يشوش).
+        //  • − ينزل بوحدة إدخال واحدة، وعند الكمية ≤ 1 يحذف السطر من السلة.
         private void GridCart_CellClick(object? sender, DataGridViewCellEventArgs e)
         {
             HideSearchPopup();
@@ -1050,7 +1050,15 @@ namespace Sayl.UI.Forms
                     break;
 
                 case "colMinus":
-                    if (item.Quantity > 1m) item.Quantity -= 1m;
+                    // المرحلة 5: ناقص = −1 بوحدة الإدخال؛ والكمية المُدخلة ≤ 1
+                    // (بما فيها الكسور مثل 0.5 كغم) يحذف السطر من السلة —
+                    // لا ناقص تحت وحدة واحدة (للحذف الزر نفسه فيُنفَّذ هنا)
+                    if (item.Quantity <= 1m)
+                    {
+                        _cart.RemoveAt(e.RowIndex);
+                        break;
+                    }
+                    item.Quantity -= 1m;
                     break;
 
                 case "colDelete":

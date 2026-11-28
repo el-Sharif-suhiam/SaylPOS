@@ -320,6 +320,104 @@ public class ProductUnitManagementTests
         Assert.Equal("حبة", baseRow.Name);
     }
 
+    // ══ 6ب) إعادة تسمية الأساس من محرر المنتج: تعارض اسم وحدة بديلة يُرفض
+    // برسالة ودّية لا استثناء (UQ_ProductUnits_Product_Name)، والاسم الحر ينجح ══
+
+    /// <summary>تسمية وحدة الأساس باسم وحدة بديلة قائمة (حتى المعطلة) —
+    /// فشل متحكَّم به بلا DbUpdateException، ولا مسّ للصفوف.</summary>
+    [Fact]
+    public async Task RenameBaseToExistingAltUnitName_FailsFriendly_NoException()
+    {
+        string marker = $"pu6b-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "تسمية", "حبة");
+
+        await using (var db = _fx.CreateContext())
+        {
+            var add = await new clsProductService(db).AddProductUnitAsync(
+                productId, "كرتون", 12m, actorUserId: seed.UserId);
+            Assert.True(add.IsSuccess, add.Message);
+        }
+
+        // تعطيل وحدة بديلة ثانية: اسمها المحجوز يظل حاجزًا (التفرد شامل المعطل)
+        await using (var db = _fx.CreateContext())
+        {
+            var svc = new clsProductService(db);
+            var second = await svc.AddProductUnitAsync(productId, "علبة", 6m, actorUserId: seed.UserId);
+            Assert.True(second.IsSuccess, second.Message);
+            await svc.DeactivateProductUnitAsync(second.Data, seed.UserId);
+        }
+
+        // التسمية باسم البديلة النشطة → رسالة ودّية بلا استثناء
+        await using (var db = _fx.CreateContext())
+        {
+            var r = await new clsProductService(db).UpdateProductAsync(new Common.DTOs.DtoProduct
+            {
+                ProductId = productId,
+                Unit = "كرتون"
+            }, seed.UserId);
+            Assert.False(r.IsSuccess);
+            Assert.Contains("كرتون", r.Message);
+        }
+
+        // وكذلك باسم البديلة المعطلة — التفرّد يشمل الصفوف غير النشطة
+        await using (var db = _fx.CreateContext())
+        {
+            var r = await new clsProductService(db).UpdateProductAsync(new Common.DTOs.DtoProduct
+            {
+                ProductId = productId,
+                Unit = "علبة"
+            }, seed.UserId);
+            Assert.False(r.IsSuccess);
+        }
+
+        // لا مسّ: المنتج وصف الأساس بكلمة الأصل
+        await using (var verify = _fx.CreateContext())
+        {
+            var product = await verify.Products.AsNoTracking().SingleAsync(p => p.ProductId == productId);
+            Assert.Equal("حبة", product.Unit);
+            var baseRow = await verify.ProductUnits.AsNoTracking().SingleAsync(u => u.ProductId == productId && u.IsBase);
+            Assert.Equal("حبة", baseRow.Name);
+        }
+    }
+
+    /// <summary>تسمية وحدة الأساس باسم حر — تنجح وتمرّ الصف الأساس (المرآة)
+    /// دون مسّ الوحدات البديلة.</summary>
+    [Fact]
+    public async Task RenameBaseToFreeName_Succeeds_MirrorsBaseRow()
+    {
+        string marker = $"pu6c-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "تسمية2", "حبة");
+
+        int altId;
+        await using (var db = _fx.CreateContext())
+        {
+            var add = await new clsProductService(db).AddProductUnitAsync(
+                productId, "كرتون", 12m, actorUserId: seed.UserId);
+            Assert.True(add.IsSuccess, add.Message);
+            altId = add.Data;
+        }
+
+        await using (var db = _fx.CreateContext())
+        {
+            var r = await new clsProductService(db).UpdateProductAsync(new Common.DTOs.DtoProduct
+            {
+                ProductId = productId,
+                Unit = "كلغ"
+            }, seed.UserId);
+            Assert.True(r.IsSuccess, r.Message);
+        }
+
+        await using var verifyDb = _fx.CreateContext();
+        var updated = await verifyDb.Products.AsNoTracking().SingleAsync(p => p.ProductId == productId);
+        Assert.Equal("كلغ", updated.Unit);
+        var baseRenamed = await verifyDb.ProductUnits.AsNoTracking().SingleAsync(u => u.ProductId == productId && u.IsBase);
+        Assert.Equal("كلغ", baseRenamed.Name);
+        var alt = await verifyDb.ProductUnits.AsNoTracking().SingleAsync(u => u.ProductUnitId == altId);
+        Assert.Equal("كرتون", alt.Name); // البديلة لا تُمسّ
+    }
+
     // ══ 7) الحذف: غير مرجعية يُحذف فعليًا — ومرجعية يُرفض ويُوجَّه للتعطيل ══
 
     [Fact]

@@ -414,7 +414,7 @@ namespace Sayl.UI.Infrastructure
                                     item.ProductName,
                                     item.BatchNumber ?? "-",
                                     ItemQtyText(item),
-                                    Money(item.ItemPrice),
+                                    Money(DisplayPriceFor(item)),
                                     Money(item.ItemPrice * item.Quantity));
                                 stripe = !stripe;
                             }
@@ -645,7 +645,7 @@ namespace Sayl.UI.Infrastructure
                             {
                                 table.Cell().Text(item.ProductName).FontSize(8);
                                 table.Cell().AlignCenter().Text(ItemQtyText(item)).FontSize(8);
-                                table.Cell().AlignLeft().Text(Money(item.ItemPrice)).FontSize(8);
+                                table.Cell().AlignLeft().Text(Money(DisplayPriceFor(item))).FontSize(8);
                                 table.Cell().AlignLeft().Text(Money(item.ItemPrice * item.Quantity)).FontSize(8);
                             }
                         });
@@ -989,14 +989,26 @@ namespace Sayl.UI.Infrastructure
         /// <summary>المرحلة 5: نص الكمية للطباعة — «الكمية المُدخلة الوحدة» من
         /// اللقطة المخزنة (2 كيس) عند وجودها؛ السطر الإرثي (بلا لقطة) يعرض
         /// الكمية مع وحدة المنتج الحالية (DisplayUnitName — المرحلة 7) أو
-        /// الكمية وحدها إن كان المنتج بلا وحدة. السعر يظل لكل وحدة أساس
-        /// والإجمالي من رياضيات الأساس
+        /// الكمية وحدها إن كان المنتج بلا وحدة. سعر الوحدة المعروض يُشتق بـ
+        /// DisplayPriceFor والإجمالي من رياضيات الأساس
         //  — حافة الخانتين الموثقة: كرتون سعره 115 ومعامله 12 → سعر الأساس
         //  9.58 والكرتون يُحسب 114.96 (الأساس هو الحقيقة المخزنة دائمًا).</summary>
         internal static string ItemQtyText(Common.DTOs.ViewModel.InvoiceItemVM item) =>
             string.IsNullOrWhiteSpace(item.DisplayUnitName ?? item.UnitName)
                 ? item.Quantity.ToString("0.###")
                 : $"{(item.EnteredQuantity ?? item.Quantity):0.###} {(item.DisplayUnitName ?? item.UnitName).Trim()}";
+
+        /// <summary>المرحلة 5: سعر الوحدة المعروض للسطر — يتسق مع نص الكمية:
+        /// سطر اللقطة (UnitName + UnitFactorToBase مخزنان) يعرض سعر وحدة
+        /// الإدخال = سعر الأساس × المعامل مقرّبًا للخانتين AwayFromZero
+        /// (9.58 × 12 = 114.96) فيجدب العدد: 114.96 × 2 = 229.92 = الإجمالي.
+        /// السطر الإرثي/وحدة الأساس (بلا لقطة) يعرض سعر الأساس كما هو.
+        /// الحقيقة المخزنة (ItemPrice بالأساس) لا تتغير — عرض وحسب،
+        /// والإجمالي يظل ItemPrice × Quantity من الأساس دائمًا.</summary>
+        internal static decimal DisplayPriceFor(Common.DTOs.ViewModel.InvoiceItemVM item) =>
+            string.IsNullOrWhiteSpace(item.UnitName) || !item.UnitFactorToBase.HasValue || item.UnitFactorToBase.Value <= 0
+                ? item.ItemPrice
+                : Math.Round(item.ItemPrice * item.UnitFactorToBase.Value, 2, MidpointRounding.AwayFromZero);
 
         // ═════════════════════════════════════════════════
         // مكوّنات الهوية الموحدة — رؤوس أقسام، خلايا جدول، صفوف جاهزة

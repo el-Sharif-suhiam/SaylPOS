@@ -909,6 +909,53 @@ public class MultiUnitTests
         Assert.Equal(5m, line.UnitFactorToBase);
     }
 
+    /// <summary>سعر الطباعة يظل حقيقة الأساس على VM: السطر بِيع 2 كيس × 5
+    /// بسعر الأساس 20 — ItemPrice = 20 لكل وحدة أساس (سعر الوحدة المُدخلة
+    /// 100 يُشتق للعرض فقط بـ PdfService.DisplayPriceFor في طبقة UI،
+    /// والحقيقة المخزنة لا تُشتق أبدًا). والإرثي يعرض سعره كما هو.</summary>
+    [Fact]
+    public async Task InvoicePrintVM_ItemPriceStaysBaseTruth_DisplayDerivesPerUnitPrice()
+    {
+        string marker = $"mu17b-{Guid.NewGuid():N}"[..12];
+        var seed = await SeedAsync(marker);
+        int productId = await SeedProductWithUnitAsync(seed, "أرز", "كغم");
+        await using (var unitDb = _fx.CreateContext())
+        {
+            unitDb.ProductUnits.Add(new ProductUnit
+            {
+                ProductId = productId,
+                Name = "كيس",
+                FactorToBase = 5m,
+                IsBase = false,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            await unitDb.SaveChangesAsync();
+        }
+        await ReceiveAsync(seed, productId, 30m, $"B-{marker}");
+
+        int snapshotSale = await SaleWithUnitAsync(seed, productId, 2m, "كيس", 5m);
+        int legacySale = await SaleAsync(seed, productId, 3m);
+
+        await using var db = _fx.CreateContext();
+        var invoiceService = new clsInvoiceService(db);
+
+        var snapshotPrint = await invoiceService.GetInvoiceForPrintAsync(snapshotSale);
+        Assert.True(snapshotPrint.IsSuccess, snapshotPrint.Message);
+        var snapshotLine = Assert.Single(snapshotPrint.Data!.Items);
+        Assert.Equal(20m, snapshotLine.ItemPrice);   // حقيقة الأساس المخزنة لا تُشتق
+        Assert.Equal(10m, snapshotLine.Quantity);
+        Assert.Equal(5m, snapshotLine.UnitFactorToBase);
+        // سعر الوحدة المعروض المشتق (20 × 5) يضاعف للإجمالي المخزن
+        Assert.Equal(Math.Round(snapshotLine.ItemPrice * 5m, 2) * 2m,
+                     snapshotLine.ItemPrice * snapshotLine.Quantity);
+
+        var legacyPrint = await invoiceService.GetInvoiceForPrintAsync(legacySale);
+        Assert.True(legacyPrint.IsSuccess, legacyPrint.Message);
+        var legacyLine = Assert.Single(legacyPrint.Data!.Items);
+        Assert.Equal(20m, legacyLine.ItemPrice);     // الإرثي: سعر الأساس كما هو
+    }
+
     /// <summary>كمية كسرية تصل تقارير VM عشرية بلا اقتطاع: بيعان 0.5 + 0.25
     /// كغم = 0.75 في «الأكثر مبيعًا» و«ربحية المنتجات».</summary>
     [Fact]

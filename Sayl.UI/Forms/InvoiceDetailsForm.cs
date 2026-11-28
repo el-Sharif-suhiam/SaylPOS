@@ -202,9 +202,10 @@ namespace Sayl.UI.Forms
                 {
                     // المرحلة 5/7: «الكمية الوحدة» من اللقطة المخزنة (2 كيس) —
                     // الإرثي بوحدة المنتج الحالية (PdfService.ItemQtyText).
-                    // الإجمالي من الأساس.
+                    // سعر الوحدة المعروض يُشتق من الأساس (PdfService.DisplayPriceFor)
+                    // فيتسق مع نص الكمية، والإجمالي من الأساس.
                     _gridItems.Rows.Add(item.ProductName, item.BatchNumber ?? "-",
-                        PdfService.ItemQtyText(item), UiHelpers.Money(item.ItemPrice),
+                        PdfService.ItemQtyText(item), UiHelpers.Money(PdfService.DisplayPriceFor(item)),
                         UiHelpers.Money(item.ItemPrice * item.Quantity));
                 }
 

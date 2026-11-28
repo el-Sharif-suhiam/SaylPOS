@@ -795,7 +795,19 @@ END";
                     var baseUnit = await _dbContext.ProductUnits
                         .FirstOrDefaultAsync(u => u.ProductId == product.ProductId && u.IsBase);
                     if (baseUnit != null && baseUnit.Name != dtoProduct.Unit)
-                        baseUnit.Name = dtoProduct.Unit;
+                    {
+                        // تفرّد (المنتج، الاسم) شامل الصفوف غير النشطة — تعارض الاسم
+                        // مع وحدة بديلة (حتى المعطلة) يُرفض برسالة ودّية لا استثناء
+                        string newName = dtoProduct.Unit.Trim();
+                        bool nameTaken = await _dbContext.ProductUnits
+                            .AnyAsync(u => u.ProductId == product.ProductId
+                                        && u.ProductUnitId != baseUnit.ProductUnitId
+                                        && u.Name == newName);
+                        if (nameTaken)
+                            return Result.Fail($"لا يمكن تسمية وحدة الأساس «{newName}» — الاسم مستخدم بوحدة أخرى لهذا المنتج.");
+
+                        baseUnit.Name = newName;
+                    }
                 }
             }
 
